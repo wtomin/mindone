@@ -165,8 +165,9 @@ def main(args):
         condition=args.condition,
         num_frames=args.num_frames,
     )
-    amp_level = "O2" if args.use_fp16 else "O1"
-    dit_model = auto_mixed_precision(dit_model, amp_level=amp_level)
+
+    if args.use_fp16:
+        dit_model = auto_mixed_precision(dit_model, amp_level="O2")
     if not args.dit_initialize_random:
         dit_model.load_params_from_ckpt(args.dit_checkpoint)
     # set temp_blocks  train
@@ -341,7 +342,7 @@ def main(args):
                 f"Data path: {args.data_path}",
                 f"Num params: {num_params:,} (dit: {num_params_dit:,}, vae: {num_params_vae:,})",
                 f"Num trainable params: {num_params_trainable:,}",
-                f"AMP level: {amp_level}",
+                f"Use FP16: {args.use_fp16}",
                 f"Learning rate: {args.start_learning_rate}",
                 f"Batch size: {args.train_batch_size}",
                 f"Image size: {args.image_size}",

@@ -147,8 +147,9 @@ if __name__ == "__main__":
         num_classes=1000,
         block_kwargs={"enable_flash_attention": args.enable_flash_attention},
     )
-    amp_level = "O2" if args.use_fp16 else "O1"
-    dit_model = auto_mixed_precision(dit_model, amp_level=amp_level)
+
+    if args.use_fp16:
+        dit_model = auto_mixed_precision(dit_model, amp_level="O2")
 
     if len(args.videodit_checkpoint) > 0:
         logger.info(f"Loading {args.videodit_checkpoint} params into VideoDiT model...")
@@ -206,7 +207,7 @@ if __name__ == "__main__":
             f"Class labels: {class_labels}",
             f"Num params: {num_params:,} (dit: {num_params_dit:,}, vae: {num_params_vae:,})",
             f"Num trainable params: {num_params_trainable:,}",
-            f"AMP level: {amp_level}",
+            f"Use FP16: {args.use_fp16}",
             f"Sampling steps {args.sampling_steps}",
             f"DDIM sampling: {args.ddim_sampling}",
             f"CFG guidance scale: {args.guidance_scale}",
