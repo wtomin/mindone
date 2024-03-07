@@ -54,7 +54,7 @@ class VideoDiT_Factorised_Encoder(nn.Cell):
         patch_size=2,
         in_channels=4,
         hidden_size=1152,
-        depth=56,
+        depth=28,
         num_heads=16,
         mlp_ratio=4.0,
         num_frames=16,
@@ -94,7 +94,7 @@ class VideoDiT_Factorised_Encoder(nn.Cell):
         self.temp_embed = ms.Parameter(ops.zeros((1, num_frames, hidden_size), dtype=ms.float32), requires_grad=False)
 
         self.blocks = nn.CellList(
-            [DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, **block_kwargs) for _ in range(depth // 2)]
+            [DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, **block_kwargs) for _ in range(depth)]
         )
 
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
