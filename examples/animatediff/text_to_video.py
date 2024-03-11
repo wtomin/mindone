@@ -19,7 +19,7 @@ __dir__ = os.path.dirname(os.path.abspath(__file__))
 mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../"))
 sys.path.insert(0, mindone_lib_path)
 
-from ad.pipelines.infer_engine import AnimateDiffText2Video
+from ad.pipelines.infer_engine import AnimateDiffText2Video, AnimateDiffText2VideoFreeInit
 from ad.utils.cond_data import transform_conditional_images
 from ad.utils.load_models import build_model_from_config, load_adapter_lora, load_controlnet, load_motion_modules
 
@@ -195,7 +195,8 @@ def main(args):
         scheduler = instantiate_from_config(sampler_config)
 
         # 3. build inference pipeline
-        pipeline = AnimateDiffText2Video(
+        pipeline_class = AnimateDiffText2Video if not args.use_freeinit else AnimateDiffText2VideoFreeInit
+        pipeline = pipeline_class(
             text_encoder,
             unet,
             vae,
@@ -203,7 +204,14 @@ def main(args):
             scale_factor=sd_model.scale_factor,
             num_inference_steps=steps,
         )
-
+        if args.use_freeinit:
+            pipeline.init_filter(
+                4,
+                ad_config.L,
+                ad_config.H // 8,
+                ad_config.W // 8,
+                filter_name=args.filter_name,
+            )
         if use_controlnet and unet.diffusion_model.controlnet.use_simplified_condition_embedding:
             b, c, f, h, w = controlnet_images.shape
             controlnet_images = controlnet_images.transpose((0, 2, 1, 3, 4)).reshape(
@@ -319,6 +327,16 @@ if __name__ == "__main__":
     parser.add_argument("--device_target", type=str, default="Ascend", help="Ascend or GPU")
     parser.add_argument(
         "--ms_mode", type=int, default=0, help="Running in GRAPH_MODE(0) or PYNATIVE_MODE(1) (default=0)"
+    )
+    parser.add_argument(
+        "--use_freeinit", type=str2bool, default=False, help="Whether to apply FreeInit to improve video quality."
+    )
+    parser.add_argument(
+        "--filter_name",
+        type=str,
+        default="gaussian",
+        help="The type of filter to apply for freeinit",
+        choices=["gaussian", "butterworth"],
     )
 
     args = parser.parse_args()

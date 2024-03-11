@@ -1,6 +1,7 @@
 from abc import ABC
 
 from ad.modules.diffusionmodules.unet3d import rearrange_in
+from ad.utils.freeinit_utils import freq_mix_3d, get_freq_filter
 from tqdm import tqdm
 
 import mindspore as ms
@@ -194,6 +195,87 @@ class AnimateDiffText2Video(ABC):
                 controlnet_image_index,
             )
             latents = self.scheduler(noise_pred, ts, latents, self.num_inference_steps)
+
+        # latents: (b c f h w)
+        frames = self.vae_decode(latents)
+        return frames
+
+
+class AnimateDiffText2VideoFreeInit(AnimateDiffText2Video):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.freq_filter = None
+
+    def init_filter(self, num_channels_latents, video_length, height, width, filter_name):
+        # initialize frequency filter for noise reinitialization
+        batch_size = 1
+        filter_shape = [
+            batch_size,
+            num_channels_latents,
+            video_length,
+            height,
+            width,
+        ]
+        if filter_name == "gaussian":
+            from ad.utils.freeinit_utils import gaussian_filter_param
+
+            filter_params = gaussian_filter_param
+        elif filter_name == "butterworth":
+            from ad.utils.freeinit_utils import butterworth_filter_param
+
+            filter_params = butterworth_filter_param
+        else:
+            raise ValueError(f"Not supported filter name {filter_name}")
+        self.freq_filter = get_freq_filter(
+            filter_shape,
+            filter_type=filter_params.method,
+            n=filter_params.n if filter_params.method == "butterworth" else None,
+            d_s=filter_params.d_s,
+            d_t=filter_params.d_t,
+        )
+
+    def __call__(
+        self,
+        inputs,
+        # freeinit args
+        num_iters: int = 5,
+        **kwargs,
+    ):
+        latents, c_crossattn, c_concat = self.data_prepare(inputs)
+        timesteps = self.scheduler.timesteps
+
+        controlnet_images = inputs.get("controlnet_images", None)
+        controlnet_image_index = inputs.get("controlnet_image_index", ms.Tensor([0]))
+
+        # sampling with freeinit
+        for iter in range(num_iters):
+            # Free Init
+            if iter == 0:
+                initial_noise = latents.copy()
+            else:
+                current_diffusion_timestep = self.scheduler.num_train_timesteps - 1
+                z_T = self.latents_add_noise(latents, initial_noise, current_diffusion_timestep)
+                # create random noise z_rand for high-frequency
+                z_rand = ops.randn_like(latents)
+                latents = freq_mix_3d(z_T, z_rand, LPF=self.freq_filter)
+
+            iterator = tqdm(
+                timesteps, desc=f"Sampling - {iter}th iteration of noise reinitialization", total=len(timesteps)
+            )
+            # Denoising Loop
+            for i, t in enumerate(iterator):
+                ts = ms.Tensor(t, ms.int32)
+                latents = self.scale_model_input(latents, ts)
+                noise_pred = self.predict_noise(
+                    latents,
+                    ts,
+                    c_crossattn,
+                    inputs["scale"],
+                    c_concat,
+                    controlnet_images,
+                    controlnet_image_index,
+                )
+                latents = self.scheduler(noise_pred, ts, latents, self.num_inference_steps)
 
         # latents: (b c f h w)
         frames = self.vae_decode(latents)
