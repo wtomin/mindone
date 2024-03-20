@@ -239,6 +239,7 @@ class SelfAttention(nn.Cell):
         self.dtype = dtype
         self.num_heads = num_heads
         head_dim = dim // num_heads
+        self.head_dim = head_dim
         self.scale = head_dim**-0.5
 
         self.qkv = nn.Dense(dim, dim * 3, has_bias=qkv_bias, weight_init=XavierUniform(), bias_init=Zero()).to_float(
