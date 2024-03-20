@@ -549,7 +549,7 @@ def get_batch(keys, value_dict, N: Union[List, ListConfig], dtype=ms.float32):
     return batch, batch_uc
 
 
-def get_discretization(discretization, sigma_min=0.03, sigma_max=14.61, rho=3.0):
+def get_discretization(discretization, sigma_min=0.002, sigma_max=80, rho=7.0):
     if discretization == "LegacyDDPMDiscretization":
         discretization_config = {
             "target": "gm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization",
@@ -573,13 +573,12 @@ def get_discretization(discretization, sigma_min=0.03, sigma_max=14.61, rho=3.0)
     return discretization_config
 
 
-def get_guider(guider="VanillaCFG", cfg_scale=5.0):
+def get_guider(guider="VanillaCFG", cfg_scale=5.0, dyn_thresh_config=None):
     if guider == "IdentityGuider":
         guider_config = {"target": "gm.modules.diffusionmodules.guiders.IdentityGuider"}
     elif guider == "VanillaCFG":
         scale = min(max(cfg_scale, 0.0), 100.0)
 
-        dyn_thresh_config = {"target": "gm.modules.diffusionmodules.sampling_utils.NoDynamicThresholding"}
         guider_config = {
             "target": "gm.modules.diffusionmodules.guiders.VanillaCFG",
             "params": {"scale": scale, "dyn_thresh_config": dyn_thresh_config},
@@ -686,6 +685,12 @@ def init_sampling(
     guider="VanillaCFG",
     guidance_scale=5.0,
     discretization="LegacyDDPMDiscretization",
+    sigma_min=0.002,
+    sigma_max=80.0,
+    rho=7.0,
+    thresholding=False,
+    dynamic_thresholding_ratio=0.995,
+    sample_max_value=1.0,
     img2img_strength=1.0,
     specify_num_samples=True,
     stage2strength=None,
@@ -701,11 +706,17 @@ def init_sampling(
         "LCMSampler",
     ]
     assert guider in ["VanillaCFG", "IdentityGuider"]
-    assert discretization in [
-        "LegacyDDPMDiscretization",
-        "EDMDiscretization",
-        "DiffusersDDPMDiscretization",
-    ]
+    if isinstance(discretization, str):
+        assert discretization in [
+            "LegacyDDPMDiscretization",
+            "EDMDiscretization",
+            "DiffusersDDPMDiscretization",
+        ]
+        discretization_config = get_discretization(discretization, sigma_min, sigma_max, rho)
+    elif isinstance(discretization, DictConfig):
+        discretization_config = discretization
+    else:
+        raise TypeError("discretization must be str or DictConfig")
 
     steps = min(max(steps, 1), 1000)
     num_rows = 1
@@ -715,8 +726,18 @@ def init_sampling(
     else:
         num_cols = num_cols if num_cols else 1
 
-    guider_config = get_guider(guider, cfg_scale=guidance_scale)
-    discretization_config = get_discretization(discretization)
+    if thresholding:
+        dyn_thresh_config = {
+            "target": "gm.modules.diffusionmodules.sampling_utils.DynamicThresholding",
+            "params": {
+                "dynamic_thresholding_ratio": dynamic_thresholding_ratio,
+                "sample_max_value": sample_max_value,
+            },
+        }
+    else:
+        dyn_thresh_config = {"target": "gm.modules.diffusionmodules.sampling_utils.NoDynamicThresholding"}
+
+    guider_config = get_guider(guider, cfg_scale=guidance_scale, dyn_thresh_config=dyn_thresh_config)
     sampler = get_sampler(sampler, steps, discretization_config, guider_config)
 
     if img2img_strength < 1.0:
@@ -762,6 +783,8 @@ def concat_images(images: list, num_cols: int):
 def perform_save_locally(save_path, samples, num_cols=1):
     os.makedirs(os.path.join(save_path), exist_ok=True)
     base_count = len(os.listdir(os.path.join(save_path)))
+    if isinstance(samples, np.ndarray):
+        samples = [samples]
     samples = embed_watermark(samples)
     samples = concat_images(samples, num_cols=num_cols)
 
