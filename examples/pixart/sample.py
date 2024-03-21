@@ -58,14 +58,8 @@ def parse_args():
     parser.add_argument(
         "--image_size",
         type=int,
-        default=256,
-        help="image size in [256, 512]",
-    )
-    parser.add_argument(
-        "--num_frames",
-        type=int,
-        default=16,
-        help="number of frames",
+        default=512,
+        help="image size in [512, 1024]",
     )
     parser.add_argument("--txt_file", default="asset/samples.txt", type=str)
     parser.add_argument(
@@ -93,7 +87,7 @@ def parse_args():
     )
 
     parser.add_argument("--sampling_steps", type=int, default=50, help="Diffusion Sampling Steps")
-    parser.add_argument("--guidance_scale", type=float, default=8.5, help="the scale for classifier-free guidance")
+    parser.add_argument("--guidance_scale", type=float, default=4.5, help="the scale for classifier-free guidance")
     # MS new args
     parser.add_argument("--device_target", type=str, default="Ascend", help="Ascend or GPU")
     parser.add_argument("--mode", type=int, default=0, help="Running in GRAPH_MODE(0) or PYNATIVE_MODE(1) (default=0)")
@@ -123,12 +117,7 @@ def parse_args():
         type=str2bool,
         help="whether use recompute.",
     )
-    parser.add_argument(
-        "--patch_embedder",
-        type=str,
-        default="conv",
-        help="Whether to use conv2d layer or dense (linear layer) as Patch Embedder.",
-    )
+
     parser.add_argument("--ddim_sampling", type=str2bool, default=True, help="Whether to use DDIM for sampling")
     default_args = parser.parse_args()
     abs_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ""))
@@ -279,7 +268,7 @@ if __name__ == "__main__":
     logger.info(key_info)
 
     # init inputs
-    z = ops.randn((n, args.num_frames, 4, latent_size, latent_size), dtype=ms.float32)
+    z = ops.randn((n, 4, latent_size, latent_size), dtype=ms.float32)
     tokens, mask = text_encoder.get_text_tokens_and_mask(prompts)
 
     inputs = {}
