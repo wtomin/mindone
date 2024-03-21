@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import html
-import os
 import re
 import urllib.parse as ul
 
 import ftfy
 from bs4 import BeautifulSoup
-from flan_t5_large.t5 import get_t5_encoder, get_t5_tokenizer
+from flan_t5_large.t5 import get_t5_encoder
+from transformers import AutoTokenizer
 
 import mindspore as ms
 from mindspore import Tensor
@@ -31,28 +31,15 @@ class T5Embedder:
     )  # noqa
 
     def __init__(
-        self,
-        dir_or_name="t5-v1_1-xxl",
-        *,
-        local_cache=False,
-        cache_dir=None,
-        hf_token=None,
-        use_text_preprocessing=True,
-        dtype=None,
-        model_max_length=120
+        self, cache_dir, dir_or_name="t5-v1_1-xxl", use_text_preprocessing=True, dtype=None, model_max_length=120
     ):
         self.dtype = dtype or ms.float16
         self.use_text_preprocessing = use_text_preprocessing
-        self.hf_token = hf_token
-        self.cache_dir = cache_dir or os.path.expanduser("~/.cache/IF_")
+        self.cache_dir = cache_dir
         self.dir_or_name = dir_or_name
-        tokenizer_path, path = dir_or_name, dir_or_name
-        if local_cache:
-            cache_dir = os.path.join(self.cache_dir, dir_or_name)
-            tokenizer_path, path = cache_dir, cache_dir
 
-        self.tokenizer = get_t5_tokenizer(tokenizer_path)
-        self.model = get_t5_encoder(path)
+        self.tokenizer = AutoTokenizer.from_pretrained(cache_dir)
+        self.model = get_t5_encoder(cache_dir)
         self.model_max_length = model_max_length
 
     @ms.jit
@@ -68,12 +55,17 @@ class T5Embedder:
             texts = [texts]
         texts = [self.text_preprocessing(text) for text in texts]
 
-        text_tokens, mask = self.tokenizer(
+        text_tokens_and_mask = self.tokenizer(
             texts,
             max_length=self.model_max_length,
-            padding=True,
+            padding="max_length",
             truncation=True,
+            return_attention_mask=True,
+            add_special_tokens=True,
+            # return_tensors='pt'
         )
+        text_tokens = text_tokens_and_mask["input_ids"]
+        mask = text_tokens_and_mask["attention_mask"]
         return text_tokens, mask
 
     def get_text_embeddings(self, texts):

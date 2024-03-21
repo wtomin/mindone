@@ -43,6 +43,8 @@ Specifically, please from the VAE checkpoint from this [url](https://huggingface
 python tools/vae_converter.py --source path/to/vae/ckpt --target models/sd-vae-ft-ema.ckpt
 ```
 
+Next, please download t5 model from this [url](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/t5-v1_1-xxl), and place the `t5-v1_1-xxl` folder under `models/`.
+
 
 ## Sampling
 
