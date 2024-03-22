@@ -1,5 +1,3 @@
-from abc import ABC
-
 from diffusion import create_diffusion
 
 import mindspore as ms
@@ -8,7 +6,7 @@ from mindspore import ops
 __all__ = ["InferPipeline"]
 
 
-class InferPipeline(ABC):
+class InferPipeline:
     """An Inference pipeline for diffusion model
 
     Args:

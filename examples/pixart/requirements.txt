@@ -1,0 +1,8 @@
+imageio==2.31.2
+ftfy]
+beautifulsoup4
+gdown
+einops
+omegaconf
+safetensors
+albumentations
