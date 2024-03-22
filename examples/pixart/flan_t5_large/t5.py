@@ -15,80 +15,20 @@ from .mininlp.configs import MINDNLP_MODEL_URL_BASE
 from .mininlp.legacy import Dropout, arange
 from .mininlp.pretrained_model import PreTrainedModel
 from .t5_config import T5_SUPPORT_LIST, T5Config
-from .t5_tokenizer import T5Tokenizer as T5T
 
 __all__ = [
-    "T5Tokenizer",
     "T5EncoderModel",
-    "get_t5_tokenizer",
     "get_t5_encoder",
 ]
 
 PRETRAINED_MODEL_ARCHIVE_MAP = {model: MINDNLP_MODEL_URL_BASE.format("t5", model) for model in T5_SUPPORT_LIST}
 
 
-class T5Tokenizer(T5T):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.model_max_length = 512
-        self.rng = np.random.RandomState(0)
-        self._pad_token = 0
-
-    def tokenize_truncate_pad(self, text: str, max_length=None, padding=True, truncation=False):
-        if max_length is None:
-            max_length = self.model_max_length
-        tokens = super().__call__(text).tolist()
-
-        output_length = len(tokens)
-        if truncation:
-            output_length = min(len(tokens), max_length)
-        start = 0 if len(tokens) <= output_length else self.rng(0, len(tokens) - output_length + 1)
-        end = start + output_length
-        tokens = tokens[start:end]
-
-        mask = [1] * len(tokens)
-        if padding:
-            mask = mask + [0] * (max_length - len(tokens))
-            tokens = tokens + [self._pad_token] * (max_length - len(tokens))
-
-        tokens = ms.Tensor(tokens)
-        mask = ms.Tensor(mask, dtype=ms.int32)
-
-        return tokens[None, ...], mask[None, ...]
-
-    def __call__(
-        self,
-        batch_text_input,
-        max_length=None,
-        padding=True,
-        truncation=True,
-    ):
-        """
-        important: if no padding, make sure batch = 1
-        returns: tokens, mask, where 1 in mask means used
-        """
-        if not isinstance(batch_text_input, list):
-            batch_text_input = [batch_text_input]
-        tokens, masks = [], []
-        for text_input in batch_text_input:
-            token, mask = self.tokenize_truncate_pad(text_input, max_length, padding, truncation)
-            tokens.append(token)
-            masks.append(mask)
-        tokens = ops.concat(tokens)
-        masks = ops.concat(masks)
-        return tokens, masks
-
-
-def get_t5_tokenizer(cache_folder):
-    tokenizer = T5Tokenizer.from_pretrained(os.path.join(cache_folder, "tokenizer.json"))
-    return tokenizer
-
-
 def get_t5_encoder(cache_folder, trainable=False):
     with open(os.path.join(cache_folder, "config.json"), "r") as file:
         config = json.load(file)
         config = T5Config(**config)
-    model = T5EncoderModel(config).get_encoder()
+    model = T5EncoderModel(config)
     if not trainable:
         model.set_train(False)
         for param in model.get_parameters():

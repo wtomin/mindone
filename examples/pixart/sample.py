@@ -3,10 +3,11 @@ import datetime
 import logging
 import os
 import sys
-import time
 
+import numpy as np
 import yaml
 from modules.t5 import T5Embedder
+from PIL import Image
 from pipelines import InferPipeline
 from tqdm import tqdm
 from utils.data_utils import ASPECT_RATIO_512_TEST, ASPECT_RATIO_1024_TEST, get_chunks, prepare_prompt_ar
@@ -27,7 +28,6 @@ from mindone.models.pixart import PixArt_XL_2, PixArtMS_XL_2
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.logger import set_logger
 from mindone.utils.seed import set_random_seed
-from mindone.visualize.videos import save_videos
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +78,10 @@ def parse_args():
     parser.add_argument(
         "--vae_checkpoint",
         type=str,
-        default="models/sd-vae-ft-mse.ckpt",
+        default="models/sd-vae-ft-ema.ckpt",
         help="VAE checkpoint file path which is used to load vae weight.",
     )
-    parser.add_argument("--t5_checkpoint", default="models/t5_ckpts", type=str)
+    parser.add_argument("--t5_checkpoint", default="models/t5-v1_1-xxl", type=str)
     parser.add_argument(
         "--sd_scale_factor", type=float, default=0.18215, help="VAE scale factor of Stable Diffusion model."
     )
@@ -132,7 +132,7 @@ def parse_args():
     return args
 
 
-def prepare_prompts(items, batch_size):
+def inference_prompts(text_encoder, pipeline, items, batch_size, latent_size):
     for chunk in tqdm(list(get_chunks(items, batch_size)), unit="batch"):
         prompts = []
         if batch_size == 1:
@@ -152,8 +152,29 @@ def prepare_prompts(items, batch_size):
             for prompt in chunk:
                 prompts.append(prepare_prompt_ar(prompt, base_ratios, show=False)[0].strip())
             latent_size_h, latent_size_w = latent_size, latent_size
+        # run inference for each batch
+        n = len(prompts)
 
-    return prompts, latent_size_h, latent_size_w, hw, ar
+        # init inputs
+        z = ops.randn((n, 4, latent_size_h, latent_size_w), dtype=ms.float32)
+        tokens, mask = text_encoder.get_text_tokens_and_mask(prompts)
+
+        inputs = {}
+        inputs["noise"] = z
+        inputs["tokens"] = tokens
+        inputs["mask"] = mask
+        inputs["scale"] = args.guidance_scale
+        inputs["img_hw"] = hw
+        inputs["aspect_ratio"] = ar
+        # infer
+        x_samples = pipeline(inputs)
+        x_samples = x_samples.asnumpy()
+        # save result
+        for i, sample in enumerate(x_samples):
+            save_fp = f"{save_dir}/{prompts[i][:100]}.jpg"
+            img = Image.fromarray((sample * 255).astype(np.uint8))
+            img.save(save_fp)
+            logger.info(f"save to {save_fp}")
 
 
 if __name__ == "__main__":
@@ -219,14 +240,8 @@ if __name__ == "__main__":
         param.requires_grad = False
 
     # t5
-    text_encoder = T5Embedder(local_cache=True, cache_dir=args.t5_checkpoint)
-
-    # prepare dataset
-    with open(args.txt_file, "r") as f:
-        items = [item.strip() for item in f.readlines()]
-    prompts, latent_size_h, latent_size_w, hw, ar = prepare_prompts(items, args.batch_size)
-
-    n = len(prompts)
+    logger.info("t5 init")
+    text_encoder = T5Embedder(cache_dir=args.t5_checkpoint)
 
     # 3. build inference pipeline
     pipeline = InferPipeline(
@@ -238,7 +253,9 @@ if __name__ == "__main__":
         guidance_rescale=args.guidance_scale,
         ddim_sampling=args.ddim_sampling,
     )
-
+    # prepare dataset
+    with open(args.txt_file, "r") as f:
+        items = [item.strip() for item in f.readlines()]
     # 4. print key info
     if vae:
         num_params_vae, num_params_vae_trainable = count_params(vae)
@@ -246,7 +263,9 @@ if __name__ == "__main__":
         num_params_vae, num_params_vae_trainable = 0, 0
     num_params_model, num_params_model_trainable = count_params(model)
     if text_encoder:
-        num_params_text_encoder, num_params_text_encoder_trainable = count_params(text_encoder)
+        num_params_text_encoder, num_params_text_encoder_trainable = count_params(
+            text_encoder.model
+        )  # only count embedding model
     else:
         num_params_text_encoder, num_params_text_encoder_trainable = 0, 0
     num_params = num_params_vae + num_params_model + num_params_text_encoder
@@ -255,8 +274,8 @@ if __name__ == "__main__":
     key_info += "\n".join(
         [
             f"MindSpore mode[GRAPH(0)/PYNATIVE(1)]: {args.mode}",
-            f"Num of samples: {n}",
-            f"Num params: {num_params:,} (model: {num_params_model:,}, vae: {num_params_vae:,}), text encoder : {num_params_text_encoder:,}",
+            f"Num of samples: {len(items)}",
+            f"Num params: {num_params:,} (model: {num_params_model:,}, vae: {num_params_vae:,}, text encoder : {num_params_text_encoder:,})",
             f"Num trainable params: {num_params_trainable:,}",
             f"Use model dtype: {model_dtype}",
             f"Sampling steps {args.sampling_steps}",
@@ -267,29 +286,4 @@ if __name__ == "__main__":
     key_info += "\n" + "=" * 50
     logger.info(key_info)
 
-    # init inputs
-    z = ops.randn((n, 4, latent_size, latent_size), dtype=ms.float32)
-    tokens, mask = text_encoder.get_text_tokens_and_mask(prompts)
-
-    inputs = {}
-    inputs["noise"] = z
-    inputs["tokens"] = tokens
-    inputs["mask"] = mask
-    inputs["scale"] = args.guidance_scale
-    inputs["img_hw"] = hw
-    inputs["aspect_ratio"] = ar
-
-    logger.info(f"Sampling for {n} prompts")
-    start_time = time.time()
-
-    # infer
-    x_samples = pipeline(inputs)
-    x_samples = x_samples.asnumpy()
-
-    end_time = time.time()
-
-    # save result
-    for i in range(n):
-        save_fp = f"{save_dir}/{i}.gif"
-        save_videos(x_samples[i : i + 1], save_fp, loop=0)
-        logger.info(f"save to {save_fp}")
+    inference_prompts(text_encoder, pipeline, items, args.batch_size, latent_size)

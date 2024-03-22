@@ -1,7 +1,7 @@
 from diffusion import create_diffusion
 
 import mindspore as ms
-from mindspore import ops
+from mindspore import Tensor, ops
 
 __all__ = ["InferPipeline"]
 
@@ -89,23 +89,22 @@ class InferPipeline:
     def data_prepare(self, inputs):
         x = inputs["noise"]
         tokens = inputs["tokens"]
-        y, attn_mask = self.get_condition_embeddings(tokens)
+        attention_mask = inputs.get("mask", None)
+        y = self.get_condition_embeddings(tokens, attention_mask)
         if self.use_cfg:
-            y_null = self.model.y_embedder.y_embedding[None].repeat(len(x), 1, 1)[:, None]
+            y_null = self.model.y_embedder.y_embedding.value()[None].repeat(len(x), axis=0)
             y = ops.cat([y, y_null], axis=0)
             x_in = ops.concat([x] * 2, axis=0)
             assert y.shape[0] == x_in.shape[0], "shape mismatch!"
         else:
             x_in = x
             y = inputs["y"]
-        return x_in, y, attn_mask
+        return x_in, y, attention_mask
 
-    def get_condition_embeddings(self, text_tokens):
+    def get_condition_embeddings(self, text_tokens: Tensor, attention_mask: Tensor = None):
         # text conditions inputs for cross-attention
-        # optional: for some conditions, concat to latents, or add to time embedding
-        text_emb, attn_mask = ops.stop_gradient(self.text_encoder(text_tokens))
-
-        return text_emb, attn_mask
+        text_emb = ops.stop_gradient(self.text_encoder(text_tokens, attention_mask))
+        return text_emb
 
     def __call__(self, inputs):
         """

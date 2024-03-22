@@ -9,10 +9,10 @@ from flan_t5_large.t5 import get_t5_encoder
 from transformers import AutoTokenizer
 
 import mindspore as ms
-from mindspore import Tensor
+from mindspore import Tensor, nn
 
 
-class T5Embedder:
+class T5Embedder(nn.Cell):
     available_models = ["t5-v1_1-xxl"]
     bad_punct_regex = re.compile(
         r"["
@@ -31,30 +31,37 @@ class T5Embedder:
     )  # noqa
 
     def __init__(
-        self, cache_dir, dir_or_name="t5-v1_1-xxl", use_text_preprocessing=True, dtype=None, model_max_length=120
+        self,
+        cache_dir,
+        use_text_preprocessing=True,
+        model_max_length=120,
+        pretrained_ckpt=None,
     ):
-        self.dtype = dtype or ms.float16
+        super().__init__()
         self.use_text_preprocessing = use_text_preprocessing
         self.cache_dir = cache_dir
-        self.dir_or_name = dir_or_name
+        self.pretrained_ckpt = pretrained_ckpt
 
         self.tokenizer = AutoTokenizer.from_pretrained(cache_dir)
         self.model = get_t5_encoder(cache_dir)
+        if self.pretrained_ckpt:
+            # load t5 ckpt into self.model
+            pass
         self.model_max_length = model_max_length
 
-    @ms.jit
-    def __call__(self, text_tokens: Tensor, attention_mask: Tensor = None):
+    def construct(self, text_tokens: Tensor, attention_mask: Tensor = None):
         text_encoder_embs = self.model(
             input_ids=text_tokens,
             attention_mask=attention_mask,
-        )[0]
+        )
+        if isinstance(text_encoder_embs, (list, tuple)):
+            text_encoder_embs = text_encoder_embs[0]
         return text_encoder_embs
 
     def get_text_tokens_and_mask(self, texts):
         if isinstance(texts, str):
             texts = [texts]
         texts = [self.text_preprocessing(text) for text in texts]
-
         text_tokens_and_mask = self.tokenizer(
             texts,
             max_length=self.model_max_length,
@@ -62,15 +69,14 @@ class T5Embedder:
             truncation=True,
             return_attention_mask=True,
             add_special_tokens=True,
-            # return_tensors='pt'
         )
-        text_tokens = text_tokens_and_mask["input_ids"]
-        mask = text_tokens_and_mask["attention_mask"]
+        text_tokens = Tensor(text_tokens_and_mask["input_ids"], dtype=ms.int32)
+        mask = Tensor(text_tokens_and_mask["attention_mask"], dtype=ms.float32)
         return text_tokens, mask
 
     def get_text_embeddings(self, texts):
         text_tokens, mask = self.get_text_tokens_and_mask(texts)
-        text_encoder_embs = self(text_tokens, mask)
+        text_encoder_embs = self.construct(text_tokens, mask)
         return text_encoder_embs, mask
 
     def text_preprocessing(self, text):

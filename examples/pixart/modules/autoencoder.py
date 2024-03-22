@@ -35,7 +35,7 @@ class AutoencoderKL(AutoencoderKL_SD):
     def init_from_ckpt(self, path, ignore_keys=list()):
         if not os.path.exists(path):
             raise ValueError(
-                "Maybe download failed. Please download the VAE encoder from https://huggingface.co/stabilityai/sd-vae-ft-mse"
+                "Maybe download failed. Please download the VAE encoder from https://huggingface.co/stabilityai/sd-vae-ft-ema"
             )
         param_dict = ms.load_checkpoint(path)
         param_not_load, ckpt_not_load = ms.load_param_into_net(self, param_dict, strict_load=True)
