@@ -99,6 +99,7 @@ class InferPipeline:
         else:
             x_in = x
             y = inputs["y"]
+        attention_mask = attention_mask.repeat(y.shape[0], axis=0)
         return x_in, y, attention_mask
 
     def get_condition_embeddings(self, text_tokens: Tensor, attention_mask: Tensor = None):

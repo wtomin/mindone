@@ -12,40 +12,45 @@ In this tutorial, we will introduce how to run inference and finetuning experime
 pip install -r requirements.txt
 ```
 
-`decord` is required for video generation. In case `decord` package is not available in your environment, try `pip install eva-decord`.
-Instruction on ffmpeg and decord install on EulerOS:
-```
-1. install ffmpeg 4, referring to https://ffmpeg.org/releases
-    wget wget https://ffmpeg.org/releases/ffmpeg-4.0.1.tar.bz2 --no-check-certificate
-    tar -xvf ffmpeg-4.0.1.tar.bz2
-    mv ffmpeg-4.0.1 ffmpeg
-    cd ffmpeg
-    ./configure --enable-shared         # --enable-shared is needed for sharing libavcodec with decord
-    make -j 64
-    make install
-2. install decord, referring to https://github.com/dmlc/decord?tab=readme-ov-file#install-from-source
-    git clone --recursive https://github.com/dmlc/decord
-    cd decord
-    rm build && mkdir build && cd build
-    cmake .. -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release
-    make -j 64
-    make install
-    cd ../python
-    python3 setup.py install --user
-```
-
 ### Pretrained Checkpoints
 
 We refer to the [official repository of Pixart-α](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main) for pretrained checkpoints downloading.
 
-Specifically, please from the VAE checkpoint from this [url](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/sd-vae-ft-ema), and convert this VAE checkpoint by running:
+Specifically, please download the VAE checkpoint from this [url](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/sd-vae-ft-ema), and convert this VAE checkpoint by running:
 ```bash
 python tools/vae_converter.py --source path/to/vae/ckpt --target models/sd-vae-ft-ema.ckpt
 ```
 
+Pixart-α uses `t5-v1_1-xxl` model for encoding text embeddings. You can download this folder from [URL](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/t5-v1_1-xxl), and place it under `models`.
+
+After that, please run the checkpoint conversion with:
+
+```bash
+python tools/t5_converter.py --source models/t5-v1_1-xxl/pytorch_model-00001-of-00002.bin models/t5-v1_1-xxl/pytorch_model-00002-of-00002.bin --target models/t5-v1_1-xxl/model.ckpt
+```
+This will convert torch weights saved in `.bin` files to mindspore weights saved in `.ckpt` file.
+
+So far, you have prepared all the checkpoints and files needed to run the sampling:
+```bash
+models/
+├── sd-vae-ft-ema.ckpt
+└── t5-v1_1-xxl
+    ├── config.json
+    ├── model.ckpt
+    ├── pytorch_model.bin.index.json
+    ├── special_tokens_map.json
+    ├── spiece.model
+    └── tokenizer_config.json
+```
 
 ## Sampling
 
+You can run text-to-image sampling using `sample.py`. Given a txt file `asset/samples.txt`, which contains lines of captions, you can run sampling with:
+```bash
+python sample.py --txt_file assets/samples.txt
+```
+
+It will save the generated images under `samples/{time-stamps}/`.
 ## Training
 
 

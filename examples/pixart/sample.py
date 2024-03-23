@@ -81,7 +81,7 @@ def parse_args():
         default="models/sd-vae-ft-ema.ckpt",
         help="VAE checkpoint file path which is used to load vae weight.",
     )
-    parser.add_argument("--t5_checkpoint", default="models/t5-v1_1-xxl", type=str)
+    parser.add_argument("--t5_cache_folder", default="models/t5-v1_1-xxl", type=str)
     parser.add_argument(
         "--sd_scale_factor", type=float, default=0.18215, help="VAE scale factor of Stable Diffusion model."
     )
@@ -241,7 +241,9 @@ if __name__ == "__main__":
 
     # t5
     logger.info("t5 init")
-    text_encoder = T5Embedder(cache_dir=args.t5_checkpoint)
+    text_encoder = T5Embedder(
+        cache_dir=args.t5_cache_folder, pretrained_ckpt=os.path.join(args.t5_cache_folder, "model.ckpt")
+    )
 
     # 3. build inference pipeline
     pipeline = InferPipeline(

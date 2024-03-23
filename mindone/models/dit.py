@@ -190,19 +190,11 @@ class Attention(nn.Cell):
         self.scale = dim_head**-0.5
         self.attn_drop = nn.Dropout(p=attn_drop)
 
-    def construct(self, q, k, v, mask):
+    def construct(self, q, k, v, attn_mask):
         sim = ops.matmul(q, self.transpose(k, (0, 2, 1))) * self.scale
 
-        if exists(mask):
-            mask = self.reshape(mask, (mask.shape[0], -1))
-            if sim.dtype == ms.float16:
-                finfo_type = np.float16
-            else:
-                finfo_type = np.float32
-            max_neg_value = -np.finfo(finfo_type).max
-            mask = mask.repeat(self.heads, axis=0)
-            mask = ops.expand_dims(mask, axis=1)
-            sim.masked_fill(mask, max_neg_value)
+        if exists(attn_mask):
+            sim += attn_mask
 
         # use fp32 for exponential inside
         attn = self.softmax(sim.astype(ms.float32)).astype(v.dtype)
@@ -311,6 +303,19 @@ class SelfAttention(nn.Cell):
             # reshape FA output to original attn input format, (b h n d) -> (b n h*d)
             out = out.transpose(0, 2, 1, 3).view(b, n, -1)
         else:
+            # make seq_mask to attention_mask
+            if mask is not None:
+                mask = self.reshape(mask, (mask.shape[0], -1))
+                if q.dtype == ms.float16:
+                    finfo_type = np.float16
+                else:
+                    finfo_type = np.float32
+                max_neg_value = -np.finfo(finfo_type).max
+                mask = mask.repeat(self.heads, axis=0)
+                mask = ops.expand_dims(mask, axis=1)
+                attn_mask = ops.zeros_like(mask, dtype=q.dtype)
+                attn_mask = ops.masked_fill(attn_mask, mask.bool(), Tensor(max_neg_value, dtype=q.dtype))
+                mask = attn_mask
             # (b, n, h*d) -> (b*h, n, d)
             q = self._rearange_in(q, h)
             k = self._rearange_in(k, h)

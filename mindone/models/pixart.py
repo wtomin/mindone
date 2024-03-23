@@ -3,7 +3,7 @@ import logging
 import numpy as np
 
 import mindspore as ms
-from mindspore import Tensor, nn, ops
+from mindspore import Parameter, Tensor, nn, ops
 from mindspore.common.initializer import TruncatedNormal, XavierUniform, initializer
 
 from mindone.utils.version_control import is_old_ms_version
@@ -73,7 +73,7 @@ class T2IFinalLayer(nn.Cell):
         self.norm_final = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Dense(hidden_size, patch_size * patch_size * out_channels, has_bias=True)
 
-        self.scale_shift_table = nn.Parameter(ops.randn((2, hidden_size)) / hidden_size**0.5)
+        self.scale_shift_table = Parameter(ops.randn((2, hidden_size)) / hidden_size**0.5)
         self.out_channels = out_channels
 
     def construct(self, x, t):
@@ -140,7 +140,7 @@ class SizeEmbedder(TimestepEmbedder):
             s = s[:, None]
         assert s.dim() == 2
         if s.shape[0] != bs:
-            s = s.repeat(bs // s.shape[0], axis=1)
+            s = s.repeat(bs // s.shape[0], axis=0)
             assert s.shape[0] == bs
         b, dims = s.shape[0], s.shape[1]
         # s = rearrange(s, "b d -> (b d)")
@@ -164,7 +164,7 @@ class CaptionEmbedder(nn.Cell):
         self.y_proj = Mlp(
             in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0
         )
-        self.y_embedding = nn.Parameter(ops.randn(token_num, in_channels) / in_channels**0.5)
+        self.y_embedding = Parameter(ops.randn(token_num, in_channels) / in_channels**0.5)
         self.uncond_prob = uncond_prob
 
     def token_drop(self, caption, force_drop_ids=None):
@@ -198,8 +198,8 @@ class CaptionEmbedderDoubleBr(nn.Cell):
         self.proj = Mlp(
             in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0
         )
-        self.embedding = nn.Parameter(ops.randn(1, in_channels) / 10**0.5)
-        self.y_embedding = nn.Parameter(ops.randn(token_num, in_channels) / 10**0.5)
+        self.embedding = Parameter(ops.randn(1, in_channels) / 10**0.5)
+        self.y_embedding = Parameter(ops.randn(token_num, in_channels) / 10**0.5)
         self.uncond_prob = uncond_prob
 
     def token_drop(self, global_caption, caption, force_drop_ids=None):
@@ -255,8 +255,8 @@ class WindowAttention(SelfAttention):
         self.use_rel_pos = use_rel_pos
         if self.use_rel_pos:
             # initialize relative positional embeddings
-            self.rel_pos_h = nn.Parameter(ops.zeros(2 * input_size[0] - 1, self.head_dim))
-            self.rel_pos_w = nn.Parameter(ops.zeros(2 * input_size[1] - 1, self.head_dim))
+            self.rel_pos_h = Parameter(ops.zeros(2 * input_size[0] - 1, self.head_dim))
+            self.rel_pos_w = Parameter(ops.zeros(2 * input_size[1] - 1, self.head_dim))
 
             if not rel_pos_zero_init:
                 trunc_normal_(self.rel_pos_h, sigma=0.02)
@@ -344,8 +344,10 @@ class MultiHeadCrossAttention(nn.Cell):
         B, N, C = x.shape
 
         q = self.q_linear(x)
+        out = self.kv_lienar(context)
         # (b, n, 2*h*d) -> (b, n, 2, h*d)  -> (2, b, n, h*d)
-        k, v = self.kv_lienar(context).reshape(B, N, 2, -1).permute((2, 0, 1, 3)).unbind(0)
+        k, v = out.reshape(out.shape[0], out.shape[1], 2, -1).unbind(2)
+
         q_b, q_n, _ = q.shape  # (b n h*d)
         k_b, k_n, _ = k.shape
         v_b, v_n, _ = v.shape
@@ -370,6 +372,20 @@ class MultiHeadCrossAttention(nn.Cell):
             # reshape FA output to original attn input format, (b h n d) -> (b n h*d)
             out = out.transpose(0, 2, 1, 3).view(b, n, -1)
         else:
+            # make seq_mask to attention_mask
+            # TODO: xformers.ops.fmha.BlockDiagonalMask.from_seqlens
+            if mask is not None:
+                mask = self.reshape(mask, (mask.shape[0], -1))
+                if q.dtype == ms.float16:
+                    finfo_type = np.float16
+                else:
+                    finfo_type = np.float32
+                max_neg_value = -np.finfo(finfo_type).max
+                mask = mask.repeat(self.num_heads, axis=0)
+                mask = ops.expand_dims(mask, axis=1)
+                attn_mask = ops.zeros_like(mask, dtype=q.dtype)
+                attn_mask = ops.masked_fill(attn_mask, mask == 0, Tensor(max_neg_value, dtype=q.dtype))
+                mask = attn_mask
             # (b, n, h*d) -> (b*h, n, d)
             q = self._rearange_in(q, h)
             k = self._rearange_in(k, h)
@@ -439,7 +455,7 @@ class PixArtBlock(nn.Cell):
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.window_size = window_size
-        self.scale_shift_table = nn.Parameter(ops.randn(6, hidden_size) / hidden_size**0.5)
+        self.scale_shift_table = Parameter(ops.randn(6, hidden_size) / hidden_size**0.5)
 
     def construct(self, x, y, t, mask=None, **kwargs):
         B, N, C = x.shape
@@ -495,7 +511,7 @@ class PixArt(nn.Cell):
         num_patches = self.x_embedder.num_patches
         self.base_size = input_size // self.patch_size
         # Will use fixed sin-cos embedding:
-        self.pos_embed = nn.Parameter(ops.zeros((1, num_patches, hidden_size)), requires_grad=False)
+        self.pos_embed = Parameter(ops.zeros((1, num_patches, hidden_size)), requires_grad=False)
 
         approx_gelu = lambda: GELU(approximate="tanh")
         self.t_block = nn.SequentialCell(nn.SiLU(), nn.Dense(hidden_size, 6 * hidden_size, has_bias=True))
@@ -531,31 +547,32 @@ class PixArt(nn.Cell):
         Forward pass of PixArt.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
-        y: (N, 1, 120, C) tensor of class labels
+        y: (N, 1, L, C) tensor of text embeddings. L is the token length, which is 120 for T5 text encoder. C is the embedding dim.
+        mask: (N, seq_q, seq_k) tensor of cross-attention mask.
         """
-
         pos_embed = self.pos_embed
         self.h, self.w = x.shape[-2] // self.patch_size, x.shape[-1] // self.patch_size
         x = self.x_embedder(x) + pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(timestep.to(x.dtype))  # (N, D)
         t0 = self.t_block(t)
         y = self.y_embedder(y, self.training)  # (N, 1, L, D)
-        if mask is not None:
-            if mask.shape[0] != y.shape[0]:
-                mask = mask.repeat(y.shape[0] // mask.shape[0], 1)
-            mask = mask.squeeze(1).squeeze(1)
-            y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
-            y_lens = mask.sum(axis=1).tolist()
-        else:
-            y_lens = [y.shape[2]] * y.shape[0]
-            y = y.squeeze(1).view(1, -1, x.shape[-1])
+        # if mask is not None:
+        #     if mask.shape[0] != y.shape[0]:
+        #         mask = mask.repeat(y.shape[0] // mask.shape[0], axis=0)
+        #     mask = mask.squeeze(1).squeeze(1)
+        #     y = y.masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])  #FIXME: dynamic shape problem!
+        #     y_lens = mask.sum(axis=1).tolist()
+        # else:
+
+        # y_lens = [y.shape[2]] * y.shape[0]
+        # y = y.squeeze(1).view(1, -1, x.shape[-1])
         for block in self.blocks:
-            x = block(x, y, t0, y_lens)  # (N, T, D) #support grad checkpoint
+            x = block(x, y, t0, mask)  # (N, T, D) #support grad checkpoint
         x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         return x
 
-    @ms.jit
+    # @ms.jit
     def construct_with_cfg(self, x: Tensor, timestep: Tensor, y: Tensor, cfg_scale: float, mask=None, **kwargs):
         """
         Forward pass of PixArt, but also batches the unconditional forward pass for classifier-free guidance.
@@ -563,7 +580,7 @@ class PixArt(nn.Cell):
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = ops.cat([half, half], axis=0)
-        model_out = self.construct(combined, timestep, y, mask, kwargs)
+        model_out = self.construct(combined, timestep, y, mask, **kwargs)
         eps, rest = model_out[:, : self.in_channels], model_out[:, self.in_channels :]
         cond_eps, uncond_eps = ops.split(eps, len(eps) // 2, axis=0)
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
@@ -616,8 +633,8 @@ class PixArt(nn.Cell):
         normal_(self.t_block[1].weight, std=0.02)
 
         # Initialize caption embedding MLP:
-        nn.init.normal_(self.y_embedder.y_proj.fc1.weight, std=0.02)
-        nn.init.normal_(self.y_embedder.y_proj.fc2.weight, std=0.02)
+        normal_(self.y_embedder.y_proj.fc1.weight, std=0.02)
+        normal_(self.y_embedder.y_proj.fc2.weight, std=0.02)
 
         # Zero-out adaLN modulation layers in PixArt blocks:
         for block in self.blocks:
@@ -701,7 +718,7 @@ class PixArtMSBlock(nn.Cell):
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.window_size = window_size
-        self.scale_shift_table = nn.Parameter(ops.randn(6, hidden_size) / hidden_size**0.5)
+        self.scale_shift_table = Parameter(ops.randn(6, hidden_size) / hidden_size**0.5)
 
     def construct(self, x, y, t, mask=None, **kwargs):
         B, N, C = x.shape
@@ -823,7 +840,7 @@ class PixArtMS(PixArt):
         y = self.y_embedder(y, self.training)  # (N, D)
         if mask is not None:
             if mask.shape[0] != y.shape[0]:
-                mask = mask.repeat(y.shape[0] // mask.shape[0], 1)
+                mask = mask.repeat(y.shape[0] // mask.shape[0], axis=0)
             mask = mask.squeeze(1).squeeze(1)
             y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
             y_lens = mask.sum(axis=1).tolist()
