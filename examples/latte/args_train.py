@@ -188,7 +188,14 @@ def parse_train_args(parser):
         help="the condition types: `None` means using no conditions; `text` means using text embedding as conditions;"
         " `class` means using class labels as conditions.",
     )
-
+    parser.add_argument(
+        "--text_encoder",
+        default=None,
+        type=str,
+        choices=["clip", "t5"],
+        help="text encoder for extract text embeddings: clip text encoder or t5-v1_1-xxl.",
+    )
+    parser.add_argument("--t5_cache_folder", default=None, type=str, help="the T5 cache folder path")
     parser.add_argument("--log_interval", type=int, default=1, help="log interval")
     return parser
 
