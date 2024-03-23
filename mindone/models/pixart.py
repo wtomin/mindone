@@ -436,9 +436,18 @@ class PixArtBlock(nn.Cell):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.scale_shift_table[None] + t.reshape(B, 6, -1)
         ).chunk(6, axis=1)
+        # assert not ops.isinf(x.min()), "input has inf!"
         x = x + self.drop_path(gate_msa * self.attn(t2i_modulate(self.norm1(x), shift_msa, scale_msa)).reshape(B, N, C))
+        # if ops.isinf(res_x.min()):
+        #     breakpoint()
+        #     attn_input = t2i_modulate(self.norm1(x), shift_msa, scale_msa)
+        #     attn_output = self.attn(attn_input)
         x = x + self.cross_attn(x, y, mask)
+        # if ops.isinf(x.min()):
+        #     breakpoint()
         x = x + self.drop_path(gate_mlp * self.mlp(t2i_modulate(self.norm2(x), shift_mlp, scale_mlp)))
+        # if ops.isinf(x.min()):
+        #     breakpoint()
 
         return x
 
@@ -458,6 +467,7 @@ class PixArt(nn.Cell):
         num_heads=16,
         mlp_ratio=4.0,
         class_dropout_prob=0.1,
+        learn_sigma=True,
         pred_sigma=True,
         drop_path: float = 0.0,
         window_size=0,
@@ -473,6 +483,7 @@ class PixArt(nn.Cell):
             window_block_indexes = []
         super().__init__()
         self.pred_sigma = pred_sigma
+        self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if pred_sigma else in_channels
         self.patch_size = patch_size
@@ -539,7 +550,9 @@ class PixArt(nn.Cell):
 
         # y_lens = [y.shape[2]] * y.shape[0]
         # y = y.squeeze(1).view(1, -1, x.shape[-1])
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
+            # if ops.isinf(x.min()):
+            #     print(f"{i} block")
             x = block(x, y, t0, mask)  # (N, T, D) #support grad checkpoint
         x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
@@ -641,6 +654,7 @@ class PatchEmbedMS(nn.Cell):
         super().__init__()
         patch_size = (patch_size, patch_size) if isinstance(patch_size, int) else patch_size
         self.patch_size = patch_size
+        self.embed_dim = embed_dim
         self.flatten = flatten
         self.proj = nn.Conv2d(
             in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, pad_mode="pad", has_bias=bias
@@ -648,9 +662,11 @@ class PatchEmbedMS(nn.Cell):
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def construct(self, x):
+        b = x.shape[0]
         x = self.proj(x)
         if self.flatten:
-            x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+            x = ops.reshape(x, (b, self.embed_dim, -1))
+            x = ops.transpose(x, (0, 2, 1))  # B Ph*Pw C
         x = self.norm(x)
         return x
 
@@ -757,8 +773,8 @@ class PixArtMS(PixArt):
         )
         self.h = self.w = 0
         approx_gelu = lambda: GELU(approximate="tanh")
-        self.t_block = nn.SequentialCell(nn.SiLU(), nn.Linear(hidden_size, 6 * hidden_size, has_bias=True))
-        self.x_embedder = PatchEmbed(patch_size, in_channels, hidden_size, bias=True)
+        self.t_block = nn.SequentialCell(nn.SiLU(), nn.Dense(hidden_size, 6 * hidden_size, has_bias=True))
+        self.x_embedder = PatchEmbedMS(patch_size, in_channels, hidden_size, bias=True)
         self.y_embedder = CaptionEmbedder(
             in_channels=caption_channels,
             hidden_size=hidden_size,
@@ -769,7 +785,7 @@ class PixArtMS(PixArt):
         self.csize_embedder = SizeEmbedder(hidden_size // 3)  # c_size embed
         self.ar_embedder = SizeEmbedder(hidden_size // 3)  # aspect ratio embed
         drop_path = [x for x in np.linspace(0, drop_path, depth)]  # stochastic depth decay rule
-        self.blocks = nn.ModuleList(
+        self.blocks = nn.CellList(
             [
                 PixArtMSBlock(
                     hidden_size,
@@ -786,7 +802,7 @@ class PixArtMS(PixArt):
         )
         self.final_layer = T2IFinalLayer(hidden_size, patch_size, self.out_channels)
 
-        self.initialize_weights()
+        self.initialize()
 
     def construct(self, x, timestep, y, mask=None, img_hw=None, aspect_ratio=None, **kwargs):
         """
@@ -811,17 +827,17 @@ class PixArtMS(PixArt):
         t = t + ops.cat([csize, ar], axis=1)
         t0 = self.t_block(t)
         y = self.y_embedder(y, self.training)  # (N, D)
-        if mask is not None:
-            if mask.shape[0] != y.shape[0]:
-                mask = mask.repeat(y.shape[0] // mask.shape[0], axis=0)
-            mask = mask.squeeze(1).squeeze(1)
-            y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
-            y_lens = mask.sum(axis=1).tolist()
-        else:
-            y_lens = [y.shape[2]] * y.shape[0]
-            y = y.squeeze(1).view(1, -1, x.shape[-1])
+        # if mask is not None:
+        #     if mask.shape[0] != y.shape[0]:
+        #         mask = mask.repeat(y.shape[0] // mask.shape[0], axis=0)
+        #     mask = mask.squeeze(1).squeeze(1)
+        #     y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
+        #     y_lens = mask.sum(axis=1).tolist()
+        # else:
+        #     y_lens = [y.shape[2]] * y.shape[0]
+        #     y = y.squeeze(1).view(1, -1, x.shape[-1])
         for block in self.blocks:
-            x = block(x, y, t0, y_lens, **kwargs)  # (N, T, D) #support grad checkpoint
+            x = block(x, y, t0, mask, **kwargs)  # (N, T, D) #support grad checkpoint
         x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         return x
@@ -833,7 +849,7 @@ class PixArtMS(PixArt):
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = ops.cat([half, half], axis=0)
-        model_out = self.forward(
+        model_out = self.construct(
             combined,
             timestep,
             y,
@@ -860,7 +876,7 @@ class PixArtMS(PixArt):
         imgs = x.reshape((x.shape[0], c, self.h * p, self.w * p))
         return imgs
 
-    def initialize_weights(self):
+    def initialize(self):
         # Initialize transformer layers:
         def _basic_init(module):
             if isinstance(module, nn.Dense):

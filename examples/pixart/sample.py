@@ -10,7 +10,13 @@ from modules.t5 import T5Embedder
 from PIL import Image
 from pipelines import InferPipeline
 from tqdm import tqdm
-from utils.data_utils import ASPECT_RATIO_512_TEST, ASPECT_RATIO_1024_TEST, get_chunks, prepare_prompt_ar
+from utils.data_utils import (
+    ASPECT_RATIO_256_TEST,
+    ASPECT_RATIO_512_TEST,
+    ASPECT_RATIO_1024_TEST,
+    get_chunks,
+    prepare_prompt_ar,
+)
 from utils.model_utils import _check_cfgs_in_parser, count_params, remove_pname_prefix, str2bool
 
 import mindspore as ms
@@ -59,7 +65,7 @@ def parse_args():
         "--image_size",
         type=int,
         default=512,
-        help="image size in [512, 1024]",
+        help="image size in [256, 512, 1024]",
     )
     parser.add_argument("--txt_file", default="asset/samples.txt", type=str)
     parser.add_argument(
@@ -191,10 +197,10 @@ if __name__ == "__main__":
     # 2. model initiate and weight loading
     # 2.1 model
     latent_size = args.image_size // 8
-    lewei_scale = {512: 1, 1024: 2}  # trick for positional embedding interpolation
+    lewei_scale = {256: 1, 512: 1, 1024: 2}  # trick for positional embedding interpolation
 
     # model setting
-    if args.image_size == 512:
+    if args.image_size == 512 or args.image_size == 256:
         model = PixArt_XL_2(input_size=latent_size, lewei_scale=lewei_scale[args.image_size])
     else:
         model = PixArtMS_XL_2(input_size=latent_size, lewei_scale=lewei_scale[args.image_size])
@@ -223,7 +229,9 @@ if __name__ == "__main__":
     for param in model.get_parameters():  # freeze model
         param.requires_grad = False
 
-    if args.image_size == 512:
+    if args.image_size == 256:
+        base_ratios = ASPECT_RATIO_256_TEST
+    elif args.image_size == 512:
         base_ratios = ASPECT_RATIO_512_TEST
     elif args.image_size == 1024:
         base_ratios = ASPECT_RATIO_1024_TEST
