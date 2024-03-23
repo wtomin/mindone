@@ -44,5 +44,19 @@ def initiate_clip_text_encoder(use_fp16: bool = True, ckpt_path: str = None, tra
     return text_encoder
 
 
-def initiate_t5_text_encoder():
-    raise NotImplementedError
+def get_text_encoder_and_tokenizer(name, ckpt_path):
+    if name == "clip":
+        logger.info("CLIP text encoder init")
+        text_encoder = initiate_clip_text_encoder(
+            use_fp16=True,  # TODO: set by config file
+            ckpt_path=ckpt_path,
+            trainable=False,
+        )
+        tokenizer = text_encoder.tokenizer
+    elif name == "t5":
+        logger.info("T5 init")
+        from modules.t5 import T5Embedder
+
+        text_encoder = T5Embedder(cache_dir=ckpt_path, pretrained_ckpt=os.path.join(ckpt_path, "model.ckpt"))
+        tokenizer = text_encoder.tokenizer
+    return text_encoder, tokenizer

@@ -53,6 +53,7 @@ class CSVDataset:
         use_safer_augment=False,
         image_video_joint=False,
         use_image_num=None,
+        condition=None,
     ):
         logger.info(f"loading annotations from {csv_path} ...")
         with open(csv_path, "r") as csvfile:
@@ -85,6 +86,7 @@ class CSVDataset:
         self.video_column = video_column
         assert self.video_column is not None, "The input csv file must specifiy the video column"
         # conditions: None, text, or class
+        self.condition = condition
         self.caption_column = caption_column
         self.class_column = class_column
         if self.caption_column is not None and self.tokenizer is None:
@@ -189,12 +191,17 @@ class CSVDataset:
             text_data = tokens
         else:
             text_data = np.array([49407], dtype=np.int64)  # dummy token ids as a placeholder. Do not return a string.
-        return pixel_values, class_label, text_data
+        if self.condition == "text":
+            return pixel_values, text_data
+        elif self.condition == "class":
+            pixel_values, class_label
+        else:
+            return pixel_values
 
     def tokenize(self, text):
         # a hack to determine if use transformers.CLIPTokenizer
         # should handle it better
-        if type(self.tokenizer).__name__ == "CLIPTokenizer":
+        if type(self.tokenizer).__name__ == "CLIPTokenizer" or type(self.tokenizer).__name__ == "T5TokenizerFast":
             return self._clip_tokenize(text)
 
         SOT_TEXT = self.tokenizer.sot_text  # "[CLS]"
@@ -241,16 +248,18 @@ def create_dataloader(
         video_column=config["video_column"],
         caption_column=config["caption_column"],
         class_column=config["class_column"],
+        condition=config["condition"],
         tokenizer=tokenizer,
     )
 
+    column_names = ["video"]
+    if config["condition"] == "text":
+        column_names += ["caption"]
+    elif config["condition"] == "class":
+        column_names += ["label"]
     dataloader = ms.dataset.GeneratorDataset(
         source=dataset,
-        column_names=[
-            "video",
-            "label",
-            "caption",
-        ],
+        column_names=column_names,
         num_shards=device_num,
         shard_id=rank_id,
         python_multiprocessing=True,
