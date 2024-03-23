@@ -6,30 +6,14 @@ import mindspore as ms
 from mindspore import Parameter, Tensor, nn, ops
 from mindspore.common.initializer import TruncatedNormal, XavierUniform, initializer
 
+from mindone.models.modules.flash_attention import FLASH_IS_AVAILABLE, MSFlashAttention
 from mindone.utils.version_control import is_old_ms_version
 
-from .dit import (
-    FLASH_IS_AVAILABLE,
-    GELU,
-    Attention,
-    LayerNorm,
-    Mlp,
-    PatchEmbed,
-    SelfAttention,
-    TimestepEmbedder,
-    choose_flash_attention_dtype,
-    constant_,
-    get_2d_sincos_pos_embed_from_grid,
-    modulate,
-    normal_,
-    xavier_uniform_,
-)
+from .dit import GELU, Attention, LayerNorm, Mlp, PatchEmbed, SelfAttention, TimestepEmbedder
+from .modules import _get_2d_sincos_pos_embed_from_grid as get_2d_sincos_pos_embed_from_grid
+from .utils import constant_, modulate, normal_, xavier_uniform_
 
 logger = logging.getLogger(__name__)
-if FLASH_IS_AVAILABLE:
-    from mindspore.nn.layer.flash_attention import FlashAttention
-
-    logger.info("Flash attention is available.")
 
 
 def trunc_normal_(tensor: Tensor, sigma: float = 0.01):
@@ -290,7 +274,7 @@ class MultiHeadCrossAttention(nn.Cell):
         context_dim = dim if context_dim is None else context_dim
 
         self.q_linear = nn.Dense(dim, dim).to_float(dtype)
-        self.kv_lienar = nn.Dense(context_dim, dim * 2).to_float(dtype)
+        self.kv_linear = nn.Dense(context_dim, dim * 2).to_float(dtype)
 
         self.proj = nn.Dense(dim, dim).to_float(self.dtype)
         self.proj_drop = nn.Dropout(p=proj_drop)
@@ -305,14 +289,9 @@ class MultiHeadCrossAttention(nn.Cell):
         )
 
         if self.enable_flash_attention:
-            self.flash_attention = FlashAttention(
-                head_dim=head_dim,
-                head_num=num_heads,
-                high_precision=True,
-                dropout_rate=attn_drop,
-            )  # TODO: how high_precision affect the training or inference quality
-            self.fa_mask_dtype = choose_flash_attention_dtype()  # ms.uint8 or ms.float16 depending on version
-            # logger.info("Flash attention is enabled.")
+            self.flash_attention = MSFlashAttention(
+                head_dim=head_dim, head_num=num_heads, fix_head_dims=[72], attention_dropout=attn_drop
+            )
         else:
             self.flash_attention = None
 
@@ -344,7 +323,7 @@ class MultiHeadCrossAttention(nn.Cell):
         B, N, C = x.shape
 
         q = self.q_linear(x)
-        out = self.kv_lienar(context)
+        out = self.kv_linear(context)
         # (b, n, 2*h*d) -> (b, n, 2, h*d)  -> (2, b, n, h*d)
         k, v = out.reshape(out.shape[0], out.shape[1], 2, -1).unbind(2)
 
@@ -361,13 +340,7 @@ class MultiHeadCrossAttention(nn.Cell):
             q = q.view(q_b, q_n, h, -1).transpose(0, 2, 1, 3)
             k = k.view(k_b, k_n, h, -1).transpose(0, 2, 1, 3)
             v = v.view(v_b, v_n, h, -1).transpose(0, 2, 1, 3)
-            if mask is None:
-                mask = ops.zeros((q_b, q_n, q_n), self.fa_mask_dtype)
-
-            out = self.flash_attention(
-                q.to(ms.float16), k.to(ms.float16), v.to(ms.float16), mask.to(self.fa_mask_dtype)
-            )
-
+            out = self.flash_attention(q, k, v, mask)
             b, h, n, d = out.shape
             # reshape FA output to original attn input format, (b h n d) -> (b n h*d)
             out = out.transpose(0, 2, 1, 3).view(b, n, -1)

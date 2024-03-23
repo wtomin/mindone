@@ -213,8 +213,9 @@ if __name__ == "__main__":
         logger.info(f"Loading ckpt {args.checkpoint} into model")
         # in case a save ckpt with "network." prefix, removing it before loading
         param_dict = remove_pname_prefix(param_dict, prefix="network.")
-        del param_dict["pos_embed"]
-        model.load_params_from_ckpt(param_dict)
+        param_not_load, ckpt_not_load = ms.load_param_into_net(model, param_dict)
+        assert len(param_not_load) == 0, f"params should be all loaded, but found {param_not_load} are not loaded."
+        assert len(ckpt_not_load) == 0, f"ckpts should be all loaded, but found {ckpt_not_load} are not loaded."
     else:
         logger.warning("model uses random initialization!")
 

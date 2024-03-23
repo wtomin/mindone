@@ -2,7 +2,7 @@ from typing import Optional
 
 import numpy as np
 
-__all__ = ["get_1d_sincos_temp_embed", "get_2d_sincos_pos_embed", "precompute_freqs_cis_2d"]
+__all__ = ["get_2d_sincos_pos_embed", "precompute_freqs_cis_2d", "_get_2d_sincos_pos_embed_from_grid"]
 
 
 def get_2d_sincos_pos_embed(embed_dim: int, nh: int, nw: Optional[int] = None) -> np.ndarray:
