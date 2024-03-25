@@ -1,6 +1,6 @@
 # task
 condition: "text"
-text_encoder: "clip"
+text_encoder: "t5"
 clip_checkpoint: "../stable_diffusion_v2/models/sd_v1.5-d0ab7146.ckpt"  # load clip text encoder from sd ckpt
 t5_cache_folder: "models/t5-v1_1-xxl/"
 output_path: outputs/toy_csv_video_ft

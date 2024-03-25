@@ -5,7 +5,6 @@ import datetime
 import logging
 import os
 import sys
-from typing import Tuple
 
 import numpy as np
 from embed_writers.mindrecord_writer import MindRecordEmbeddingCacheWriter
@@ -15,7 +14,6 @@ from tqdm import tqdm
 
 import mindspore as ms
 from mindspore import ops
-from mindspore.communication.management import get_group_size, get_rank, init
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
 latte_path = os.path.abspath(os.path.join(__dir__, "../"))
@@ -24,75 +22,19 @@ sys.path.insert(0, latte_path)
 from args_train import parse_args
 from data.dataset import get_dataset
 from modules.autoencoder import SD_CONFIG, AutoencoderKL
-from modules.text_encoders import initiate_clip_text_encoder
+from modules.text_encoders import get_text_encoder_and_tokenizer
 
 mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../../"))
 sys.path.insert(0, mindone_lib_path)
 
+from mindone.env import init_train_env
+
 # load training modules
 from mindone.utils.logger import set_logger
-from mindone.utils.seed import set_random_seed
 
 os.environ["HCCL_CONNECT_TIMEOUT"] = "6000"
 
 logger = logging.getLogger(__name__)
-
-
-def init_env(
-    mode: int = ms.GRAPH_MODE,
-    seed: int = 42,
-    distributed: bool = False,
-    max_device_memory: str = None,
-    device_target: str = "Ascend",
-) -> Tuple[int, int, int]:
-    """
-    Initialize MindSpore environment.
-
-    Args:
-        mode: MindSpore execution mode. Default is 0 (ms.GRAPH_MODE).
-        seed: The seed value for reproducibility. Default is 42.
-        distributed: Whether to enable distributed training. Default is False.
-    Returns:
-        A tuple containing the device ID, rank ID and number of devices.
-    """
-    set_random_seed(seed)
-    if max_device_memory is not None:
-        ms.set_context(max_device_memory=max_device_memory)
-
-    if distributed:
-        device_id = int(os.getenv("DEVICE_ID"))
-        ms.set_context(
-            mode=mode,
-            device_target=device_target,
-            device_id=device_id,
-            # ascend_config={"precision_mode": "allow_fp32_to_fp16"}, # TODO: tune
-        )
-        init()
-        device_num = get_group_size()
-        rank_id = get_rank()
-        logger.debug(f"Device_id: {device_id}, rank_id: {rank_id}, device_num: {device_num}")
-        ms.reset_auto_parallel_context()
-        ms.set_auto_parallel_context(
-            parallel_mode=ms.ParallelMode.DATA_PARALLEL,
-            gradients_mean=True,
-            device_num=device_num,
-        )
-        var_info = ["device_num", "rank_id", "device_num / 8", "rank_id / 8"]
-        var_value = [device_num, rank_id, int(device_num / 8), int(rank_id / 8)]
-        logger.info(dict(zip(var_info, var_value)))
-
-    else:
-        device_num = 1
-        device_id = int(os.getenv("DEVICE_ID", 0))
-        rank_id = 0
-        ms.set_context(
-            mode=mode,
-            device_target=device_target,
-            device_id=device_id,
-            # ascend_config={"precision_mode": "allow_fp32_to_fp16"},  # TODO: tune
-        )
-
-    return device_id, rank_id, device_num
 
 
 def init_models(args):
@@ -109,13 +51,14 @@ def init_models(args):
         param.requires_grad = False
 
     if args.condition == "text":
-        text_encoder = initiate_clip_text_encoder(
-            use_fp16=True,  # TODO: set by config file
-            ckpt_path=args.clip_checkpoint,
-            trainable=False,
-        )
-        tokenizer = text_encoder.tokenizer
-        text_embed_shape = [77, 768]
+        if args.text_encoder == "t5":
+            ckpt_path = args.t5_cache_folder
+            text_embed_shape = [1024]
+        elif args.text_encoder == "clip":
+            ckpt_path = args.clip_checkpoint
+            text_embed_shape = [768]
+        text_encoder, tokenizer = get_text_encoder_and_tokenizer(args.text_encoder, ckpt_path)
+        text_embed_shape.insert(0, tokenizer.context_length)
     else:
         text_encoder, tokenizer, text_embed_shape = None, None, None
     return vae, text_encoder, tokenizer, text_embed_shape
@@ -140,11 +83,13 @@ def main(args):
     args.output_path = os.path.join(args.output_path, time_str)
 
     # 1. init
-    device_id, rank_id, device_num = init_env(
+    _, rank_id, device_num = init_train_env(
         args.mode,
         seed=args.seed,
+        distributed=args.use_parallel,
         device_target=args.device_target,
         max_device_memory=args.max_device_memory,
+        ascend_config=None if args.precision_mode is None else {"precision_mode": args.precision_mode},
     )
     set_logger(name="", output_dir=args.output_path, rank=rank_id, log_level=eval(args.log_level))
     set_logger(name="", output_dir=args.output_path, rank=rank_id, log_level=eval(args.log_level))
@@ -176,6 +121,7 @@ def main(args):
     caption_column = "caption"
     text_emb_column = "text_emb"
     class_column = "class"
+    mask_column = "token_mask"
 
     start_video_index = 0 if args.resume_cache_index is None else args.resume_cache_index
     logger.info(f"Start embedding cache from {start_video_index}th video...")
@@ -209,6 +155,8 @@ def main(args):
             save_npz_keys += [class_column]
         if args.condition == "text":
             save_npz_keys += [caption_column, text_emb_column]
+            if args.text_encoder == "t5":
+                save_npz_keys += [mask_column]
         embed_cache_writer = NumpyEmbeddingCacheWriter(
             cache_folder,
             start_video_index,
@@ -247,21 +195,30 @@ def main(args):
             video_latent.append(clip_latent.asnumpy())
             all_frames_names.extend([os.path.basename(frame_path).split(".")[0] for frame_path in frames_paths])
         video_latent = np.concatenate(video_latent, axis=0)
-        # save video_latent (tensor) and video_name (string)
-        video_save_kwargs["video_latent"] = video_latent.copy().astype(save_data_type)
+        # 1. save video_latent (tensor) and video_name (string)
+        video_save_kwargs[latent_column] = video_latent.copy().astype(save_data_type)
         video_save_kwargs[video_column] = video_name
 
         if args.condition == "text":
-            # save text_emb (tensor) and caption (string)
+            # 2. save text_emb (tensor)
             assert len(inputs) > 1, "incorrect data return shape"
             token_ids = inputs["text"]
-            text_emb = ops.stop_gradient(text_encoder(ms.Tensor(token_ids, ms.int32))).asnumpy()
-            video_save_kwargs["text_emb"] = text_emb.copy().astype(save_data_type)
+            mask = inputs.get("mask", None)
+            if mask is not None:
+                text_emb = ops.stop_gradient(
+                    text_encoder(ms.Tensor(token_ids, ms.int32).unsqueeze(0), ms.Tensor(mask, ms.float32).unsqueeze(0))
+                )[0].asnumpy()
+                # 3. save mask if it needs
+                video_save_kwargs[mask_column] = mask.copy().astype(save_data_type)
+            else:
+                text_emb = ops.stop_gradient(text_encoder(ms.Tensor(token_ids, ms.int32)).unsqueeze(0))[0].asnumpy()
 
+            video_save_kwargs[text_emb_column] = text_emb.copy().astype(save_data_type)
+            # 4. save caption (strings)
             caption = inputs["caption"]
-            video_save_kwargs["caption"] = caption
+            video_save_kwargs[caption_column] = caption
         elif args.condition == "class":
-            # save class_labels (tensor)
+            # 2. save class_labels (tensor)
             assert len(inputs) > 1, "incorrect data return shape"
             class_labels = inputs["class"]
             video_save_kwargs[class_column] = class_labels.copy().astype(np.int32)
