@@ -3,6 +3,7 @@ import glob
 import html
 import logging
 import os
+import pickle as pkl
 import random
 import re
 import urllib.parse as ul
@@ -697,6 +698,171 @@ class CSVDatasetWithEmbeddingNumpy(CSVDataset):
             return self.video_num
 
 
+class CSVDatasetWithEmbeddingPKL(CSVDataset):
+    def __init__(
+        self,
+        video_folder,
+        sample_size=256,
+        sample_stride=4,
+        sample_n_frames=16,
+        transform_backend="al",  # ms, pt, al
+        tokenizer=None,
+        video_column=None,
+        caption_column=None,
+        class_column=None,
+        use_safer_augment=False,
+        image_video_joint=False,
+        use_image_num=None,
+        condition=None,
+        return_token_mask=False,
+        latent_column="video_latent",
+        text_emb_column="text_emb",
+        mask_column="token_mask",
+        frames_folder="frm_emb",
+        text_emb_folder="t5_emb",
+    ):
+        self.video_folder = video_folder
+        self.sample_stride = sample_stride
+        assert (
+            isinstance(self.sample_stride, int) and self.sample_stride > 0
+        ), "The sample stride should be a positive integer"
+        self.sample_n_frames = sample_n_frames
+        assert (
+            isinstance(self.sample_n_frames, int) and self.sample_n_frames > 0
+        ), "The number of sampled frames should be a positive integer"
+        sample_size = tuple(sample_size) if not isinstance(sample_size, int) else (sample_size, sample_size)
+
+        # it should match the transformation used in SD/VAE pretraining, especially for normalization
+        self.pixel_transforms = create_video_transforms(
+            sample_size[0],
+            sample_size[1],
+            sample_n_frames,
+            interpolation="bicubic",
+            backend=transform_backend,
+            use_safer_augment=use_safer_augment,
+        )
+        self.transform_backend = transform_backend
+        self.tokenizer = tokenizer
+        self.video_column = video_column
+        assert self.video_column is not None, "The input csv file must specifiy the video column"
+        # conditions: None, text, or class
+        self.condition = condition
+        self.caption_column = caption_column
+        self.class_column = class_column
+        self.latent_column = latent_column
+        self.text_emb_column = text_emb_column
+        self.mask_column = mask_column
+
+        self.return_token_mask = return_token_mask
+        column_names = [self.latent_column]
+        if self.condition == "text":
+            column_names += [self.text_emb_column]
+            if self.return_token_mask:
+                column_names += [self.mask_column]
+        elif self.condition == "class":
+            column_names += [self.class_column]
+        self.column_names = column_names  # names are mapped with the values returned by __getitem__
+        self.load_video_frames(self.video_folder)
+        # whether to use image and video joint training
+        self.image_video_joint = image_video_joint
+        self.use_image_num = use_image_num
+        self.frames_folder = frames_folder
+        self.text_emb_folder = text_emb_folder
+
+    def load_video_frames(self):
+        self.video_dict = {}
+        self.video_names = []
+        self.video_frame_all = []
+        num_filtered_videos = 0
+
+        # load pkl files first
+        for dirpath, dirnames, _ in os.walk(os.path.join(self.video_folder, self.frames_folder)):
+            for dirname in dirnames:
+                dir_fullpath = os.path.join(dirpath, dirname)
+                pkl_files = glob.glob(os.path.join(dir_fullpath, "*.pkl"))
+                pkl_files = sorted(pkl_files)
+                for pkl_file in pkl_files:
+                    video_name = os.path.basename(pkl_file).split(".")[0]
+                    self.video_dict[video_name] = {"pkl": pkl_file, "npz": []}
+                    self.video_names.append(video_name)
+
+        for dirpath, dirnames, _ in os.walk(os.path.join(self.video_folder, self.text_emb_folder)):
+            for dirname in dirnames:
+                dir_fullpath = os.path.join(dirpath, dirname)
+                npz_files = glob.glob(os.path.join(dir_fullpath, "*.npz"))
+                npz_files = sorted(npz_files)
+                for npz_file in npz_files:
+                    video_name = os.path.basename(npz_file).split(".")[0]
+                    if video_name not in self.video_dict:
+                        self.video_dict[video_name] = {"pkl": [], "npz": npz_file}
+                        self.video_names.append(video_name)
+                    else:
+                        self.video_dict[video_name]["npz"] = npz_file
+        self.video_num = len(self.video_dict)
+        self.video_frame_num = len(self.video_frame_all)
+        if self.video_frame_num == 0:
+            # no npy file existent
+            assert not self.image_video_joint, "Cannot apply image-video-joint training, because no frame num!"
+        self.video_names = list(self.video_dict.keys())
+        if num_filtered_videos:
+            logger.info(
+                f"{num_filtered_videos} videos were filtered out because the number of frames are smaller"
+                f" than n_frames * sample_stride: {self.sample_n_frames * self.sample_stride}!"
+            )
+
+    def get_batch(self, index):
+        if self.image_video_joint:
+            video_index = index % self.video_num
+        else:
+            video_index = index
+
+        # get pkl file
+        video_latent = []
+        video_name = self.video_names[video_index]
+        if self.video_dict[video_name]["pkl"]:
+            emb_fp = self.video_dict[video_name]["pkl"]
+            video_latent = pkl.load(open(emb_fp, "rb"))
+            video_length = len(video_latent)
+
+        if self.video_dict[video_name]["npz"]:
+            emb_fp = self.video_dict[video_name]["npz"]
+            emb_data = np.load(emb_fp)
+            text_emb = emb_data.get("T5_text_embedding", None)
+            mask = emb_data.get("T5_mask", None)
+            class_label = emb_data.get("class", None)
+
+        # Sampling video frames
+        clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
+        start_idx = random.randint(0, video_length - clip_length)
+        frame_indice = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
+        if len(video_latent):
+            video_emb_train = video_latent[frame_indice]
+
+        # get random frames if needed
+        if self.image_video_joint:
+            images_embeddings = []
+            for i in range(self.use_image_num):
+                while True:
+                    try:
+                        video_frame_path = self.video_frame_all[index + i]
+                        image_emb = np.load(video_frame_path)
+                        images_embeddings.append(image_emb)
+                        break
+                    except Exception:
+                        index = random.randint(0, self.video_frame_num - self.use_image_num)
+            images_embeddings = np.stack(images_embeddings, axis=0)
+            video_emb_train = np.concatenate([video_emb_train, images_embeddings], axis=0)
+        pixel_values = video_emb_train.astype(np.float32)
+
+        return pixel_values, class_label, text_emb, mask
+
+    def __len__(self):
+        if self.image_video_joint:
+            return self.video_frame_num
+        else:
+            return self.video_num
+
+
 def create_dataloader(
     config,
     tokenizer=None,
@@ -745,6 +911,19 @@ def create_dataloader(
             )
         elif config["train_data_type"] == "numpy":
             dataset = CSVDatasetWithEmbeddingNumpy(
+                config["data_folder"],
+                sample_size=config.get("sample_size", 256),
+                sample_stride=config.get("sample_stride", 4),
+                sample_n_frames=config.get("sample_n_frames", 16),
+                video_column=config["video_column"],
+                caption_column=config["caption_column"],
+                class_column=config["class_column"],
+                condition=config["condition"],
+                return_token_mask=config.get("return_token_mask", False),
+                tokenizer=tokenizer,
+            )
+        elif config["train_data_type"] == "pkl":
+            dataset = CSVDatasetWithEmbeddingPKL(
                 config["data_folder"],
                 sample_size=config.get("sample_size", 256),
                 sample_stride=config.get("sample_stride", 4),
