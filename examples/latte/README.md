@@ -113,15 +113,15 @@ sky_train/
 └── ...
 ```
 
-First, edit the configuration file `configs/training/data/sky_video.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
+First, edit the configuration file `configs/training/data/sky_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
 
 Then, you can start standalone training on Ascend devices using:
 ```bash
-python train.py -c configs/training/sky_video.yaml
+python train.py -c configs/training/sky_uncond.yaml
 ```
 To start training on GPU devices, simply append `--device_target GPU` to the command above.
 
-The default training configuration is to train Latte model from scratch. The batch size is $5$, and the number of epochs is $3000$, which corresponds to around 900k steps. The learning rate is a constant value $1e^{-4}$. The model is trained under mixed precision mode. The default AMP level is `O2`. See more details in `configs/training/sky_video.yaml`.
+The default training configuration is to train Latte model from scratch. The batch size is $5$, and the number of epochs is $3000$, which corresponds to around 900k steps. The learning rate is a constant value $1e^{-4}$. The model is trained under mixed precision mode. The default AMP level is `O2`. See more details in `configs/training/sky_uncond.yaml`.
 
 To accelerate the training speed, we use `dataset_sink_mode: True` in the configuration file by default. You can also set `enable_flash_attention: True` to further accelerate the training speed.
 
@@ -152,11 +152,11 @@ We can accelerate the training speed by caching the embeddings of the dataset be
 
 <details onclose>
 
-To cache embeddings for Sky Timelapse dataset, first, please make sure the `data_path` in `configs/training/sky_video.yaml` is set correctly to the folder named `sky_train/`.
+To cache embeddings for Sky Timelapse dataset, first, please make sure the `data_path` in `configs/training/sky_uncond.yaml` is set correctly to the folder named `sky_train/`.
 
 Then you can start saving the embeddings using:
 ```bash
-python tools/embedding_cache.py --config configs/training/sky_video.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
+python tools/embedding_cache.py --config configs/training/sky_uncond.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
 ```
 You can also change `cache_file_type` to `mindrecord` to save embeddings in `.mindrecord` files.
 
@@ -175,20 +175,20 @@ To check more usages, please use `python tools/embedding_cache.py -h`.
 
 - **Step 2**: Change the dataset configuration file's `data_folder` to the current cache folder path.
 
-After the embeddings have been cached, edit `configs/training/data/sky_numpy_video.yaml`, and change the `data_folder` to the folder where the cached embeddings are stored in.
+After the embeddings have been cached, edit `configs/training/data/sky_numpy_uncond.yaml`, and change the `data_folder` to the folder where the cached embeddings are stored in.
 
 - **Step 3**: Run the training script.
 
 You can start training on the cached embedding dataset of Sky TimeLapse using:
 ```bash
-python train.py -c configs/training/sky_numpy_video.yaml
+python train.py -c configs/training/sky_numpy_uncond.yaml
 ```
 
-Note that in `sky_numpy_video.yaml`, we use a large number of frames $128$ and a smaller sample stride $1$, which are different from the settings in `sky_video.yaml` (num_frames=16 and stride=3)· Embedding caching allows us to train Latte to generate more frames with a larger frame rate.
+Note that in `sky_numpy_uncond.yaml`, we use a large number of frames $128$ and a smaller sample stride $1$, which are different from the settings in `sky_uncond.yaml` (num_frames=16 and stride=3)· Embedding caching allows us to train Latte to generate more frames with a larger frame rate.
 
 Due to the memory limit, we set the local batch size to $1$ and use a gradient accumulation steps $4$. The number of epochs is $1000$ and the learning rate is $2e^{-5}$. The total number of training steps is about 1000k.
 
-In case of OOM, please set `enable_flash_attention: True` in the `configs/training/sky_numpy_video.yaml`. It can reduce the memory cost and also accelerate the training speed.
+In case of OOM, please set `enable_flash_attention: True` in the `configs/training/sky_numpy_uncond.yaml`. It can reduce the memory cost and also accelerate the training speed.
 
 ### 4.3 Distributed Training
 

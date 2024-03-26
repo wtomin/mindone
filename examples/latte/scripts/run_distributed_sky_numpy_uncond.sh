@@ -26,11 +26,13 @@ for ((i = 0; i < ${RANK_SIZE}; i++)); do
     echo "Launching rank: ${RANK_ID}, device: ${DEVICE_ID}"
     if [ $i -eq 0 ]; then
         python train.py \
-            -c configs/training/sky_numpy_video.yaml \
+            -c configs/training/sky_numpy_uncond.yaml \
+            --gradient_accumulation_steps 1 \
             --use_parallel True > train.log 2>&1 &
     else
         python train.py \
-            -c configs/training/sky_numpy_video.yaml \
+            -c configs/training/sky_numpy_uncond.yaml \
+            --gradient_accumulation_steps 1 \
             --use_parallel True > /dev/null 2>&1 &
     fi
 done
