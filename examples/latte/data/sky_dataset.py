@@ -237,6 +237,7 @@ class SkyDatasetWithEmbeddingNumpy(SkyDataset):
                 if os.path.isdir(folder) and len(os.listdir(folder)) > 0:
                     video_folders.append(folder)
                     assert len(file) > 0, "found empty video name!"
+                    video_name = file
                     self.video_dict[video_name] = {"npz": None, "npy": []}
 
         for video_folder in video_folders:
