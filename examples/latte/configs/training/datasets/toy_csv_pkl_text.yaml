@@ -1,0 +1,16 @@
+data_config:
+  condition: "text"
+  train_data_type: "pkl"
+  data_folder: "/mnt/disk1/hyx/datasets/media_sora"
+  csv_path:
+  sample_stride: 1
+  video_column: "video"
+  class_column:
+  caption_column: "caption"
+  return_token_mask: True
+  use_safer_augment: True
+  image_video_joint: False
+  use_image_num:
+  num_parallel_workers: 8
+  max_rowsize: 64
+  shuffle: True
