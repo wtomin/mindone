@@ -578,6 +578,7 @@ class CSVDatasetWithEmbeddingNumpy(CSVDataset):
         # whether to use image and video joint training
         self.image_video_joint = image_video_joint
         self.use_image_num = use_image_num
+        logger.info(f"Num data samples: {len(self)}")
 
     def load_video_frames(self, dataroot):
         self.video_dict = {}
@@ -769,6 +770,7 @@ class CSVDatasetWithEmbeddingPKL(CSVDataset):
         self.frames_folder = frames_folder
         self.text_emb_folder = text_emb_folder
         self.load_video_frames()
+        logger.info(f"Num data samples: {len(self)}")
 
     def load_video_frames(self):
         self.video_dict = {}
