@@ -1,30 +1,32 @@
 # task
 condition: null
-output_path: outputs/sky_video_train
+output_path: outputs/sky_numpy_video_train
 
 # model setting
 image_size: 256
-num_frames: 16
+num_frames: 128
 model_name: "Latte-XL/2"
 pretrained_model_path: ""
 vae_checkpoint: "models/sd-vae-ft-mse.ckpt"
 sd_scale_factor: 0.18215
 enable_flash_attention: False
 dtype: "fp16"
+patch_embedder: "conv"
+use_recompute: True
 
 # data setting
 dataset_name: "sky"
-data_config_file: "configs/training/data/sky_video.yaml"
+data_config_file: "configs/training/data/sky_numpy_uncond.yaml"
 dataset_sink_mode: True
 
 # training hyper-params
-start_learning_rate: 1e-4
+start_learning_rate: 2e-5
 scheduler: "constant"
 warmup_steps: 0
-train_batch_size: 5
-gradient_accumulation_steps: 1
+train_batch_size: 1
+gradient_accumulation_steps: 4
 weight_decay: 0.0
-epochs: 3000
+epochs: 1000
 
 use_ema: True
 clip_grad: False  # original repo applies clip grad after 20k steps
