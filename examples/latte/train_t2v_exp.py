@@ -73,7 +73,7 @@ def main(args):
         if args.text_encoder == "clip":
             text_emb_dim = 768
         elif args.text_encoder == "t5":
-            text_emb_dim = 1024
+            text_emb_dim = 4096
         t2v_model_extra_kwargs["context_dim"] = text_emb_dim
 
     latte_model = MODELS_DICT[args.model_name](
@@ -277,7 +277,7 @@ def main(args):
             [
                 f"MindSpore mode[GRAPH(0)/PYNATIVE(1)]: {args.mode}",
                 f"Distributed mode: {args.use_parallel}",
-                f"Num params: {num_params:,} (dit: {num_params_latte:,}, vae: {num_params_vae:,})",
+                f"Num params: {num_params:,} (latte: {num_params_latte:,}, vae: {num_params_vae:,})",
                 f"Num trainable params: {num_params_trainable:,}",
                 f"Use model dtype: {model_dtype}",
                 f"Learning rate: {args.start_learning_rate}",
