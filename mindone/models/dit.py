@@ -302,7 +302,7 @@ class SelfAttention(nn.Cell):
             q = q.view(q_b, q_n, h, -1).transpose(0, 2, 1, 3)
             k = k.view(k_b, k_n, h, -1).transpose(0, 2, 1, 3)
             v = v.view(v_b, v_n, h, -1).transpose(0, 2, 1, 3)
-            if mask.dim() != 4:
+            if mask is not None and mask.dim() != 4:
                 mask = ops.expand_dims(mask, axis=1)  # (q_b, 1, q_n, k_n)
             out = self.flash_attention(q, k, v, mask)
             b, h, n, d = out.shape
@@ -313,7 +313,7 @@ class SelfAttention(nn.Cell):
             q = self._rearange_in(q, h)
             k = self._rearange_in(k, h)
             v = self._rearange_in(v, h)
-            if mask.shape[0] != q.shape[0]:
+            if mask is not None and mask.shape[0] != q.shape[0]:
                 mask = mask.repeat(h, axis=0)
             out = self.attention(q, k, v, mask)
             # (b*h, n, d) -> (b, n, h*d)

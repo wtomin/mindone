@@ -98,7 +98,7 @@ class MultiHeadCrossAttention(nn.Cell):
         q = self.to_q(x)
         context = default(context, x)
         # (b, n, 2*h*d) -> (b, n, 2, h*d)  -> (b, n, h*d), (b, n, h*d)
-        k, v = self.to_kv(context).reshape(x.shape[0], x.shape[1], 2, -1).unbind(2)
+        k, v = self.to_kv(context).reshape(context.shape[0], context.shape[1], 2, -1).unbind(2)
         q_b, q_n, _ = q.shape  # (b n h*d)
         k_b, k_n, _ = k.shape
         v_b, v_n, _ = v.shape
@@ -119,7 +119,7 @@ class MultiHeadCrossAttention(nn.Cell):
             q = q.view(q_b, q_n, h, -1).transpose(0, 2, 1, 3)
             k = k.view(k_b, k_n, h, -1).transpose(0, 2, 1, 3)
             v = v.view(v_b, v_n, h, -1).transpose(0, 2, 1, 3)
-            if mask.dim() != 4:
+            if mask is not None and mask.dim() != 4:
                 mask = ops.expand_dims(mask, axis=1)  # (q_b, 1, q_n, k_n)
             out = self.flash_attention(q, k, v, mask)
             b, h, n, d = out.shape
@@ -130,7 +130,7 @@ class MultiHeadCrossAttention(nn.Cell):
             q = self._rearange_in(q, h)
             k = self._rearange_in(k, h)
             v = self._rearange_in(v, h)
-            if mask.shape[0] != q.shape[0]:
+            if mask is not None and mask.shape[0] != q.shape[0]:
                 mask = mask.repeat(h, axis=0)
 
             out = self.attention(q, k, v, mask)

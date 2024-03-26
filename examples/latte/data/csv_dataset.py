@@ -855,6 +855,10 @@ class CSVDatasetWithEmbeddingPKL(CSVDataset):
             images_embeddings = np.stack(images_embeddings, axis=0)
             video_emb_train = np.concatenate([video_emb_train, images_embeddings], axis=0)
         pixel_values = video_emb_train.astype(np.float32)
+        if pixel_values.shape[0] != self.sample_n_frames:
+            pixel_values = pixel_values.transpose((1, 0, 2, 3))
+        text_emb = text_emb.squeeze()
+        mask = mask.squeeze()
 
         return pixel_values, class_label, text_emb, mask
 
