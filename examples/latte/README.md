@@ -113,7 +113,7 @@ sky_train/
 └── ...
 ```
 
-First, edit the configuration file `configs/training/data/sky_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
+First, edit the configuration file `configs/training/datasets/sky_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
 
 Then, you can start standalone training on Ascend devices using:
 ```bash
@@ -175,7 +175,7 @@ To check more usages, please use `python tools/embedding_cache.py -h`.
 
 - **Step 2**: Change the dataset configuration file's `data_folder` to the current cache folder path.
 
-After the embeddings have been cached, edit `configs/training/data/sky_numpy_uncond.yaml`, and change the `data_folder` to the folder where the cached embeddings are stored in.
+After the embeddings have been cached, edit `configs/training/datasets/sky_numpy_uncond.yaml`, and change the `data_folder` to the folder where the cached embeddings are stored in.
 
 - **Step 3**: Run the training script.
 

@@ -18,7 +18,7 @@ dtype: "fp16"
 
 # data setting
 dataset_name: "csv"
-data_config_file: "configs/training/data/toy_csv_numpy_text.yaml"
+data_config_file: "configs/training/datasets/toy_csv_numpy_text.yaml"
 dataset_sink_mode: False
 
 # training hyper-params
