@@ -14,7 +14,7 @@ dtype: "fp16"
 
 # data setting
 dataset_name: "sky"
-data_config_file: "configs/training/data/sky_uncond.yaml"
+data_config_file: "configs/training/datasets/sky_uncond.yaml"
 dataset_sink_mode: True
 
 # training hyper-params
