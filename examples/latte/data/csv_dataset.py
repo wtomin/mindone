@@ -228,17 +228,17 @@ class CSVDataset:
                 - text_data: if tokenizer provided, tokens shape (context_max_len,), otherwise text string
         """
         pixel_values, class_label, tokens, mask = self.get_batch(idx)
-        return_values = pixel_values
+        return_values = (pixel_values,)
 
         if self.condition == "text":
             assert tokens is not None, "tokens is None!"
-            return_values += tokens
+            return_values += (tokens,)
             if self.return_token_mask:
                 assert mask is not None, "mask is None!"
-                return_values += mask
+                return_values += (mask,)
         elif self.condition == "class":
             assert class_label is not None, "class label is None!"
-            return_values += class_label
+            return_values += (class_label,)
         return return_values
 
     def tokenize(self, text):
@@ -762,12 +762,12 @@ class CSVDatasetWithEmbeddingPKL(CSVDataset):
         elif self.condition == "class":
             column_names += [self.class_column]
         self.column_names = column_names  # names are mapped with the values returned by __getitem__
-        self.load_video_frames(self.video_folder)
         # whether to use image and video joint training
         self.image_video_joint = image_video_joint
         self.use_image_num = use_image_num
         self.frames_folder = frames_folder
         self.text_emb_folder = text_emb_folder
+        self.load_video_frames()
 
     def load_video_frames(self):
         self.video_dict = {}
@@ -818,11 +818,12 @@ class CSVDatasetWithEmbeddingPKL(CSVDataset):
 
         # get pkl file
         video_latent = []
+        video_length = 0
         video_name = self.video_names[video_index]
         if self.video_dict[video_name]["pkl"]:
             emb_fp = self.video_dict[video_name]["pkl"]
-            video_latent = pkl.load(open(emb_fp, "rb"))
-            video_length = len(video_latent)
+            video_latent = pkl.load(open(emb_fp, "rb"))  # (c, num_frames, h, w)
+            video_length = video_latent.shape[1]
 
         if self.video_dict[video_name]["npz"]:
             emb_fp = self.video_dict[video_name]["npz"]
@@ -835,8 +836,8 @@ class CSVDatasetWithEmbeddingPKL(CSVDataset):
         clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
         start_idx = random.randint(0, video_length - clip_length)
         frame_indice = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
-        if len(video_latent):
-            video_emb_train = video_latent[frame_indice]
+        if video_length:
+            video_emb_train = video_latent[:, frame_indice]
 
         # get random frames if needed
         if self.image_video_joint:
