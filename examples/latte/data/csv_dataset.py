@@ -1,4 +1,5 @@
 import csv
+import glob
 import html
 import logging
 import os
@@ -128,7 +129,7 @@ class CSVDataset:
         self.return_token_mask = return_token_mask
         column_names = ["video"]
         if self.condition == "text":
-            column_names += ["caption"]
+            column_names += ["tokens"]
             if self.return_token_mask:
                 column_names += ["mask"]
         elif self.condition == "class":
@@ -138,16 +139,29 @@ class CSVDataset:
     def get_batch(self, idx):
         video_dict = self.dataset[idx]
         video_fn = video_dict[self.video_column]
+
         # load caption if needed, otherwise replace it with a dummy value
         if self.caption_column is not None and self.condition == "text":
             caption = video_dict[self.caption_column]
+            tokens, mask = None, None
+            if self.tokenizer is not None:
+                tokens, mask = self.tokenize(caption)
+                # print("D--: ", type(text_data))
+                if isinstance(tokens, list):
+                    tokens = np.array(tokens, dtype=np.int64)
+                if len(tokens.shape) == 2:  # in case, the tokenizer output [1, 77]
+                    tokens = tokens[0]
+                if isinstance(mask, list):
+                    mask = np.array(mask, dtype=np.float32)
+                if len(mask.shape) == 2:  # in case, the tokenizer output [1, 77]
+                    mask = mask[0]
         else:
-            caption = ""
-        # load class labels if needed, otherwise replace it with a dummy value
+            caption, tokens, mask = None, None, None
+        # load class labels if needed
         if self.class_column is not None and self.condition == "class":
             class_label = int(video_dict[self.class_column])
         else:
-            class_label = 0  # a dummy class label as a placeholder
+            class_label = None
 
         # pixel transformation
         video_path = os.path.join(self.video_folder, video_fn)
@@ -167,7 +181,10 @@ class CSVDataset:
             pixel_values = video_reader.get_batch(batch_index).asnumpy()  # shape: (f, h, w, c)
         del video_reader
 
-        return pixel_values, class_label, caption
+        pixel_values = self.apply_transform(pixel_values, video_transform=True)
+        pixel_values = (pixel_values / 127.5 - 1.0).astype(np.float32)
+
+        return pixel_values, class_label, tokens, mask
 
     def __len__(self):
         return self.length
@@ -209,30 +226,17 @@ class CSVDataset:
                 - video: preprocessed video frames in shape (f, c, h, w)
                 - text_data: if tokenizer provided, tokens shape (context_max_len,), otherwise text string
         """
-        pixel_values, class_label, caption = self.get_batch(idx)
-        pixel_values = self.apply_transform(pixel_values, video_transform=True)
-        pixel_values = (pixel_values / 127.5 - 1.0).astype(np.float32)
-
-        if self.tokenizer is not None and self.condition == "text":
-            tokens, mask = self.tokenize(caption)
-            # print("D--: ", type(text_data))
-            if isinstance(tokens, list):
-                tokens = np.array(tokens, dtype=np.int64)
-            if len(tokens.shape) == 2:  # in case, the tokenizer output [1, 77]
-                tokens = tokens[0]
-            if isinstance(mask, list):
-                mask = np.array(mask, dtype=np.float32)
-            if len(mask.shape) == 2:  # in case, the tokenizer output [1, 77]
-                mask = mask[0]
-            text_data = tokens
-
+        pixel_values, class_label, tokens, mask = self.get_batch(idx)
         return_values = pixel_values
 
         if self.condition == "text":
-            return_values += text_data
+            assert tokens is not None, "tokens is None!"
+            return_values += tokens
             if self.return_token_mask:
+                assert mask is not None, "mask is None!"
                 return_values += mask
         elif self.condition == "class":
+            assert class_label is not None, "class label is None!"
             return_values += class_label
         return return_values
 
@@ -488,6 +492,211 @@ class CSVDataset:
         return text
 
 
+class SelectFrameMap:
+    def __init__(self, is_image=False, sample_n_frames=16, sample_stride=4):
+        self.is_image = is_image
+        self.sample_n_frames = sample_n_frames
+        self.sample_stride = sample_stride
+
+    def __call__(self, video_latent):
+        video_length = len(video_latent)
+        if not self.is_image:
+            clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
+            start_idx = random.randint(0, video_length - clip_length)
+            batch_index = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
+        else:
+            batch_index = [random.randint(0, video_length - 1)]
+
+        video_emb_train = video_latent[batch_index]
+        return video_emb_train
+
+
+class CSVDatasetWithEmbeddingNumpy(CSVDataset):
+    def __init__(
+        self,
+        video_folder,
+        sample_size=256,
+        sample_stride=4,
+        sample_n_frames=16,
+        transform_backend="al",  # ms, pt, al
+        tokenizer=None,
+        video_column=None,
+        caption_column=None,
+        class_column=None,
+        use_safer_augment=False,
+        image_video_joint=False,
+        use_image_num=None,
+        condition=None,
+        return_token_mask=False,
+        latent_column="video_latent",
+        text_emb_column="text_emb",
+        mask_column="token_mask",
+    ):
+        self.video_folder = video_folder
+        self.sample_stride = sample_stride
+        assert (
+            isinstance(self.sample_stride, int) and self.sample_stride > 0
+        ), "The sample stride should be a positive integer"
+        self.sample_n_frames = sample_n_frames
+        assert (
+            isinstance(self.sample_n_frames, int) and self.sample_n_frames > 0
+        ), "The number of sampled frames should be a positive integer"
+        sample_size = tuple(sample_size) if not isinstance(sample_size, int) else (sample_size, sample_size)
+
+        # it should match the transformation used in SD/VAE pretraining, especially for normalization
+        self.pixel_transforms = create_video_transforms(
+            sample_size[0],
+            sample_size[1],
+            sample_n_frames,
+            interpolation="bicubic",
+            backend=transform_backend,
+            use_safer_augment=use_safer_augment,
+        )
+        self.transform_backend = transform_backend
+        self.tokenizer = tokenizer
+        self.video_column = video_column
+        assert self.video_column is not None, "The input csv file must specifiy the video column"
+        # conditions: None, text, or class
+        self.condition = condition
+        self.caption_column = caption_column
+        self.class_column = class_column
+        self.latent_column = latent_column
+        self.text_emb_column = text_emb_column
+        self.mask_column = mask_column
+
+        self.return_token_mask = return_token_mask
+        column_names = [self.latent_column]
+        if self.condition == "text":
+            column_names += [self.text_emb_column]
+            if self.return_token_mask:
+                column_names += [self.mask_column]
+        elif self.condition == "class":
+            column_names += [self.class_column]
+        self.column_names = column_names  # names are mapped with the values returned by __getitem__
+        self.load_video_frames(self.video_folder)
+        # whether to use image and video joint training
+        self.image_video_joint = image_video_joint
+        self.use_image_num = use_image_num
+
+    def load_video_frames(self, dataroot):
+        self.video_dict = {}
+        self.video_names = []
+        self.video_frame_all = []
+        num_filtered_videos = 0
+
+        # load npz files first
+        npz_files = glob.glob(os.path.join(dataroot, "*.npz"))
+        if len(npz_files) > 0:
+            for fp in npz_files:
+                video_name = os.path.basename(fp).split(".")[0]
+                self.video_dict[video_name] = {"npz": fp, "npy": []}
+
+        # then load npy files
+        if len(self.video_dict) > 0:
+            # load from video_names folders
+            video_folders = [os.path.join(dataroot, video_name) for video_name in self.video_dict]
+        else:
+            # load from all sub-folders
+            # get video folders
+            video_folders = []
+            for file in os.listdir(dataroot):
+                folder = os.path.join(dataroot, file)
+                if os.path.isdir(folder) and len(os.listdir(folder)) > 0:
+                    video_folders.append(folder)
+                    assert len(file) > 0, "found empty video name!"
+                    self.video_dict[video_name] = {"npz": None, "npy": []}
+
+        for video_folder in video_folders:
+            video_name = os.path.basename(video_folder)
+            if os.path.exists(video_folder):
+                frames = glob.glob(os.path.join(video_folder, "*.npy"))
+                frames = sorted(
+                    frames, key=lambda item: int(os.path.basename(item).split(".")[0].split("_")[-1].split("-")[-1])
+                )
+
+                if len(frames) > max(0, self.sample_n_frames * self.sample_stride):
+                    self.video_dict[video_name]["npy"] = frames
+                    self.video_frame_all.extend(frames)
+                else:
+                    # filter videos that are too short
+                    if video_name in self.video_dict:
+                        del self.video_dict[video_name]
+                    num_filtered_videos += 1
+
+        self.video_num = len(self.video_dict)
+        self.video_frame_num = len(self.video_frame_all)
+        if self.video_frame_num == 0:
+            # no npy file existent
+            assert not self.image_video_joint, "Cannot apply image-video-joint training, because no frame num!"
+        self.video_names = list(self.video_dict.keys())
+        if num_filtered_videos:
+            logger.info(
+                f"{num_filtered_videos} videos were filtered out because the number of frames are smaller"
+                f" than n_frames * sample_stride: {self.sample_n_frames * self.sample_stride}!"
+            )
+
+    def get_batch(self, index):
+        if self.image_video_joint:
+            video_index = index % self.video_num
+        else:
+            video_index = index
+
+        # get npz file if needed
+        video_name = self.video_names[video_index]
+        if self.video_dict[video_name]["npz"]:
+            emb_fp = self.video_dict[video_name]["npz"]
+            emb_data = np.load(emb_fp)
+            video_latent = emb_data.get(self.latent_column, [])
+            video_length = len(video_latent)
+            class_label = emb_data.get(self.class_column, None)
+            text_emb = emb_data.get(self.text_emb_column, None)
+            mask = emb_data.get(self.mask_column, None)
+
+        if self.video_dict[video_name]["npy"]:
+            emb_data = self.video_dict[video_name]["npy"]
+            video_length = len(emb_data)
+            video_latent = []
+
+        # Sampling video frames
+        clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
+        start_idx = random.randint(0, video_length - clip_length)
+        frame_indice = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
+        if len(video_latent):
+            video_emb_train = video_latent[frame_indice]
+        else:
+            # load from npy files
+            video_frames_paths = self.video_dict[video_name]["npy"]
+            frames = [video_frames_paths[index] for index in frame_indice]
+            for frame_path in frames:
+                latent = np.load(frame_path)
+                video_latent.append(latent)
+            video_emb_train = np.stack(video_latent, axis=0)
+
+        # get random frames if needed
+        if self.image_video_joint:
+            images_embeddings = []
+            for i in range(self.use_image_num):
+                while True:
+                    try:
+                        video_frame_path = self.video_frame_all[index + i]
+                        image_emb = np.load(video_frame_path)
+                        images_embeddings.append(image_emb)
+                        break
+                    except Exception:
+                        index = random.randint(0, self.video_frame_num - self.use_image_num)
+            images_embeddings = np.stack(images_embeddings, axis=0)
+            video_emb_train = np.concatenate([video_emb_train, images_embeddings], axis=0)
+        pixel_values = video_emb_train.astype(np.float32)
+
+        return pixel_values, class_label, text_emb, mask
+
+    def __len__(self):
+        if self.image_video_joint:
+            return self.video_frame_num
+        else:
+            return self.video_num
+
+
 def create_dataloader(
     config,
     tokenizer=None,
@@ -495,30 +704,68 @@ def create_dataloader(
     rank_id=0,
     return_dataset=False,
 ):
-    dataset = CSVDataset(
-        config["csv_path"],
-        config["data_folder"],
-        sample_size=config.get("sample_size", 256),
-        sample_stride=config.get("sample_stride", 4),
-        sample_n_frames=config.get("sample_n_frames", 16),
-        video_column=config["video_column"],
-        caption_column=config["caption_column"],
-        class_column=config["class_column"],
-        condition=config["condition"],
-        return_token_mask=config.get("return_token_mask", False),
-        tokenizer=tokenizer,
-    )
+    if "train_data_type" not in config:
+        # by default a video file dataset
+        config["train_data_type"] = "video_file"
 
-    dataloader = ms.dataset.GeneratorDataset(
-        source=dataset,
-        column_names=dataset.column_names,
-        num_shards=device_num,
-        shard_id=rank_id,
-        python_multiprocessing=True,
-        shuffle=config["shuffle"],
-        num_parallel_workers=config["num_parallel_workers"],
-        max_rowsize=config["max_rowsize"],  # video data require larger rowsize
-    )
+    if config["train_data_type"] == "mindrecord":
+        data_files = []
+        for file in os.listdir(config["data_folder"]):
+            file_path = os.path.join(config["data_folder"], file)
+            if os.path.isfile(file_path) and file.split(".")[-1] == "mindrecord":
+                data_files.append(file_path)
+        dataset = ms.dataset.MindDataset(
+            dataset_files=data_files,
+            columns_list=["video_latent"],
+            num_shards=device_num,
+            shard_id=rank_id,
+            shuffle=config["shuffle"],
+            num_parallel_workers=config["num_parallel_workers"],
+        )
+        select_frames_map = SelectFrameMap(
+            is_image=False,
+            sample_n_frames=config["sample_n_frames"],
+            sample_stride=config["sample_stride"],
+        )
+        dataloader = dataset.map(operations=select_frames_map, input_columns=["video_latent"])
+    else:
+        if config["train_data_type"] == "video_file":
+            dataset = CSVDataset(
+                config["csv_path"],
+                config["data_folder"],
+                sample_size=config.get("sample_size", 256),
+                sample_stride=config.get("sample_stride", 4),
+                sample_n_frames=config.get("sample_n_frames", 16),
+                video_column=config["video_column"],
+                caption_column=config["caption_column"],
+                class_column=config["class_column"],
+                condition=config["condition"],
+                return_token_mask=config.get("return_token_mask", False),
+                tokenizer=tokenizer,
+            )
+        elif config["train_data_type"] == "numpy":
+            dataset = CSVDatasetWithEmbeddingNumpy(
+                config["data_folder"],
+                sample_size=config.get("sample_size", 256),
+                sample_stride=config.get("sample_stride", 4),
+                sample_n_frames=config.get("sample_n_frames", 16),
+                video_column=config["video_column"],
+                caption_column=config["caption_column"],
+                class_column=config["class_column"],
+                condition=config["condition"],
+                return_token_mask=config.get("return_token_mask", False),
+                tokenizer=tokenizer,
+            )
+        dataloader = ms.dataset.GeneratorDataset(
+            source=dataset,
+            column_names=dataset.column_names,
+            num_shards=device_num,
+            shard_id=rank_id,
+            python_multiprocessing=True,
+            shuffle=config["shuffle"],
+            num_parallel_workers=config["num_parallel_workers"],
+            max_rowsize=config["max_rowsize"],  # video data require larger rowsize
+        )
 
     dl = dataloader.batch(
         config["batch_size"],
