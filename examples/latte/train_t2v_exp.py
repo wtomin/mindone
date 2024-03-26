@@ -115,7 +115,7 @@ def main(args):
     data_config.sample_size = args.image_size
     data_config.sample_n_frames = args.num_frames
     data_config.batch_size = args.train_batch_size
-    train_with_embed = True if data_config.get("train_data_type", None) in ["numpy", "mindrecord"] else False
+    train_with_embed = False if data_config.get("train_data_type", None) in ["video_file", None] else True
 
     if not train_with_embed:
         # 2.2 vae

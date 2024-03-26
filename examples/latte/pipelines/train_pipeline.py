@@ -49,12 +49,12 @@ class NetworkWithLoss(nn.Cell):
             condition = condition.lower()
         self.condition = condition
         self.text_encoder = text_encoder
-        if self.condition == "text":
-            assert self.text_encoder is not None, "Expect to get text encoder"
 
         self.scale_factor = scale_factor
         self.cond_stage_trainable = cond_stage_trainable
         self.train_with_embed = train_with_embed
+        if self.condition == "text" and not self.train_with_embed:
+            assert self.text_encoder is not None, "Expect to get text encoder"
         if self.train_with_embed:
             self.vae = None
             self.text_encoder = None
@@ -64,13 +64,13 @@ class NetworkWithLoss(nn.Cell):
             self.text_encoder.set_train(True)
             self.text_encoder.set_grad(True)
 
-    def get_condition_embeddings(self, text_tokens):
+    def get_condition_embeddings(self, text_tokens, **kwargs):
         # text conditions inputs for cross-attention
         # optional: for some conditions, concat to latents, or add to time embedding
         if self.cond_stage_trainable:
-            text_emb = self.text_encoder(text_tokens)
+            text_emb = self.text_encoder(text_tokens, **kwargs)
         else:
-            text_emb = ops.stop_gradient(self.text_encoder(text_tokens))
+            text_emb = ops.stop_gradient(self.text_encoder(text_tokens, **kwargs))
 
         return text_emb
 
@@ -104,11 +104,11 @@ class NetworkWithLoss(nn.Cell):
             y: (b f H W 3), batch of images, normalized to [0, 1]
         """
         b, f, c, h, w = x.shape
-        x = x.reshape((b * f, c, h, w))
+        y = []
+        for x_sample in x:
+            y.append(self.vae_decode(x_sample))
 
-        y = self.vae_decode(x)
-        _, h, w, c = y.shape
-        y = y.reshape((b, f, h, w, c))
+        y = ops.stack(y, axis=0)
 
         return y
 
@@ -155,7 +155,7 @@ class NetworkWithLoss(nn.Cell):
             x = self.get_latents(x)
             # 2. get conditions
             if self.condition == "text":
-                text_embed = self.get_condition_embeddings(text_tokens)
+                text_embed = self.get_condition_embeddings(text_tokens, **kwargs)
             else:
                 text_embed = None
         else:
@@ -165,7 +165,7 @@ class NetworkWithLoss(nn.Cell):
             y = labels
         else:
             y = None
-        loss = self.compute_loss(x, y, text_embed)
+        loss = self.compute_loss(x, y, text_embed, **kwargs)
         return loss
 
     def apply_model(self, *args, **kwargs):
@@ -191,11 +191,11 @@ class NetworkWithLoss(nn.Cell):
         vb = ops.where((t == 0), decoder_nll.to(kl.dtype), kl)
         return vb
 
-    def compute_loss(self, x, y, text_embed):
+    def compute_loss(self, x, y, text_embed, **kwargs):
         t = ops.randint(0, self.diffusion.num_timesteps, (x.shape[0],))
         noise = ops.randn_like(x)
         x_t = self.diffusion.q_sample(x, t, noise=noise)
-        model_output = self.apply_model(x_t, t, y=y, text_embed=text_embed)
+        model_output = self.apply_model(x_t, t, y=y, text_embed=text_embed, **kwargs)
         if x_t.dim() == 5:
             B, F, C = x_t.shape[:3]
             assert model_output.shape == (B, F, C * 2) + x_t.shape[3:]
@@ -224,8 +224,8 @@ class ClassConditionedModelWithLoss(NetworkWithLoss):
 
 
 class TextConditionedModelWithLoss(NetworkWithLoss):
-    def construct(self, x: ms.Tensor, text_tokens: ms.Tensor):
-        return super().construct(x, labels=None, text_tokens=text_tokens)
+    def construct(self, x: ms.Tensor, text_tokens: ms.Tensor, mask: ms.Tensor = None):
+        return super().construct(x, labels=None, text_tokens=text_tokens, mask=mask)
 
 
 def get_model_with_loss(condition):
