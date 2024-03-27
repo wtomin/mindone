@@ -96,7 +96,7 @@ Some of the generated results are shown here:
   <em> Figure 2. The generated videos of the pretrained model converted from the torch checkpoint. </em>
 </p>
 
-## 4. Training
+## 4. Training (Unconditional Video Generation)
 
 ### 4.1 Training With Videos
 
@@ -113,19 +113,19 @@ sky_train/
 └── ...
 ```
 
-First, edit the configuration file `configs/training/datasets/sky_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
+First, edit the configuration file `configs/training/datasets/sky_video_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
 
 Then, you can start standalone training on Ascend devices using:
 ```bash
-python train.py -c configs/training/sky_uncond.yaml
+python train.py -c configs/training/sky_video_uncond.yaml
 ```
 To start training on GPU devices, simply append `--device_target GPU` to the command above.
 
-The default training configuration is to train Latte model from scratch. The batch size is $5$, and the number of epochs is $3000$, which corresponds to around 900k steps. The learning rate is a constant value $1e^{-4}$. The model is trained under mixed precision mode. The default AMP level is `O2`. See more details in `configs/training/sky_uncond.yaml`.
+The default training configuration is to train Latte model from scratch. The batch size is $5$, and the number of epochs is $3000$, which corresponds to around 900k steps. The learning rate is a constant value $1e^{-4}$. The model is trained under mixed precision mode. The default AMP level is `O2`. See more details in `configs/training/sky_video_uncond.yaml`.
 
 To accelerate the training speed, we use `dataset_sink_mode: True` in the configuration file by default. You can also set `enable_flash_attention: True` to further accelerate the training speed.
 
-After training, the checkpoints are saved under `output_dir/ckpt/`. To run inference with the checkpoint, please change `checkpoint` in `configs/inference/sky.yaml` to the path of the checkpoint, and then run `python sample.py -c configs/inference/sky.yaml`.
+After training, the checkpoints are saved under `output_dir/ckpt/`. To run inference with the checkpoint, please change `checkpoint` in `configs/inference/sky_uncond.yaml` to the path of the checkpoint, and then run `python sample.py -c configs/inference/sky_uncond.yaml`.
 
 The number of epochs is set to a large number to ensure convergence. You can terminate training whenever it is ready. For example, we took the checkpoint which was trained for $1700$ epochs (about $500k$ steps) and ran inference with it. Here are some examples generated:
 <table class="center">
@@ -152,11 +152,11 @@ We can accelerate the training speed by caching the embeddings of the dataset be
 
 <details onclose>
 
-To cache embeddings for Sky Timelapse dataset, first, please make sure the `data_path` in `configs/training/sky_uncond.yaml` is set correctly to the folder named `sky_train/`.
+To cache embeddings for Sky Timelapse dataset, first, please make sure the `data_path` in `configs/training/sky_video_uncond.yaml` is set correctly to the folder named `sky_train/`.
 
 Then you can start saving the embeddings using:
 ```bash
-python tools/embedding_cache.py --config configs/training/sky_uncond.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
+python tools/embedding_cache.py --config configs/training/sky_video_uncond.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
 ```
 You can also change `cache_file_type` to `mindrecord` to save embeddings in `.mindrecord` files.
 
@@ -184,9 +184,9 @@ You can start training on the cached embedding dataset of Sky TimeLapse using:
 python train.py -c configs/training/sky_numpy_uncond.yaml
 ```
 
-Note that in `sky_numpy_uncond.yaml`, we use a large number of frames $128$ and a smaller sample stride $1$, which are different from the settings in `sky_uncond.yaml` (num_frames=16 and stride=3)· Embedding caching allows us to train Latte to generate more frames with a larger frame rate.
+Note that in `sky_numpy_uncond.yaml`, we use a large number of frames $128$ and a smaller sample stride $1$, which are different from the settings in `sky_video_uncond.yaml` (num_frames=16 and stride=3)· Embedding caching allows us to train Latte to generate more frames with a larger frame rate.
 
-Due to the memory limit, we set the local batch size to $1$ and use a gradient accumulation steps $4$. The number of epochs is $1000$ and the learning rate is $2e^{-5}$. The total number of training steps is about 1000k.
+Due to the memory limit, we set the local batch size to $1$ and use a gradient accumulation steps $4$. The number of epochs is $3000$, which corresponds to around 800k steps. You can terminate the training when it's ready.
 
 In case of OOM, please set `enable_flash_attention: True` in the `configs/training/sky_numpy_uncond.yaml`. It can reduce the memory cost and also accelerate the training speed.
 
@@ -197,21 +197,22 @@ Taking the 4-card distributed training as an example, you can start the distribu
 export MS_ASCEND_CHECK_OVERFLOW_MODE="INFNAN_MODE"
 mpirun -n 4 python train.py \
     -c path/to/configuration/file \
+    --gradient_accumulation_steps 1 \
     --use_parallel True
 ```
-where the configuration file can be selected from the `.yaml` files in `configs/training/` folder.
+where the configuration file can be selected from the `.yaml` files in `configs/training/` folder. By setting `gradient_accumulation_steps` to 1, and loading data into 4 cards in parallel, we have a global batch size which equals to `4 x local_batch_size`.
 
-If you have the rank table of Ascend devices, you can take `scripts/run_distributed_sky_numpy_video.sh` as a reference, and start the 4-card distributed training using:
+If you have the rank table of Ascend devices, you can take `scripts/run_distributed_sky_numpy_uncond.sh` as a reference, and start the 4-card distributed training using:
 ```bash
-bash scripts/run_distributed_sky_numpy_video.sh path/to/rank/table 0 4
+bash scripts/run_distributed_sky_numpy_uncond.sh path/to/rank/table 0 4
 ```
 
 The first number `0` indicates the start index of the training devices, and the second number `4` indicates the total number of distributed processes you want to launch.
 
 
-## 5. Evaluation
+### 4.4 Performance
 
-The training speed of the experiments with `256x256` image size is summarized in the following table:
+The training speed of the unconditional video experiments with `256x256` image size is summarized in the following table:
 
 | Cards | Recompute | Dataset Sink mode | Embedding Cache|Train. imgs/s |
 | ---   | ---       | ---               | ---          |   ---          |
@@ -219,7 +220,80 @@ The training speed of the experiments with `256x256` image size is summarized in
 | 1     | ON        | ON                | ON           | 93.6           |
 | 4     | ON        | ON                | ON           | 368.3          |
 
+## 5. Training (Text-To-Video Generation, Experimental)
 
+Here we provide an experimental feature of training a text-to-video latte model using T5 model as the text encoder.
+
+### 5.1 Text Encoder
+
+Please download the cache folder of the `t5-v1_1-xxl` model from PixArt-alpha's [URL](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/t5-v1_1-xxl), and place it under `models/`. The t5 cache folder looks like:
+
+```bash
+models/t5-v1_1-xxl/
+├── config.json
+├── pytorch_model-00001-of-00002.bin
+├── pytorch_model-00002-of-00002.bin
+├── pytorch_model.bin.index.json
+├── special_tokens_map.json
+├── spiece.model
+└── tokenizer_config.json
+```
+
+Then, you can convert the T5 Torch checkpoint to a MindSpore checkpoint using:
+
+```bash
+python tools/t5_converter.py --source models/t5-v1_1-xxl/pytorch_model-00001-of-00002.bin  models/t5-v1_1-xxl/pytorch_model-00002-of-00002.bin --target models/t5-v1_1-xxl/model.ckpt
+```
+
+### 5.2 Dataset Preparation
+
+In general, we need to prepare video-caption pairs to train a text-to-video latte model. As for the dataset format, we provide a toy CSV dataset which can be downloaded by:
+```bash
+bash scripts/download_toy_csvdataset.sh
+```
+Afterwards, the dataset is downloaded into `imagenet_samples/videos/`, like this:
+```bash
+imagenet_samples/videos/
+├── n01644373_tree_frog_31.mp4
+├── n02085936_Maltese_dog_153.mp4
+├── n04146614_school_bus_779.mp4
+└── video_caption.csv
+```
+
+Checking the CSV file, you will find:
+
+| video | caption | class|
+| ---   | ---     | ---  |
+| n01644373_tree_frog_31.mp4 | "a tree frog perches on a branch in the tropical rainforest" | 3|
+| n02085936_Maltese_dog_153.mp4 | "a Maltese dog squats beside the bed and looks into the camera" | 153|
+...
+
+The two columns `video` and `caption` are essential for text-to-video model training, while the third column `class` is optional. `class` is required for class-conditioned model training.
+
+### 5.3 Training with Videos
+
+You can start standalone training on Ascend devices using:
+```bash
+python train_t2v_exp.py -c configs/training/csv_video_text.yaml
+```
+It is highly risky of OOM to train with raw videos and captions. Therefore, we recommend to extract embeddings before running training experiments.
+
+
+### 5.4 Training with Embedding Cache
+
+Similar to Sec [4.2](#42-training-with-embedding-cache), please extract the visual latent embeddings and the text embeddings as well as the token masks beforehand.
+
+You can start saving the embeddings using:
+```bash
+python tools/embedding_cache.py --config configs/training/csv_video_text.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
+```
+
+Please take the example in [4.2](#42-training-with-embedding-cache) as a reference to use `tools/embedding_cache.py`.
+
+After the embeddings are saved in the cache folder, you can set the `data_folder` to the cache folder in `configs/training/datasets/csv_numpy_text.yaml`. Then, you can start the training using:
+```bash
+python train.py -c configs/training/csv_numpy_text.yaml
+```
 # References
 
 [1] Xin Ma, Yaohui Wang, Gengyun Jia, Xinyuan Chen, Ziwei Liu, Yuan-Fang Li, Cunjian Chen, Yu Qiao: Latte: Latent Diffusion Transformer for Video Generation. CoRR abs/2401.03048 (2024)

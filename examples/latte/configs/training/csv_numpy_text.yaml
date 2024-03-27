@@ -1,11 +1,15 @@
 # task
-condition: null
-output_path: outputs/sky_video_train
+condition: "text"
+text_encoder: "t5"
+clip_checkpoint: ""
+t5_cache_folder: "models/t5-v1_1-xxl/"
+output_path: outputs/csv_numpy_text_train
 
 # model setting
 image_size: 256
 num_frames: 16
-model_name: "Latte-XL/2"
+num_classes:
+model_name: "Latte-t2v-XL/2"
 pretrained_model_path: ""
 vae_checkpoint: "models/sd-vae-ft-mse.ckpt"
 sd_scale_factor: 0.18215
@@ -13,21 +17,21 @@ enable_flash_attention: False
 dtype: "fp16"
 
 # data setting
-dataset_name: "sky"
-data_config_file: "configs/training/datasets/sky_uncond.yaml"
-dataset_sink_mode: True
+dataset_name: "csv"
+data_config_file: "configs/training/datasets/csv_numpy_text.yaml"
+dataset_sink_mode: False
 
 # training hyper-params
 start_learning_rate: 1e-4
 scheduler: "constant"
-warmup_steps: 0
-train_batch_size: 5
+warmup_steps: 10
+train_batch_size: 1
 gradient_accumulation_steps: 1
-weight_decay: 0.0
+weight_decay: 0.01
 epochs: 3000
 
 use_ema: True
-clip_grad: False  # original repo applies clip grad after 20k steps
+clip_grad: False
 max_grad_norm: 0.1
 ckpt_max_keep: 3
 init_loss_scale: 65536
