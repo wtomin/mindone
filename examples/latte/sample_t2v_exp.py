@@ -6,6 +6,7 @@ import sys
 import time
 
 import yaml
+from modules.text_encoders import get_text_encoder_and_tokenizer
 from pipelines import InferPipeline
 from utils.model_utils import _check_cfgs_in_parser, count_params, remove_pname_prefix, str2bool
 
@@ -21,6 +22,7 @@ sys.path.insert(0, mindone_lib_path)
 from modules.autoencoder import SD_CONFIG, AutoencoderKL
 
 from mindone.models.latte import Latte_models
+from mindone.models.latte_t2v_sd import Latte_T2V_models
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.logger import set_logger
 from mindone.utils.seed import set_random_seed
@@ -145,6 +147,12 @@ def parse_args():
         choices=["conv", "linear"],
         help="Whether to use conv2d layer or dense (linear layer) as Patch Embedder.",
     )
+    parser.add_argument(
+        "--captions",
+        type=str,
+        nargs="+",
+        help="A list of text captions to be generated with",
+    )
     parser.add_argument("--ddim_sampling", type=str2bool, default=True, help="Whether to use DDIM for sampling")
     default_args = parser.parse_args()
     abs_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ""))
@@ -174,7 +182,18 @@ if __name__ == "__main__":
     # 2.1 latte
     logger.info(f"{args.model_name}-{args.image_size}x{args.image_size} init")
     latent_size = args.image_size // 8
-    latte_model = Latte_models[args.model_name](
+    MODELS_DICT = Latte_models if args.condition != "text" else Latte_T2V_models
+
+    t2v_model_extra_kwargs = {}
+    text_emb_dim = None
+    if args.condition == "text":
+        if args.text_encoder == "clip":
+            text_emb_dim = 768
+        elif args.text_encoder == "t5":
+            text_emb_dim = 4096
+        t2v_model_extra_kwargs["context_dim"] = text_emb_dim
+
+    latte_model = MODELS_DICT[args.model_name](
         input_size=latent_size,
         num_classes=args.num_classes,
         block_kwargs={"enable_flash_attention": args.enable_flash_attention},
@@ -182,8 +201,8 @@ if __name__ == "__main__":
         num_frames=args.num_frames,
         use_recompute=args.use_recompute,
         patch_embedder=args.patch_embedder,
+        **t2v_model_extra_kwargs,
     )
-
     if args.dtype == "fp16":
         model_dtype = ms.float16
         latte_model = auto_mixed_precision(latte_model, amp_level="O2", dtype=model_dtype)
@@ -193,19 +212,17 @@ if __name__ == "__main__":
     else:
         model_dtype = ms.float32
 
-    if len(args.checkpoint) > 0:
-        param_dict = ms.load_checkpoint(args.checkpoint)
-        logger.info(f"Loading ckpt {args.checkpoint} into Latte")
+    if len(args.pretrained_model_path) > 0:
+        param_dict = ms.load_checkpoint(args.pretrained_model_path)
+        logger.info(f"Loading ckpt {args.pretrained_model_path} into Latte...")
         # in case a save ckpt with "network." prefix, removing it before loading
         param_dict = remove_pname_prefix(param_dict, prefix="network.")
         latte_model.load_params_from_ckpt(param_dict)
     else:
-        logger.warning("Latte uses random initialization!")
-
+        logger.info("Use random initialization for Latte")
     latte_model = latte_model.set_train(False)
     for param in latte_model.get_parameters():  # freeze latte_model
         param.requires_grad = False
-
     # 2.2 vae
     logger.info("vae init")
     vae = AutoencoderKL(
@@ -217,7 +234,8 @@ if __name__ == "__main__":
     vae = vae.set_train(False)
     for param in vae.get_parameters():  # freeze vae
         param.requires_grad = False
-
+    # Labels to condition the model with (feel free to change):
+    # Create sampling noise:
     # Labels to condition the model with (feel free to change):
     # Create sampling noise:
     if args.condition == "class":
@@ -226,11 +244,20 @@ if __name__ == "__main__":
         y = Tensor(class_labels)
         y_null = ops.ones_like(y) * args.num_classes
     elif args.condition == "text":
-        # tokenizer
-        pass
+        if args.text_encoder == "t5":
+            ckpt_path = args.t5_cache_folder
+        elif args.text_encoder == "clip":
+            ckpt_path = args.clip_checkpoint
+        text_encoder, tokenizer = get_text_encoder_and_tokenizer(args.text_encoder, ckpt_path)
+        # extracting text tokends and attention mask?
+        n = len(args.captions)
+        assert n > 0, "No captions provided"
+        text_tokens, mask = text_encoder.get_text_tokens_and_mask(args.captions, return_tensor=True)
+        y, y_null = None, None
     else:
         y, y_null = None, None
         n = args.num_samples
+
     z = ops.randn((n, args.num_frames, 4, latent_size, latent_size), dtype=ms.float32)
     # 3. build inference pipeline
     pipeline = InferPipeline(
@@ -266,9 +293,12 @@ if __name__ == "__main__":
     # init inputs
     inputs = {}
     inputs["noise"] = z
-    inputs["y"] = y
+    inputs["y"] = y  # None if condition is None; otherwise, a tensor with shape (n, )
     inputs["y_null"] = y_null
     inputs["scale"] = args.guidance_scale
+    if args.condition == "text":
+        inputs["text_tokens"] = text_tokens
+        inputs["mask"] = mask
 
     logger.info(f"Sampling for {n} samples with condition {args.condition}")
     start_time = time.time()
