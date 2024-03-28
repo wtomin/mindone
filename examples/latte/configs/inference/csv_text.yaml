@@ -1,7 +1,12 @@
-# model
+# task
 condition: "text"
-num_classes:
-image_size: 256
+text_encoder: "t5"
+clip_checkpoint: ""
+t5_cache_folder: "models/t5-v1_1-xxl/"
+output_path: outputs/csv_pkl_text_train/
+
+# model
+image_size: 512
 num_frames: 16
 model_name: "Latte-t2v-XL/2"
 checkpoint: "path/to/ckpt"
