@@ -161,7 +161,7 @@ class BasicTransformerBlock(nn.Cell):
         self.attn2 = MultiHeadCrossAttention(
             dim=hidden_size, num_heads=num_heads, qkv_bias=True, context_dim=context_dim, **block_kwargs
         )  # is self-attn if context is none
-        self.norm_crossattn = LayerNorm(hidden_size, epsilon=1e-06)
+        self.norm_crossattn = LayerNorm(hidden_size, eps=1e-06)
 
     def construct(self, x, c, context=None, mask=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, axis=1)
@@ -327,14 +327,22 @@ class Latte_T2V_SD(nn.Cell):
             # N, L, D = text_embed.shape
             # (N, L, D) -> (N*num_frames, L, D)
             text_embed_spatial = text_embed.repeat_interleave(repeats=self.temp_embed.shape[1], dim=0)
+            if mask is not None:
+                mask_spatial = mask.repeat_interleave(repeats=self.temp_embed.shape[1], dim=0)
+            else:
+                mask_spatial = None
             # (N, L, D) -> (N*T, L, D)
             text_embed_temp = text_embed.repeat_interleave(repeats=self.pos_embed.shape[1], dim=0)
+            if mask is not None:
+                mask_temp = mask.repeat_interleave(repeats=self.pos_embed.shape[1], dim=0)
+            else:
+                mask_temp = None
         else:
             text_embed_spatial, text_embed_temp = None, None
 
         for i in range(0, len(self.blocks), 2):
             spatial_block, temp_block = self.blocks[i : i + 2]
-            x = spatial_block(x, t_spatial, text_embed_spatial, mask)
+            x = spatial_block(x, t_spatial, text_embed_spatial, mask_spatial)
             _, num_patches, channels = x.shape
             x = (
                 x.reshape((bs, num_frames, num_patches, channels))
@@ -345,7 +353,7 @@ class Latte_T2V_SD(nn.Cell):
             if i == 0:
                 x = x + self.temp_embed
 
-            x = temp_block(x, t_temp, text_embed_temp, mask)
+            x = temp_block(x, t_temp, text_embed_temp, mask_temp)
 
             _, num_frames, channels = x.shape
             x = (
@@ -360,14 +368,14 @@ class Latte_T2V_SD(nn.Cell):
         x = x.reshape((bs, num_frames, channels, h, w))
         return x
 
-    def construct_with_cfg(self, x, t, text_embed=None, cfg_scale=4.0):
+    def construct_with_cfg(self, x, t, text_embed=None, mask=None, cfg_scale=4.0, **kwargs):
         """
         Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.
         """
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = ops.cat([half, half], axis=0)
-        model_out = self.construct(combined, t, text_embed=text_embed)
+        model_out = self.construct(combined, t, text_embed=text_embed, mask=mask, **kwargs)
         # For exact reproducibility reasons, we apply classifier-free guidance on only
         # three channels by default. The standard approach to cfg applies it to all channels.
         # This can be done by uncommenting the following line and commenting-out the line following that.

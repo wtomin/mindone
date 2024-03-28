@@ -57,10 +57,10 @@ class T5Embedder(nn.Cell):
         self.tokenizer.context_length = model_max_length
         self.model = model
 
-    def construct(self, text_tokens: Tensor, attention_mask: Tensor = None):
+    def construct(self, text_tokens: Tensor, mask: Tensor = None):
         text_encoder_embs = self.model(
             input_ids=text_tokens,
-            attention_mask=attention_mask,
+            attention_mask=mask,
         )
         if isinstance(text_encoder_embs, (list, tuple)):
             text_encoder_embs = text_encoder_embs[0]

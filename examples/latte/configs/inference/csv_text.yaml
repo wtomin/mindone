@@ -3,7 +3,6 @@ condition: "text"
 text_encoder: "t5"
 clip_checkpoint: ""
 t5_cache_folder: "models/t5-v1_1-xxl/"
-output_path: outputs/csv_pkl_text_train/
 
 # model
 image_size: 512
