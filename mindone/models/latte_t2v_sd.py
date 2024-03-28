@@ -161,7 +161,7 @@ class BasicTransformerBlock(nn.Cell):
         self.attn2 = MultiHeadCrossAttention(
             dim=hidden_size, num_heads=num_heads, qkv_bias=True, context_dim=context_dim, **block_kwargs
         )  # is self-attn if context is none
-        self.norm_crossattn = nn.LayerNorm([hidden_size], epsilon=1e-06)
+        self.norm_crossattn = LayerNorm(hidden_size, epsilon=1e-06)
 
     def construct(self, x, c, context=None, mask=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, axis=1)

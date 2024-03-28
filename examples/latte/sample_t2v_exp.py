@@ -100,6 +100,20 @@ def parse_args():
         help="latte checkpoint path. If specified, will load from it, otherwise, will use random initialization",
     )
     parser.add_argument(
+        "--text_encoder",
+        default=None,
+        type=str,
+        choices=["clip", "t5"],
+        help="text encoder for extract text embeddings: clip text encoder or t5-v1_1-xxl.",
+    )
+    parser.add_argument("--t5_cache_folder", default=None, type=str, help="the T5 cache folder path")
+    parser.add_argument(
+        "--clip_checkpoint",
+        type=str,
+        default=None,
+        help="CLIP text encoder checkpoint (or sd checkpoint to only load the text encoder part.)",
+    )
+    parser.add_argument(
         "--vae_checkpoint",
         type=str,
         default="models/sd-vae-ft-mse.ckpt",
@@ -212,14 +226,15 @@ if __name__ == "__main__":
     else:
         model_dtype = ms.float32
 
-    if len(args.pretrained_model_path) > 0:
-        param_dict = ms.load_checkpoint(args.pretrained_model_path)
-        logger.info(f"Loading ckpt {args.pretrained_model_path} into Latte...")
+    if len(args.checkpoint) > 0:
+        param_dict = ms.load_checkpoint(args.checkpoint)
+        logger.info(f"Loading ckpt {args.checkpoint} into Latte")
         # in case a save ckpt with "network." prefix, removing it before loading
         param_dict = remove_pname_prefix(param_dict, prefix="network.")
         latte_model.load_params_from_ckpt(param_dict)
     else:
-        logger.info("Use random initialization for Latte")
+        logger.warning("Latte uses random initialization!")
+
     latte_model = latte_model.set_train(False)
     for param in latte_model.get_parameters():  # freeze latte_model
         param.requires_grad = False
@@ -234,11 +249,9 @@ if __name__ == "__main__":
     vae = vae.set_train(False)
     for param in vae.get_parameters():  # freeze vae
         param.requires_grad = False
-    # Labels to condition the model with (feel free to change):
-    # Create sampling noise:
-    # Labels to condition the model with (feel free to change):
-    # Create sampling noise:
+
     if args.condition == "class":
+        # Labels to condition the model with (feel free to change):
         class_labels = [1, 13, 100]
         n = len(class_labels)
         y = Tensor(class_labels)
