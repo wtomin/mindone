@@ -1,9 +1,9 @@
 # model
-condition: "class"
-num_classes: 1000
+condition: "text"
+num_classes:
 image_size: 256
 num_frames: 16
-model_name: "Latte-XL/2"
+model_name: "Latte-t2v-XL/2"
 checkpoint: "path/to/ckpt"
 vae_checkpoint: "models/sd-vae-ft-mse.ckpt"
 sd_scale_factor: 0.18215
@@ -15,3 +15,8 @@ sampling_steps: 250
 guidance_scale: 7.0
 seed: 42
 ddim_sampling: False
+
+captions:
+- "a woman with blue paint on her face"
+- "a man in black is doing a karate move"
+- "a laptop with the word secure sharing on it"

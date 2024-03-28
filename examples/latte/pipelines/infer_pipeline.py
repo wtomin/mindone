@@ -87,6 +87,14 @@ class InferPipeline(ABC):
 
     def data_prepare(self, inputs):
         x = inputs["noise"]
+        # if text_tokens (or mask) exist in inputs, extract text embedding
+        if "text_tokens" in inputs:
+            mask = inputs.get("mask", None)
+            text_emb = self.get_condition_embeddings(inputs["text_tokens"], **{"mask": mask})
+            # replace "y" in inputs by text_emb
+            inputs["y"] = text_emb
+            inputs["y_null"] = ops.zeros_like(text_emb)
+
         if self.use_cfg:
             y = ops.cat([inputs["y"], inputs["y_null"]], axis=0)
             x_in = ops.concat([x] * 2, axis=0)
@@ -95,6 +103,11 @@ class InferPipeline(ABC):
             x_in = x
             y = inputs["y"]
         return x_in, y
+
+    def get_condition_embeddings(self, text_tokens, **kwargs):
+        # text conditions inputs for cross-attention
+        text_emb = ops.stop_gradient(self.text_encoder(text_tokens, **kwargs))
+        return text_emb
 
     def __call__(self, inputs):
         """
@@ -105,14 +118,19 @@ class InferPipeline(ABC):
             images (b H W 3)
         """
         z, y = self.data_prepare(inputs)
+        mask = inputs.get("mask", None)
         if self.use_cfg:
             model_kwargs = dict(y=y, cfg_scale=self.guidance_rescale)
+            if mask is not None:
+                model_kwargs["mask"] = mask
             latents = self.sampling_func(
                 self.model.construct_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True
             )
             latents, _ = latents.chunk(2, axis=0)
         else:
             model_kwargs = dict(y=y)
+            if mask is not None:
+                model_kwargs["mask"] = mask
             latents = self.sampling_func(
                 self.model.construct, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True
             )
