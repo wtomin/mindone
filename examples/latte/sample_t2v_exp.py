@@ -276,10 +276,12 @@ if __name__ == "__main__":
     pipeline = InferPipeline(
         latte_model,
         vae,
+        text_encoder=text_encoder,
         scale_factor=args.sd_scale_factor,
         num_inference_steps=args.sampling_steps,
         guidance_rescale=args.guidance_scale,
         ddim_sampling=args.ddim_sampling,
+        condition=args.condition,
     )
 
     # 4. print key info

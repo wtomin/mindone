@@ -25,6 +25,7 @@ class InferPipeline(ABC):
         model,
         vae,
         text_encoder=None,
+        condition: str = None,
         scale_factor=1.0,
         guidance_rescale=1.0,
         num_inference_steps=50,
@@ -32,6 +33,7 @@ class InferPipeline(ABC):
     ):
         super().__init__()
         self.model = model
+        self.condition = condition
 
         self.vae = vae
         self.scale_factor = scale_factor
@@ -87,21 +89,29 @@ class InferPipeline(ABC):
 
     def data_prepare(self, inputs):
         x = inputs["noise"]
-        # if text_tokens (or mask) exist in inputs, extract text embedding
-        if "text_tokens" in inputs:
-            mask = inputs.get("mask", None)
-            text_emb = self.get_condition_embeddings(inputs["text_tokens"], **{"mask": mask})
-            # replace "y" in inputs by text_emb
-            inputs["y"] = text_emb
-            inputs["y_null"] = ops.zeros_like(text_emb)
 
-        if self.use_cfg:
-            y = ops.cat([inputs["y"], inputs["y_null"]], axis=0)
-            x_in = ops.concat([x] * 2, axis=0)
-            assert y.shape[0] == x_in.shape[0], "shape mismatch!"
+        if self.condition == "text":
+            text_tokens = inputs["text_tokens"]
+            mask = inputs.get("mask", None)
+            text_emb = self.get_condition_embeddings(text_tokens, **{"mask": mask})
+            if self.use_cfg:
+                y, y_null = text_emb, ops.zeros_like(text_emb)
+                y = ops.cat([y, y_null], axis=0)
+                x_in = ops.concat([x] * 2, axis=0)
+                assert y.shape[0] == x_in.shape[0], "shape mismatch!"
+                if mask is not None:
+                    inputs["mask"] = ops.concat([mask] * 2, axis=0)
+            else:
+                x_in = x
+                y = text_emb
         else:
-            x_in = x
-            y = inputs["y"]
+            if self.use_cfg:
+                y = ops.cat([inputs["y"], inputs["y_null"]], axis=0)
+                x_in = ops.concat([x] * 2, axis=0)
+                assert y.shape[0] == x_in.shape[0], "shape mismatch!"
+            else:
+                x_in = x
+                y = inputs["y"]
         return x_in, y
 
     def get_condition_embeddings(self, text_tokens, **kwargs):
@@ -118,19 +128,25 @@ class InferPipeline(ABC):
             images (b H W 3)
         """
         z, y = self.data_prepare(inputs)
-        mask = inputs.get("mask", None)
-        if self.use_cfg:
-            model_kwargs = dict(y=y, cfg_scale=self.guidance_rescale)
+        # prepare model key arguments for sampling
+        # class condition, keys include "y", "cfg_scale"(optional)
+        # None condition, keys include "y", "cfg_scale"(optional)
+        # text condition, keys include "text_embed", "mask"(optional), "cfg_scale"(optional)
+        if self.condition == "text":
+            mask = inputs.get("mask", None)
+            model_kwargs = dict(text_embed=y)
             if mask is not None:
                 model_kwargs["mask"] = mask
+        else:
+            model_kwargs = dict(y=y)
+
+        if self.use_cfg:
+            model_kwargs["cfg_scale"] = self.guidance_rescale
             latents = self.sampling_func(
                 self.model.construct_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True
             )
             latents, _ = latents.chunk(2, axis=0)
         else:
-            model_kwargs = dict(y=y)
-            if mask is not None:
-                model_kwargs["mask"] = mask
             latents = self.sampling_func(
                 self.model.construct, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True
             )
