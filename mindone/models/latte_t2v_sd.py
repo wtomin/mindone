@@ -339,6 +339,7 @@ class Latte_T2V_SD(nn.Cell):
                 mask_temp = None
         else:
             text_embed_spatial, text_embed_temp = None, None
+            mask_spatial, mask_temp = None, None
 
         for i in range(0, len(self.blocks), 2):
             spatial_block, temp_block = self.blocks[i : i + 2]
