@@ -27,8 +27,6 @@ from mindspore import Tensor
 from mindspore import log as logger
 from mindspore import ops
 
-from .legacy import arange
-
 
 class CellUtilMixin:
     """
@@ -42,19 +40,17 @@ class CellUtilMixin:
         """
         return mindspore.float32
 
-    @staticmethod
-    def create_extended_attention_mask_for_decoder(input_shape, attention_mask):
+    # @staticmethod
+    def create_extended_attention_mask_for_decoder(self, input_shape, attention_mask):
         """create_extended_attention_mask_for_decoder"""
         batch_size, seq_length = input_shape
-        seq_ids = arange(seq_length)
-        # causal_mask = ops.tile((seq_ids[None, None, :]).astype(mindspore.int32),\
-        #  (batch_size, seq_length, 1)) <= seq_ids[None, :, None] # mindspore 2.0
-        causal_mask = (
-            Tensor(np.tile(seq_ids[None, None, :].asnumpy(), (batch_size, seq_length, 1))) <= seq_ids[None, :, None]
-        )
+        seq_ids = np.arange(seq_length)
+        # causal_mask = ops.tile((seq_ids[None, None, :]).astype(mindspore.int32), (batch_size, seq_length, 1)) <= seq_ids[None, :, None] # mindspore 2.0
+        causal_mask = np.tile(seq_ids[None, None, :], (batch_size, seq_length, 1)) < seq_ids[None, :, None]
+
         # in case past_key_values are used we need to add a prefix ones mask to the causal mask
         # causal and attention masks must have same type with pytorch version < 1.3
-        causal_mask = causal_mask.astype(attention_mask.dtype)
+        causal_mask = Tensor(causal_mask, dtype=attention_mask.dtype)
 
         if causal_mask.shape[1] < attention_mask.shape[1]:
             prefix_seq_len = attention_mask.shape[1] - causal_mask.shape[1]
@@ -122,10 +118,8 @@ class CellUtilMixin:
             # - if the model is a decoder, apply a causal mask in addition to the padding mask
             # - if the model is an encoder, make the mask broadcastable
             #   to [batch_size, num_heads, seq_length, seq_length]
-            if self.config.is_decoder:
-                extended_attention_mask = CellUtilMixin.create_extended_attention_mask_for_decoder(
-                    input_shape, attention_mask
-                )
+            if self.is_decoder:
+                extended_attention_mask = self.create_extended_attention_mask_for_decoder(input_shape, attention_mask)
             else:
                 extended_attention_mask = attention_mask[:, None, None, :]
         else:
