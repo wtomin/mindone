@@ -29,8 +29,8 @@ weight_decay: 0.0
 epochs: 3000
 
 use_ema: True
-clip_grad: False  # original repo applies clip grad after 20k steps
-max_grad_norm: 0.1
+clip_grad: True  # original repo applies clip grad after 20k steps
+max_grad_norm: 1.0
 ckpt_max_keep: 3
 init_loss_scale: 65536
 
