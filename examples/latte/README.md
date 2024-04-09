@@ -302,7 +302,7 @@ Please take [4.2](#42-training-with-embedding-cache) as a reference for distribu
 python sample_t2v_exp.py --config configs/inference/csv_text.yaml
 ```
 
-### 5.5 Evaluation
+### 5.5 Performance
 
 
 The training speed of the text-conditioned video experiments with `512x512` frame size is to be released soon.
