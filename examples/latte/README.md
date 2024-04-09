@@ -28,7 +28,7 @@ This tutorial includes:
 - [x] Training un-conditional Latte on Sky TimeLapse dataset: support training (1) with videos ; and (2) with embedding cache;
 - [x] Mixed Precision: support (1) Float16; (2) BFloat16 (set patch_embedder to "linear");
 - [x] Standalone training and distributed training.
-- [ ] Text-to-Video Latte inference and training.
+- [x] Text-to-Video Latte inference and training (Experimental).
 
 ### 2.1 Environment Setup
 
@@ -76,7 +76,7 @@ python tools/vae_converter.py --source path/to/vae/ckpt --target models/sd-vae-f
 
 For example, to run inference of `skytimelapse.ckpt` model with the `256x256` image size on Ascend devices, you can use:
 ```bash
-python sample.py -c configs/inference/sky.yaml
+python sample.py -c configs/inference/sky_uncond.yaml
 ```
 
 Some of the generated results are shown here:
@@ -93,12 +93,14 @@ Some of the generated results are shown here:
     </tr>
 </table>
 <p align="center">
-  <em> Figure 2. The generated videos of the pretrained model converted from the torch checkpoint. </em>
+  <em> Figure 2. The generated videos (16x256x256) of the pretrained model converted from the torch checkpoint. </em>
 </p>
 
 ## 4. Training (Unconditional Video Generation)
 
 ### 4.1 Training With Videos
+
+#### 4.1.1 Dataset
 
 Now, we support training Latte model on the Sky Timelapse dataset, a video dataset which can be downloaded from https://github.com/weixiong-ur/mdgan.
 
@@ -113,9 +115,27 @@ sky_train/
 └── ...
 ```
 
-First, edit the configuration file `configs/training/datasets/sky_video_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`.
+First, edit the dataset configuration file `configs/training/datasets/sky_video_uncond.yaml`. Change the `data_folder` from `""` to the absolute path to `sky_train/`. For example,
 
-Then, you can start standalone training on Ascend devices using:
+```yaml
+data_config:
+  data_folder: "path-to-sky_train"
+  train_data_type: "video_file"
+  sample_stride: 3
+  use_safer_augment: True
+  image_video_joint: False
+  use_image_num:
+  num_parallel_workers: 8
+  max_rowsize: 64
+  shuffle: True
+```
+Here `sample_stride: 3` means the frames loaded in each video file will be sampled at a stride of $3$. `use_safer_augment: True` means to use resizing and center-croping as the transformation functions, while disanbling random horizontal flip (applied when `use_safer_augment` is `False`).
+
+By default, we disable image-video joint training. If `image_video_joint` is `True` and `use_image_num` is $8$, in addition, the `num_frames` in `configs/training/sky_video_uncond.yaml` is set to 16, this means for a single 16-frame sample, we load 8 consecutive frames from one video and 8 randomly-selected images from all videos. Both the video frames and images will be used for training.
+
+#### 4.1.2 Standalone Training
+
+Then, you can start standalone training (single-card) on Ascend devices using:
 ```bash
 python train.py -c configs/training/sky_video_uncond.yaml
 ```
@@ -141,10 +161,12 @@ The number of epochs is set to a large number to ensure convergence. You can ter
     </tr>
 </table>
 <p align="center">
-  <em> Figure 3. The generated videos of the Latte model trained for 1700 epochs (about 500k steps). </em>
+  <em> Figure 3. The generated videos (16x256x256) of the Latte model trained for 1700 epochs (about 500k steps). </em>
 </p>
 
 ### 4.2 Training With Embedding Cache
+
+We still use the Sky Timelapse dataset as an example. Please refer to [Sec 4.1.1](#411-dataset) for dataset downloading.
 
 We can accelerate the training speed by caching the embeddings of the dataset before running the training script. This takes three steps:
 
@@ -186,7 +208,7 @@ python train.py -c configs/training/sky_numpy_uncond.yaml
 
 Note that in `sky_numpy_uncond.yaml`, we use a large number of frames $128$ and a smaller sample stride $1$, which are different from the settings in `sky_video_uncond.yaml` (num_frames=16 and stride=3)· Embedding caching allows us to train Latte to generate more frames with a larger frame rate.
 
-Due to the memory limit, we set the local batch size to $1$ and use a gradient accumulation steps $4$. The number of epochs is $3000$, which corresponds to around 800k steps. You can terminate the training when it's ready.
+Due to the memory limit, we set the local batch size to $1$ and use a gradient accumulation steps $4$. The number of epochs is $3000$, which corresponds to around 800k steps. You can terminate the training when it's ready. Check more configurations in `configs/training/sky_numpy_uncond.yaml`.
 
 In case of OOM, please set `enable_flash_attention: True` in the `configs/training/sky_numpy_uncond.yaml`. It can reduce the memory cost and also accelerate the training speed.
 
@@ -220,9 +242,29 @@ The training speed of the unconditional video experiments with `256x256` image s
 | 1     | ON        | ON                | ON           | 93.6           |
 | 4     | ON        | ON                | ON           | 368.3          |
 
+
+After training with embedding cache for 700 epochs (about 185k steps) with `128x256x256` data shape, we ran inference with the saved checkpoint and obtained the following results.
+
+<table class="center">
+    <tr style="line-height: 0">
+    <td width=33% style="border: none; text-align: center">Example 1</td>
+    <td width=33% style="border: none; text-align: center">Example 2</td>
+    <td width=33% style="border: none; text-align: center">Example 3</td>
+    </tr>
+    <tr>
+    <td width=33% style="border: none"><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/latte/sky/epochs-700-128frames-0.gif" style="width:100%"></td>
+    <td width=33% style="border: none"><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/latte/sky/epochs-700-128frames-1.gif" style="width:100%"></td>
+    <td width=33% style="border: none"><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/latte/sky/epochs-700-128frames-2.gif" style="width:100%"></td>
+    </tr>
+</table>
+<p align="center">
+  <em> Figure 4. The generated videos (128x256x256) of the Latte model trained for 700 epochs (about 185k steps). </em>
+</p>
+
+
 ## 5. Training (Text-To-Video Generation, Experimental)
 
-Here we provide an experimental feature of training a text-to-video latte model using T5 model as the text encoder.
+Here we provide an experimental feature of training a text-to-video (T2V) latte model using T5 model as the text encoder. The structure of this T2V model is closely related to the structure of Latte. By inserting a cross-attention layer after the self-attention layer in each spatial block or temporal block, we allow text embedding as conditions to guide the video generation.
 
 ### 5.1 Text Encoder
 
@@ -276,7 +318,23 @@ You can start standalone training on Ascend devices using:
 ```bash
 python train_t2v_exp.py -c configs/training/csv_video_text.yaml
 ```
-It is highly risky of OOM to train with raw videos and captions. Therefore, we recommend to extract embeddings before running training experiments.
+The dataset configuration file is `configs/training/datasets/csv_video_text.yaml`. In this yaml file, you can set the data folder path, the csv file path, the frame sample stride, and so on:
+```yaml
+data_config:
+  condition: "text"
+  data_folder: "imagenet_samples/videos/"
+  csv_path: "imagenet_samples/videos/video_caption.csv"
+  sample_stride: 1  # use small sample stride for toy dataset with short lengths. Change it to large sample stride for longer videos
+  video_column: "video"
+  class_column:
+  caption_column: "caption"
+  use_safer_augment: True
+  image_video_joint: False
+  use_image_num:
+```
+
+
+It is inefficient to train with raw videos and captions. Therefore, we recommend to extract embeddings before running training experiments.
 
 
 ### 5.4 Training with Embedding Cache
