@@ -226,7 +226,7 @@ Here we provide an experimental feature of training a text-to-video latte model 
 
 ### 5.1 Text Encoder
 
-Please download the cache folder of the `t5-v1_1-xxl` model from PixArt-alpha's [URL](https://huggingface.co/PixArt-alpha/PixArt-alpha/tree/main/t5-v1_1-xxl), and place it under `models/`. The t5 cache folder looks like:
+Please download the cache folder of the `t5-v1_1-xxl` model from HuggingFace [URL](https://huggingface.co/DeepFloyd/t5-v1_1-xxl/tree/main), and place it under `models/`. The t5 cache folder looks like:
 
 ```bash
 models/t5-v1_1-xxl/
@@ -268,7 +268,7 @@ Checking the CSV file, you will find:
 | n02085936_Maltese_dog_153.mp4 | "a Maltese dog squats beside the bed and looks into the camera" | 153|
 ...
 
-The two columns `video` and `caption` are essential for text-to-video model training, while the third column `class` is optional. `class` is required for class-conditioned model training.
+The two columns `video` and `caption` are essential for text-to-video model training, while the third column `class` is optional. `class` is only required for class-conditioned model training.
 
 ### 5.3 Training with Videos
 
@@ -294,6 +294,20 @@ After the embeddings are saved in the cache folder, you can set the `data_folder
 ```bash
 python train.py -c configs/training/csv_numpy_text.yaml
 ```
+
+The same applies to `csv_pkl_text.yaml` if you want to save the embeddings in `.pkl` files.
+
+Please take [4.2](#42-training-with-embedding-cache) as a reference for distributed training. After the checkpoints being saved, please edit the `checkpoint` in the file `configs/inference/csv_text.yaml`, and then run inference using:
+```bash
+python sample_t2v_exp.py --config configs/inference/csv_text.yaml
+```
+
+### 5.5 Evaluation
+
+
+The training speed of the text-conditioned video experiments with `512x512` frame size is to be released soon.
+
+
 # References
 
 [1] Xin Ma, Yaohui Wang, Gengyun Jia, Xinyuan Chen, Ziwei Liu, Yuan-Fang Li, Cunjian Chen, Yu Qiao: Latte: Latent Diffusion Transformer for Video Generation. CoRR abs/2401.03048 (2024)
