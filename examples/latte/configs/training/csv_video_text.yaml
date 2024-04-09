@@ -6,7 +6,7 @@ t5_cache_folder: "models/t5-v1_1-xxl/"
 output_path: outputs/csv_video_text_train/
 
 # model setting
-image_size: 256
+image_size: 512
 num_frames: 16
 num_classes:
 model_name: "Latte-t2v-XL/2"
@@ -19,14 +19,14 @@ dtype: "fp16"
 # data setting
 dataset_name: "csv"
 data_config_file: "configs/training/datasets/csv_video_text.yaml"
-dataset_sink_mode: False
+dataset_sink_mode: True
 
 # training hyper-params
 start_learning_rate: 1e-4
 scheduler: "constant"
 warmup_steps: 10
 train_batch_size: 1
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 4
 weight_decay: 0.01
 epochs: 3000
 
