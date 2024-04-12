@@ -289,11 +289,14 @@ class SelfAttention(nn.Cell):
         head_dim = q.shape[-1] // h
         # convert sequence mask to attention mask: (b, q_n) to (b, q_n, k_n)
         if mask is not None:
-            mask = self.reshape(mask, (mask.shape[0], -1))
-            attn_mask = ops.zeros((q_b, q_n, k_n), self.dtype)
-            mask = ops.expand_dims(mask, axis=1)  # (q_b, q_n, 1)
-            attn_mask = attn_mask.masked_fill(~mask, -ms.numpy.inf)
-            mask = attn_mask
+            if mask.dim() == 2:
+                mask = self.reshape(mask, (mask.shape[0], -1))
+                attn_mask = ops.zeros((q_b, q_n, k_n), self.dtype)
+                mask = ops.expand_dims(mask, axis=1)  # (q_b, q_n, 1)
+                attn_mask = attn_mask.masked_fill(~mask, -ms.numpy.inf)
+                mask = attn_mask
+            elif mask.dim() != 3:
+                raise ValueError(f"mask should be 2D or 3D, but got {mask.dim()}D")
 
         if (
             self.enable_flash_attention and q_n % 16 == 0 and k_n % 16 == 0 and head_dim <= 256
