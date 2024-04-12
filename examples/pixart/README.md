@@ -47,7 +47,7 @@ models/
 
 You can run text-to-image sampling using `sample.py`. Given a txt file `asset/samples.txt`, which contains lines of captions, you can run sampling with:
 ```bash
-python sample.py --txt_file assets/samples.txt
+python sample.py --txt_file asset/samples.txt
 ```
 
 It will save the generated images under `samples/{time-stamps}/`.

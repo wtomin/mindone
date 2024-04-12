@@ -6,7 +6,6 @@ import sys
 
 import numpy as np
 import yaml
-from modules.t5 import T5Embedder
 from PIL import Image
 from pipelines import InferPipeline
 from tqdm import tqdm
@@ -29,6 +28,7 @@ sys.path.insert(0, mindone_lib_path)
 
 
 from modules.autoencoder import SD_CONFIG, AutoencoderKL
+from text_encoders.t5_embedder import T5Embedder
 
 from mindone.models.pixart import PixArt_XL_2, PixArtMS_XL_2
 from mindone.utils.amp import auto_mixed_precision
@@ -265,6 +265,7 @@ if __name__ == "__main__":
         ddim_sampling=args.ddim_sampling,
     )
     # prepare dataset
+
     with open(args.txt_file, "r") as f:
         items = [item.strip() for item in f.readlines()]
     # 4. print key info
