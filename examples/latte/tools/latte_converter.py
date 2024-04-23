@@ -46,6 +46,8 @@ def torch_to_ms_weight(source_fp, target_fp):
         source_data = source_data["ema"]
     if "state_dict" in source_data:
         source_data = source_data["state_dict"]
+    if "model" in source_data:
+        source_data = source_data["model"]
     target_data = []
     for _name_pt in source_data:
         _name_ms = convert_pt_name_to_ms(_name_pt)
