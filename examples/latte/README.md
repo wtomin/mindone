@@ -28,7 +28,7 @@ This tutorial includes:
 - [x] Training un-conditional Latte on Sky TimeLapse dataset: support training (1) with videos ; and (2) with embedding cache;
 - [x] Mixed Precision: support (1) Float16; (2) BFloat16 (set patch_embedder to "linear");
 - [x] Standalone training and distributed training.
-- [x] Text-to-Video Latte inference and training (Experimental).
+- [ ] Text-to-Video Latte inference and training (Experimental).
 
 ### 2.1 Environment Setup
 
@@ -260,110 +260,6 @@ After training with embedding cache for 700 epochs (about 185k steps) with `128x
 <p align="center">
   <em> Figure 4. The generated videos (128x256x256) of the Latte model trained for 700 epochs (about 185k steps). </em>
 </p>
-
-
-## 5. Training (Text-To-Video Generation, Experimental)
-
-Here we provide an experimental feature of training a text-to-video (T2V) latte model using T5 model as the text encoder. The structure of this T2V model is closely related to the structure of Latte. By inserting a cross-attention layer after the self-attention layer in each spatial block or temporal block, we allow text embedding as conditions to guide the video generation.
-
-### 5.1 Text Encoder
-
-Please download the cache folder of the `t5-v1_1-xxl` model from HuggingFace [URL](https://huggingface.co/DeepFloyd/t5-v1_1-xxl/tree/main), and place it under `models/`. The t5 cache folder looks like:
-
-```bash
-models/t5-v1_1-xxl/
-├── config.json
-├── pytorch_model-00001-of-00002.bin
-├── pytorch_model-00002-of-00002.bin
-├── pytorch_model.bin.index.json
-├── special_tokens_map.json
-├── spiece.model
-└── tokenizer_config.json
-```
-
-Then, you can convert the T5 Torch checkpoint to a MindSpore checkpoint using:
-
-```bash
-python tools/t5_converter.py --source models/t5-v1_1-xxl/pytorch_model-00001-of-00002.bin  models/t5-v1_1-xxl/pytorch_model-00002-of-00002.bin --target models/t5-v1_1-xxl/model.ckpt
-```
-
-### 5.2 Dataset Preparation
-
-In general, we need to prepare video-caption pairs to train a text-to-video latte model. As for the dataset format, we provide a toy CSV dataset which can be downloaded by:
-```bash
-bash scripts/download_toy_csvdataset.sh
-```
-Afterwards, the dataset is downloaded into `imagenet_samples/videos/`, like this:
-```bash
-imagenet_samples/videos/
-├── n01644373_tree_frog_31.mp4
-├── n02085936_Maltese_dog_153.mp4
-├── n04146614_school_bus_779.mp4
-└── video_caption.csv
-```
-
-Checking the CSV file, you will find:
-
-| video | caption | class|
-| ---   | ---     | ---  |
-| n01644373_tree_frog_31.mp4 | "a tree frog perches on a branch in the tropical rainforest" | 3|
-| n02085936_Maltese_dog_153.mp4 | "a Maltese dog squats beside the bed and looks into the camera" | 153|
-...
-
-The two columns `video` and `caption` are essential for text-to-video model training, while the third column `class` is optional. `class` is only required for class-conditioned model training.
-
-### 5.3 Training with Videos
-
-You can start standalone training on Ascend devices using:
-```bash
-python train_t2v_exp.py -c configs/training/csv_video_text.yaml
-```
-The dataset configuration file is `configs/training/datasets/csv_video_text.yaml`. In this yaml file, you can set the data folder path, the csv file path, the frame sample stride, and so on:
-```yaml
-data_config:
-  condition: "text"
-  data_folder: "imagenet_samples/videos/"
-  csv_path: "imagenet_samples/videos/video_caption.csv"
-  sample_stride: 1  # use small sample stride for toy dataset with short lengths. Change it to large sample stride for longer videos
-  video_column: "video"
-  class_column:
-  caption_column: "caption"
-  use_safer_augment: True
-  image_video_joint: False
-  use_image_num:
-```
-
-
-It is inefficient to train with raw videos and captions. Therefore, we recommend to extract embeddings before running training experiments.
-
-
-### 5.4 Training with Embedding Cache
-
-Similar to Sec [4.2](#42-training-with-embedding-cache), please extract the visual latent embeddings and the text embeddings as well as the token masks beforehand.
-
-You can start saving the embeddings using:
-```bash
-python tools/embedding_cache.py --config configs/training/csv_video_text.yaml --cache_folder path/to/cache/folder --cache_file_type numpy
-```
-
-Please take the example in [4.2](#42-training-with-embedding-cache) as a reference to use `tools/embedding_cache.py`.
-
-After the embeddings are saved in the cache folder, you can set the `data_folder` to the cache folder in `configs/training/datasets/csv_numpy_text.yaml`. Then, you can start the training using:
-```bash
-python train.py -c configs/training/csv_numpy_text.yaml
-```
-
-The same applies to `csv_pkl_text.yaml` if you want to save the embeddings in `.pkl` files.
-
-Please take [4.2](#42-training-with-embedding-cache) as a reference for distributed training. After the checkpoints being saved, please edit the `checkpoint` in the file `configs/inference/csv_text.yaml`, and then run inference using:
-```bash
-python sample_t2v_exp.py --config configs/inference/csv_text.yaml
-```
-
-### 5.5 Performance
-
-
-The training speed of the text-conditioned video experiments with `512x512` frame size is to be released soon.
 
 
 # References
