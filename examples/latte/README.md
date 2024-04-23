@@ -28,7 +28,7 @@ This tutorial includes:
 - [x] Training un-conditional Latte on Sky TimeLapse dataset: support training (1) with videos ; and (2) with embedding cache;
 - [x] Mixed Precision: support (1) Float16; (2) BFloat16 (set patch_embedder to "linear");
 - [x] Standalone training and distributed training.
-- [ ] Text-to-Video Latte inference and training (Experimental).
+- [ ] Text-to-Video Latte inference and training.
 
 ### 2.1 Environment Setup
 

@@ -188,7 +188,6 @@ def parse_train_args(parser):
         help="the condition types: `None` means using no conditions; `text` means using text embedding as conditions;"
         " `class` means using class labels as conditions.",
     )
-    parser.add_argument("--t5_cache_folder", default=None, type=str, help="the T5 cache folder path")
     parser.add_argument("--log_interval", type=int, default=1, help="log interval")
     return parser
 
