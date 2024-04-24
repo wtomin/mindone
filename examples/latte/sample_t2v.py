@@ -5,24 +5,28 @@ import os
 import sys
 import time
 
+import numpy as np
 import yaml
-from modules.text_encoders import get_text_encoder_and_tokenizer
-from pipelines import InferPipeline
-from utils.model_utils import _check_cfgs_in_parser, count_params, remove_pname_prefix, str2bool
+
+# from modules.text_encoders import get_text_encoder_and_tokenizer
+# from pipelines import InferPipeline
+from utils.model_utils import _check_cfgs_in_parser, count_params, str2bool
 
 import mindspore as ms
-from mindspore import Tensor, ops
+from mindspore import nn
 
 # TODO: remove in future when mindone is ready for install
 __dir__ = os.path.dirname(os.path.abspath(__file__))
 mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../"))
 sys.path.insert(0, mindone_lib_path)
 
+from modules.latte_t2v import Attention, LatteT2V, LayerNorm
+from pipelines.pipeline_videogen import VideoGenPipeline
+from transformers import T5Tokenizer
 
-from modules.autoencoder import SD_CONFIG, AutoencoderKL
-
-from mindone.models.latte import Latte_models
-from mindone.models.latte_t2v_sd import Latte_T2V_models
+from mindone.diffusers.models.autoencoders import AutoencoderKL, AutoencoderKLTemporalDecoder
+from mindone.diffusers.schedulers import DDIMScheduler, DDPMScheduler
+from mindone.transformers.models import T5EncoderModel
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.logger import set_logger
 from mindone.utils.seed import set_random_seed
@@ -67,10 +71,7 @@ def parse_args():
         help="number of frames",
     )
     parser.add_argument(
-        "--num_classes",
-        type=int,
-        default=1000,
-        help="number of classes, applies only when condition is `class`",
+        "--enable_vae_temporal_decoder", type=str2bool, default=True, help="whether to use AutoencoderKLTemporalDecoder"
     )
     parser.add_argument(
         "--num_samples",
@@ -96,9 +97,10 @@ def parse_args():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="",
-        help="latte checkpoint path. If specified, will load from it, otherwise, will use random initialization",
+        default="models/t2v.pt",
+        help="latte t2v checkpoint path. If specified, will load from it, otherwise, will use random initialization",
     )
+    parser.add_argument("--pretrained_model_path", type=str, default="", help="the directory to t2v required models.")
     parser.add_argument(
         "--text_encoder",
         default=None,
@@ -196,94 +198,88 @@ if __name__ == "__main__":
     # 2.1 latte
     logger.info(f"{args.model_name}-{args.image_size}x{args.image_size} init")
     latent_size = args.image_size // 8
-    MODELS_DICT = Latte_models if args.condition != "text" else Latte_T2V_models
-
-    t2v_model_extra_kwargs = {}
-    text_emb_dim = None
-    if args.condition == "text":
-        if args.text_encoder == "clip":
-            text_emb_dim = 768
-        elif args.text_encoder == "t5":
-            text_emb_dim = 4096
-        t2v_model_extra_kwargs["context_dim"] = text_emb_dim
-
-    latte_model = MODELS_DICT[args.model_name](
-        input_size=latent_size,
-        num_classes=args.num_classes,
-        block_kwargs={"enable_flash_attention": args.enable_flash_attention},
-        condition=args.condition,
-        num_frames=args.num_frames,
-        use_recompute=args.use_recompute,
-        patch_embedder=args.patch_embedder,
-        **t2v_model_extra_kwargs,
+    latte_model = LatteT2V.from_pretrained_2d(
+        args.pretrained_model_path, subfolder="transformer", video_length=args.num_frames
     )
-    if args.dtype == "fp16":
-        model_dtype = ms.float16
-        latte_model = auto_mixed_precision(latte_model, amp_level="O2", dtype=model_dtype)
-    elif args.dtype == "bf16":
-        model_dtype = ms.bfloat16
-        latte_model = auto_mixed_precision(latte_model, amp_level="O2", dtype=model_dtype)
-    else:
+    # mixed precision
+    if args.dtype == "fp32":
         model_dtype = ms.float32
+    else:
+        model_dtype = {"fp16": ms.float16, "bf16": ms.bfloat16}[args.dtype]
+        latte_model = auto_mixed_precision(
+            latte_model,
+            amp_level=args.amp_level,
+            dtype=model_dtype,
+            custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU],
+        )
 
     if len(args.checkpoint) > 0:
-        param_dict = ms.load_checkpoint(args.checkpoint)
         logger.info(f"Loading ckpt {args.checkpoint} into Latte")
-        # in case a save ckpt with "network." prefix, removing it before loading
-        param_dict = remove_pname_prefix(param_dict, prefix="network.")
-        latte_model.load_params_from_ckpt(param_dict)
+        latte_model.load_from_checkpoint(args.checkpoint)
     else:
         logger.warning("Latte uses random initialization!")
 
     latte_model = latte_model.set_train(False)
     for param in latte_model.get_parameters():  # freeze latte_model
         param.requires_grad = False
+
     # 2.2 vae
-    logger.info("vae init")
-    vae = AutoencoderKL(
-        SD_CONFIG,
-        4,
-        ckpt_path=args.vae_checkpoint,
-        use_fp16=False,  # disable amp for vae
-    )
-    vae = vae.set_train(False)
-    for param in vae.get_parameters():  # freeze vae
-        param.requires_grad = False
-
-    if args.condition == "class":
-        # Labels to condition the model with (feel free to change):
-        class_labels = [1, 13, 100]
-        n = len(class_labels)
-        y = Tensor(class_labels)
-        y_null = ops.ones_like(y) * args.num_classes
-    elif args.condition == "text":
-        if args.text_encoder == "t5":
-            ckpt_path = args.t5_cache_folder
-        elif args.text_encoder == "clip":
-            ckpt_path = args.clip_checkpoint
-        text_encoder, tokenizer = get_text_encoder_and_tokenizer(args.text_encoder, ckpt_path)
-        # extracting text tokends and attention mask?
-        n = len(args.captions)
-        assert n > 0, "No captions provided"
-        text_tokens, mask = text_encoder.get_text_tokens_and_mask(args.captions, return_tensor=True)
-        y, y_null = None, None
+    if args.enable_vae_temporal_decoder:
+        vae = AutoencoderKLTemporalDecoder.from_pretrained(args.pretrained_model_path, subfolder="vae_temporal_decoder")
     else:
-        y, y_null = None, None
-        n = args.num_samples
+        vae = AutoencoderKL.from_pretrained(args.pretrained_model_path, subfolder="vae")
 
-    z = ops.randn((n, args.num_frames, 4, latent_size, latent_size), dtype=ms.float32)
+    n = len(args.captions)
+    assert n > 0, "No captions provided"
+    if args.decode_latents:
+        for i in range(n):
+            for i_video in range(args.num_videos_per_prompt):
+                save_fp = f"{args.input_latents_dir}/{i_video}-{args.captions[i].strip()[:100]}.npy"
+                assert os.path.exists(
+                    save_fp
+                ), f"{save_fp} does not exist! Please check the `input_latents_dir` or check if you run `--save_latents` ahead."
+                loaded_latent = np.load(save_fp)
+                decode_data = vae.decode(ms.Tensor(loaded_latent) / args.sd_scale_factor)
+                decode_data = ms.ops.clip_by_value(
+                    (decode_data + 1.0) / 2.0, clip_value_min=0.0, clip_value_max=1.0
+                ).asnumpy()
+                save_fp = f"{save_dir}/{i_video}-{args.captions[i].strip()[:100]}.gif"
+                save_video_data = decode_data.transpose(0, 2, 3, 4, 1)  # (b c t h w) -> (b t h w c)
+                save_videos(save_video_data, save_fp, loop=0)
+                logger.info(f"video save to {save_fp}")
+        sys.exit()
+
+    tokenizer = T5Tokenizer.from_pretrained(args.pretrained_model_path, subfolder="tokenizer")
+    text_encoder = T5EncoderModel.from_pretrained(args.pretrained_model_path, subfolder="text_encoder")
+
     # 3. build inference pipeline
-    pipeline = InferPipeline(
-        latte_model,
-        vae,
+    if args.ddim_sampling:
+        scheduler = DDIMScheduler.from_pretrained(
+            args.pretrained_model_path,
+            subfolder="scheduler",
+            beta_start=args.beta_start,
+            beta_end=args.beta_end,
+            beta_schedule=args.beta_schedule,
+            variance_type=args.variance_type,
+        )
+    else:
+        scheduler = DDPMScheduler.from_pretrained(
+            args.pretrained_model_path,
+            subfolder="scheduler",
+            beta_start=args.beta_start,
+            beta_end=args.beta_end,
+            beta_schedule=args.beta_schedule,
+            variance_type=args.variance_type,
+        )
+    text_encoder = text_encoder.model
+    pipeline = VideoGenPipeline(
+        vae=vae,
         text_encoder=text_encoder,
-        scale_factor=args.sd_scale_factor,
-        num_inference_steps=args.sampling_steps,
-        guidance_rescale=args.guidance_scale,
-        ddim_sampling=args.ddim_sampling,
-        condition=args.condition,
+        tokenizer=tokenizer,
+        scheduler=scheduler,
+        transformer=latte_model,
+        vae_scale_factor=args.sd_scale_factor,
     )
-
     # 4. print key info
     num_params_vae, num_params_vae_trainable = count_params(vae)
     num_params_latte, num_params_latte_trainable = count_params(latte_model)
@@ -305,27 +301,45 @@ if __name__ == "__main__":
     key_info += "\n" + "=" * 50
     logger.info(key_info)
 
-    # init inputs
-    inputs = {}
-    inputs["noise"] = z
-    inputs["y"] = y  # None if condition is None; otherwise, a tensor with shape (n, )
-    inputs["y_null"] = y_null
-    inputs["scale"] = args.guidance_scale
-    if args.condition == "text":
-        inputs["text_tokens"] = text_tokens
-        inputs["mask"] = mask
-
     logger.info(f"Sampling for {n} samples with condition {args.condition}")
     start_time = time.time()
 
     # infer
-    x_samples = pipeline(inputs)
-    x_samples = x_samples.asnumpy()
+    video_grids = []
+    if not isinstance(args.captions, list):
+        args.captions = [args.captions]
+    if len(args.captions) == 1 and args.captions[0].endswith("txt"):
+        captions = open(args.captions[0], "r").readlines()
+        args.captions = [i.strip() for i in captions]
+    for prompt in args.captions:
+        print("Processing the ({}) prompt".format(prompt))
+        videos = pipeline(
+            prompt,
+            video_length=args.num_frames,
+            height=args.image_size,
+            width=args.image_size,
+            num_inference_steps=args.sampling_steps,
+            guidance_scale=args.guidance_scale,
+            enable_temporal_attentions=True,
+            num_videos_per_prompt=args.num_videos_per_prompt,
+            mask_feature=False,
+            output_type="latents" if args.save_latents else "pil",
+        ).video.asnumpy()
+        video_grids.append(videos)
+    x_samples = np.stack(video_grids, axis=0)
 
     end_time = time.time()
 
     # save result
     for i in range(n):
-        save_fp = f"{save_dir}/{i}.gif"
-        save_videos(x_samples[i : i + 1], save_fp, loop=0)
-        logger.info(f"save to {save_fp}")
+        for i_video in range(args.num_videos_per_prompt):
+            if args.save_latents:
+                save_fp = f"{save_dir}/{i_video}-{args.captions[i].strip()[:100]}.npy"
+                save_latent_data = x_samples[i : i + 1, i_video]
+                np.save(save_fp, save_latent_data)
+                logger.info(f"latent save to {save_fp}")
+            else:
+                save_fp = f"{save_dir}/{i_video}-{args.captions[i].strip()[:100]}.gif"
+                save_video_data = x_samples[i : i + 1, i_video].transpose(0, 2, 3, 4, 1)  # (b c t h w) -> (b t h w c)
+                save_videos(save_video_data, save_fp, loop=0)
+                logger.info(f"video save to {save_fp}")
