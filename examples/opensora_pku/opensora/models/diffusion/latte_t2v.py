@@ -26,6 +26,8 @@ from mindone.diffusers.models.modeling_utils import ModelMixin
 from mindone.diffusers.models.normalization import AdaLayerNorm, AdaLayerNormZero
 from mindone.models.modules.flash_attention import FLASH_IS_AVAILABLE, MSFlashAttention
 
+from .activations import GELU as SP_GELU
+from .activations import ApproximateGELU as SP_ApproximateGELU
 from .flash_attention import FlashAttentionSP
 
 # from mindone.diffusers.models.lora import LoRACompatibleConv, LoRACompatibleLinear
@@ -839,15 +841,16 @@ class SeqParallelFeedForward(nn.Cell):
         dim_out = dim_out if dim_out is not None else dim
         linear_cls = nn.Dense
         self.final_dropout = final_dropout
+        self.activation_fn = activation_fn
 
         if activation_fn == "gelu":
-            act_fn = GELU(dim, inner_dim)
+            raise NotImplementedError
         if activation_fn == "gelu-approximate":
-            act_fn = GELU(dim, inner_dim, approximate="tanh")
+            act_fn = SP_GELU(dim, inner_dim, approximate="tanh")
         elif activation_fn == "geglu":
-            act_fn = GEGLU(dim, inner_dim)
+            raise NotImplementedError
         elif activation_fn == "geglu-approximate":
-            act_fn = ApproximateGELU(dim, inner_dim)
+            act_fn = SP_ApproximateGELU(dim, inner_dim)
 
         self.net = nn.CellList([])
         # project in
@@ -876,8 +879,17 @@ class SeqParallelFeedForward(nn.Cell):
         self.dp = self.parallel_config.get("data_parallel", 1)
         self.mp = self.parallel_config.get("model_parallel", 1)
         self.sp = self.parallel_config.get("sequence_parallel", 1)
+        if self.activation_fn == "gelu-approximate":
+            self.net[0].proj.matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
+            self.net[0].proj.bias_add.shard(((self.dp * self.sp, 1), (1,)))
+            self.net[0].gelu.shard(((self.dp * self.sp, self.mp),))
+        elif self.activation_fn == "geglu-approximate":
+            self.net[0].proj.matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
+            self.net[0].proj.bias_add.shard(((self.dp * self.sp, 1), (1,)))
+            self.net[0].sigmoid.shard(((self.dp * self.sp, self.mp),))
+        else:
+            raise NotImplementedError
 
-        self.net[0].shard(((self.dp * self.sp, self.mp),))  # act_layer
         self.net[1].dropout.shard(((self.dp * self.sp, 1),))
 
         self.net[2].matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
