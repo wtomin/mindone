@@ -23,7 +23,7 @@ sys.path.insert(0, mindone_lib_path)
 from opensora.data.t2v_dataset import create_dataloader
 from opensora.diffusion import create_diffusion
 from opensora.models.ae.causal_vae_3d import TimeDownsample2x, TimeUpsample2x
-from opensora.models.diffusion.latte_t2v import Attention, Latte_models, LayerNorm
+from opensora.models.diffusion.latte_t2v import Attention, Latte_models, LayerNorm, SeqParallelAttention
 from opensora.pipelines import DiffusionWithLoss
 
 from mindone.trainers.callback import EvalSaveCallback, OverflowMonitor, ProfilerCallback
@@ -53,6 +53,9 @@ def init_env(
     parallel_mode: str = "data",
     enable_dvm: bool = False,
     mempool_block_size: str = "9GB",
+    data_parallel: int = 1,
+    use_sequence_parallel: bool = False,
+    outdir: str = "./outputs",
 ) -> Tuple[int, int, int]:
     """
     Initialize MindSpore environment.
@@ -86,7 +89,7 @@ def init_env(
             init()
             device_num = get_group_size()
             rank_id = get_rank()
-        else:
+        elif parallel_mode == "data":
             init()
             device_num = get_group_size()
             rank_id = get_rank()
@@ -97,6 +100,25 @@ def init_env(
                 parallel_mode=ms.ParallelMode.DATA_PARALLEL,
                 gradients_mean=True,
                 device_num=device_num,
+            )
+        elif parallel_mode == "semi":
+            init()
+            device_num = get_group_size()
+            rank_id = get_rank()
+            logger.debug(f"rank_id: {rank_id}, device_num: {device_num}")
+            assert use_sequence_parallel, "Expect to enable sequence parallel"
+            ms.set_auto_parallel_context(
+                parallel_mode=ms.ParallelMode.SEMI_AUTO_PARALLEL,
+                gradients_mean=False,
+                enable_parallel_optimizer=True,
+                enable_alltoall=True,
+                device_num=device_num,
+                dataset_strategy=(
+                    (data_parallel, 1, 1, 1, 1),  # video or latent
+                    (data_parallel, 1, 1),  # text embed
+                    (data_parallel, 1),  # text mask
+                ),
+                strategy_ckpt_config={"save_file": os.path.join(outdir, "src_strategy.ckpt")},
             )
 
         var_info = ["device_num", "rank_id", "device_num / 8", "rank_id / 8"]
@@ -117,6 +139,29 @@ def init_env(
         ms.set_context(enable_graph_kernel=True)
 
     return rank_id, device_num
+
+
+def check_sequence_parallel_condition(args, device_num):
+    if not args.use_parallel:
+        raise ValueError("Sequence parallelism can only be used in paralle mode.")
+
+    total_nprocs = args.data_parallel * args.model_parallel * args.sequence_parallel
+    if total_nprocs != device_num:
+        raise ValueError(
+            "The product of data parallel, model parallel and sequence parallel must be equal to the number fo devices, "
+            f"but get `{args.data_parallel}, {args.model_parallel}, {args.sequence_parallel}` and `{device_num}` respectively."
+        )
+    if args.enable_flash_attention:
+        if args.model_parallel > 12:
+            raise ValueError(f"Model parallel ({args.model_parallel}) can not be larger than the number of heads (12)")
+
+    if args.num_frames % args.sequence_parallel != 0:
+        raise ValueError(
+            f"Number of frames `{args.num_frames}` must be divisible by the sequence parallel `{args.sequence_parallel}`."
+        )
+
+    if args.model_parallel > 1:
+        raise NotImplementedError("Model parallel is not supported yet.")
 
 
 def set_all_reduce_fusion(
@@ -141,18 +186,27 @@ def main(args):
     args.output_path = os.path.join(args.output_path, time_str)
 
     # 1. init
+    parallel_mode = "semi" if args.enable_sequence_parallelism else args.parallel_mode
     rank_id, device_num = init_env(
         args.mode,
         seed=args.seed,
         distributed=args.use_parallel,
         device_target=args.device_target,
         max_device_memory=args.max_device_memory,
-        parallel_mode=args.parallel_mode,
+        parallel_mode=parallel_mode,
         enable_dvm=args.enable_dvm,
         mempool_block_size=args.mempool_block_size,
+        data_parallel=args.data_parallel,
+        use_sequence_parallel=args.enable_sequence_parallelism,
     )
-    set_logger(output_dir=args.output_path, rank=rank_id, log_level=eval(args.log_level))
-
+    set_logger(
+        log_fn="stdout.log",
+        output_dir=os.path.join(args.output_path, f"log/rank_{rank_id}"),
+        rank=rank_id,
+        log_level=eval(args.log_level),
+    )
+    if args.enable_sequence_parallelism:
+        check_sequence_parallel_condition(args, device_num)
     train_with_vae_latent = args.vae_latent_folder is not None and os.path.exists(args.vae_latent_folder)
     if train_with_vae_latent:
         logger.info("Train with vae latent cache.")
@@ -200,6 +254,12 @@ def main(args):
         video_length=video_length,
         enable_flash_attention=args.enable_flash_attention,
         use_recompute=args.use_recompute,
+        enable_sequence_parallelism=args.enable_sequence_parallelism,
+        parallel_config=dict(
+            data_parallel=args.data_parallel,
+            model_parallel=args.model_parallel,
+            sequence_parallel=args.sequence_parallel,
+        ),
     )
 
     # mixed precision
@@ -211,7 +271,7 @@ def main(args):
             latte_model,
             amp_level=args.amp_level,
             dtype=model_dtype,
-            custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU],
+            custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU, SeqParallelAttention],
         )
     # load checkpoint
     if len(args.pretrained_model_path) > 0:
@@ -236,6 +296,11 @@ def main(args):
         use_image_num=args.use_image_num,
         dtype=model_dtype,
     )
+    # do not perform optimizer parallel for one-dim tensor
+    if parallel_mode == "semi":
+        for param in latent_diffusion_with_loss.get_parameters():
+            if len(param.data.shape) == 1:
+                param.parallel_optimizer = False
 
     # 3. create dataset
     ds_config = dict(
@@ -256,15 +321,32 @@ def main(args):
         filter_nonexistent=args.filter_nonexistent,  # for loading safty
         use_image_num=args.use_image_num,
     )
-    dataset = create_dataloader(
-        ds_config,
-        batch_size=args.batch_size,
-        shuffle=True,
-        device_num=device_num,
-        rank_id=rank_id,
-        num_parallel_workers=args.num_parallel_workers,
-        max_rowsize=args.max_rowsize,
-    )
+    if args.enable_sequence_parallelism:
+        group = rank_id // (device_num // args.data_parallel)
+        print(
+            f"Creating dataloader: ID={rank_id}, group={group}, num_groups={args.data_parallel}, global_bs={args.batch_size * args.data_parallel}."
+        )
+
+        # given N cards and data parallel = dp, make sure that data are same for ID (0, ..., dp-1), (dp, ..., 2*dp-1), ..., (N-dp, ..., N-1)
+        dataset = create_dataloader(
+            ds_config,
+            batch_size=args.batch_size,
+            shuffle=True,
+            device_num=args.data_parallel,
+            rank_id=group,
+            num_parallel_workers=args.num_parallel_workers,
+            max_rowsize=args.max_rowsize,
+        )
+    else:
+        dataset = create_dataloader(
+            ds_config,
+            batch_size=args.batch_size,
+            shuffle=True,
+            device_num=device_num,
+            rank_id=rank_id,
+            num_parallel_workers=args.num_parallel_workers,
+            max_rowsize=args.max_rowsize,
+        )
     dataset_size = dataset.get_dataset_size()
 
     # 4. build training utils: lr, optim, callbacks, trainer
@@ -354,7 +436,7 @@ def main(args):
     ofm_cb = OverflowMonitor()
     callback.append(ofm_cb)
 
-    if rank_id == 0:
+    if rank_id == 0 and not args.enable_sequence_parallelism:
         save_cb = EvalSaveCallback(
             network=latent_diffusion_with_loss.network,
             rank_id=rank_id,
@@ -368,10 +450,30 @@ def main(args):
             start_epoch=start_epoch,
             model_name=args.model_version.replace("/", "-"),
             record_lr=False,
+            integrated_save=False,
         )
         callback.append(save_cb)
         if args.profile:
             callback.append(ProfilerCallback())
+    else:
+        save_cb = EvalSaveCallback(
+            network=latent_diffusion_with_loss.network,
+            rank_id=None,
+            ckpt_save_dir=os.path.join(args.output_path, "ckpt", f"rank_{rank_id}"),
+            output_dir=os.path.join(args.output_path, "log", f"rank_{rank_id}"),
+            ema=ema,
+            ckpt_save_policy="latest_k",
+            ckpt_max_keep=1,  # make sure only one ckpt is in each folder, for later ckpt merge
+            step_mode=args.step_mode,
+            ckpt_save_interval=args.ckpt_save_interval,
+            log_interval=args.log_interval,
+            start_epoch=start_epoch,
+            model_name="STDiT",
+            record_lr=False,
+            integrated_save=False,
+            save_training_resume=False,  # TODO: support training resume
+        )
+        callback.append(save_cb)
 
     # 5. log and save config
     if rank_id == 0:

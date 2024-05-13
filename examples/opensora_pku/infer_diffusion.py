@@ -24,7 +24,7 @@ sys.path.insert(0, mindone_lib_path)
 import pandas as pd
 from opensora.data.text_dataset import create_dataloader
 from opensora.models.ae.causal_vae_3d import TimeDownsample2x, TimeUpsample2x
-from opensora.models.diffusion.latte_t2v import Attention, LatteT2V, LayerNorm
+from opensora.models.diffusion.latte_t2v import Attention, LatteT2V, LayerNorm, SeqParallelAttention
 from opensora.text_encoders.t5_embedder import T5Embedder
 
 from examples.opensora_pku.opensora.pipelines import VideoGenPipeline
@@ -78,7 +78,7 @@ def init_env(
             init()
             device_num = get_group_size()
             rank_id = get_rank()
-        else:
+        elif parallel_mode == "data":
             init()
             device_num = get_group_size()
             rank_id = get_rank()
@@ -90,7 +90,17 @@ def init_env(
                 gradients_mean=True,
                 device_num=device_num,
             )
-
+        elif parallel_mode == "semi":
+            init()
+            device_num = get_group_size()
+            rank_id = get_rank()
+            logger.debug(f"rank_id: {rank_id}, device_num: {device_num}")
+            ms.set_auto_parallel_context(
+                parallel_mode=ms.ParallelMode.SEMI_AUTO_PARALLEL,
+                enable_alltoall=True,
+                device_num=device_num,
+                full_batch=True,
+            )
         var_info = ["device_num", "rank_id", "device_num / 8", "rank_id / 8"]
         var_value = [device_num, rank_id, int(device_num / 8), int(rank_id / 8)]
         logger.info(dict(zip(var_info, var_value)))
@@ -192,7 +202,11 @@ def parse_args():
     parser.add_argument("--mode", default=0, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
     parser.add_argument("--use_parallel", default=False, type=str2bool, help="use parallel")
     parser.add_argument(
-        "--parallel_mode", default="data", type=str, choices=["data", "optim"], help="parallel mode: data, optim"
+        "--parallel_mode",
+        default="data",
+        type=str,
+        choices=["data", "optim", "semi"],
+        help="parallel mode: data, optim, semi",
     )
     parser.add_argument("--enable_dvm", default=False, type=str2bool, help="enable dvm mode")
 
@@ -224,6 +238,30 @@ def parse_args():
         default=False,
         type=str2bool,
         help="whether use recompute.",
+    )
+    parser.add_argument(
+        "--enable_sequence_parallelism",
+        default=False,
+        type=str2bool,
+        help="whether to enable sequence parallelism.",
+    )
+    parser.add_argument(
+        "--data_parallel",
+        default=1,
+        type=int,
+        help="number of devices for data parallel (slicing along batch) when use sequence parallelism.",
+    )
+    parser.add_argument(
+        "--model_parallel",
+        default=1,
+        type=int,
+        help="number of devices for model parallel (slicing along heads) when use sequence parallelism.",
+    )
+    parser.add_argument(
+        "--sequence_parallel",
+        default=1,
+        type=int,
+        help="number of devices for sequence parallel (slicing along sequence length) when use sequence parallelism.",
     )
     parser.add_argument(
         "--patch_embedder",
@@ -304,6 +342,12 @@ if __name__ == "__main__":
         subfolder=args.model_version,
         enable_flash_attention=args.enable_flash_attention,
         use_recompute=args.use_recompute,
+        enable_sequence_parallelism=args.enable_sequence_parallelism,
+        parallel_config=dict(
+            data_parallel=args.data_parallel,
+            model_parallel=args.model_parallel,
+            sequence_parallel=args.sequence_parallel,
+        ),
     )
     # mixed precision
     if args.dtype == "fp32":
@@ -314,7 +358,12 @@ if __name__ == "__main__":
             latte_model,
             amp_level=args.amp_level,
             dtype=model_dtype,
-            custom_fp32_cells=[LayerNorm, Attention, nn.SiLU],
+            custom_fp32_cells=[
+                LayerNorm,
+                Attention,
+                nn.SiLU,
+                SeqParallelAttention,
+            ],
         )
 
     video_length, image_size = latte_model.config.video_length, args.image_size
@@ -407,6 +456,9 @@ if __name__ == "__main__":
             decode_data = ms.ops.clip_by_value(
                 (decode_data + 1.0) / 2.0, clip_value_min=0.0, clip_value_max=1.0
             ).asnumpy()
+            if rank_id > 0 and args.enable_sequence_parallelism:
+                continue
+            # save results
             for i_sample in range(args.batch_size):
                 save_fp = os.path.join(save_dir, file_paths[i_sample]).replace(".npy", ".gif")
                 save_video_data = decode_data[i_sample : i_sample + 1].transpose(
@@ -476,6 +528,9 @@ if __name__ == "__main__":
             mask_feature=False,
             output_type="latents" if args.save_latents else "pil",
         ).video.asnumpy()
+        if rank_id > 0 and args.enable_sequence_parallelism:
+            continue
+        # save results
         for i_sample in range(args.batch_size):
             file_path = os.path.join(save_dir, file_paths[i_sample])
             if args.save_latents:

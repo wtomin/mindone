@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 import mindspore as ms
-from mindspore import Parameter, nn, ops
+from mindspore import Parameter, Tensor, nn, ops
 from mindspore.common.initializer import initializer
 
 from mindone.diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -25,6 +25,8 @@ from mindone.diffusers.models.embeddings import (
 from mindone.diffusers.models.modeling_utils import ModelMixin
 from mindone.diffusers.models.normalization import AdaLayerNorm, AdaLayerNormZero
 from mindone.models.modules.flash_attention import FLASH_IS_AVAILABLE, MSFlashAttention
+
+from .flash_attention import FlashAttentionSP
 
 # from mindone.diffusers.models.lora import LoRACompatibleConv, LoRACompatibleLinear
 
@@ -85,6 +87,143 @@ class Attention(nn.Cell):
         out = ops.matmul(attn, v)
 
         return out
+
+
+class SeqParallelAttention(nn.Cell):
+    def __init__(
+        self,
+        num_heads: int,
+        dim_head: int,
+        attn_drop: float = 0.0,
+        has_mask: bool = False,
+        parallel_config: Dict[str, Any] = {},
+        upcast_attention=False,
+        upcast_softmax=True,
+    ) -> None:
+        super().__init__()
+        self.scale = ms.Tensor(dim_head**-0.5, dtype=ms.float32)
+        self.num_heads = num_heads
+        self.dim_head = dim_head
+        self.has_mask = has_mask
+        self.upcast_attention = upcast_attention
+        self.upcast_softmax = upcast_softmax
+
+        self.bmm = ops.BatchMatMul()
+        self.mul = ops.Mul()
+        self.softmax = ops.Softmax(axis=-1)
+        self.attn_drop = nn.Dropout(p=attn_drop)
+        self.matmul = ops.BatchMatMul()
+        self.transpose = ops.Transpose()
+        self.transpose_a2a = ops.Transpose()
+
+        self.one = ms.Tensor(1, dtype=ms.float32)
+
+        if self.has_mask:
+            self.sub = ops.Sub()
+            self.mul_mask = ops.Mul()
+            self.add = ops.Add()
+
+        self.minus_inf = Tensor(np.finfo(np.float32).min, dtype=ms.float32)
+
+        self.parallel_config = parallel_config
+        self.shard()
+
+    def _merge_head(self, x: Tensor) -> Tensor:
+        x = self.transpose(x, (0, 3, 1, 2, 4))  # (b, n, h/mp, mp, d)
+        x = self.transpose_a2a(x, (0, 1, 3, 2, 4))
+        x = ops.reshape(x, (-1, self.num_heads * self.dim_head))
+        return x
+
+    def construct(self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        # mask: (b 1 1 1 n_k), 1 - keep, 0 indicates discard.
+        if self.upcast_attention:
+            q, k, v = [x.astype(ms.float32) for x in (q, k, v)]
+        sim = self.bmm(q, k)
+        sim = self.mul(sim, self.scale)
+        if self.upcast_softmax:
+            sim = sim.astype(ms.float32)
+
+        if mask is not None:
+            assert self.has_mask
+            mask = self.sub(self.one, mask.to(ms.float32))
+            mask = self.mul_mask(mask, self.minus_inf)
+            sim = self.add(mask, sim)
+
+        attn = self.softmax(sim).astype(v.dtype)
+        attn = self.attn_drop(attn)
+        out = self.matmul(attn, v)
+        out = self._merge_head(out)
+        return out
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+
+        if self.sp > self.num_heads // self.mp:
+            self.sp_ds = self.num_heads // self.mp
+            self.sp_co = self.sp // self.sp_ds
+        else:
+            self.sp_ds = self.sp
+            self.sp_co = 1
+
+        self.bmm.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1), (self.dp, self.sp_ds, self.mp, 1, 1)))
+        self.bmm.add_prim_attr(
+            "layout",
+            {
+                "dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1),
+                "input_tensor_map": ((4, 2, 1, 3, 0), (4, 2, 1, -1, 0)),
+            },
+        )
+
+        self.mul.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1), ()))
+        self.mul.add_prim_attr(
+            "layout",
+            {"dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1), "input_tensor_map": ((4, 2, 1, 3, 0), ())},
+        )
+
+        self.softmax.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1),))
+        self.softmax.add_prim_attr(
+            "layout",
+            {"dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1), "input_tensor_map": ((4, 2, 1, 3, 0),)},
+        )
+
+        self.attn_drop.dropout.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1),))
+        self.attn_drop.dropout.add_prim_attr(
+            "layout",
+            {"dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1), "input_tensor_map": ((4, 2, 1, 3, 0),)},
+        )
+
+        self.matmul.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1), (self.dp, self.sp_ds, self.mp, 1, 1)))
+        self.matmul.add_prim_attr(
+            "layout",
+            {
+                "dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1),
+                "input_tensor_map": ((4, 2, 1, 3, 0), (4, 2, 1, -1, 0)),
+            },
+        )
+
+        self.transpose.shard(((self.dp, self.sp_ds, self.mp, self.sp_co, 1),))
+        self.transpose.add_prim_attr(
+            "layout",
+            {"dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1), "input_tensor_map": ((4, 2, 1, 3, 0),)},
+        )
+
+        self.transpose_a2a.shard(((self.dp, self.sp, 1, self.mp, 1),))
+
+        if self.has_mask:
+            self.sub.shard(((), (self.dp, 1, 1, self.sp_co, 1)))
+
+            self.mul_mask.shard(((self.dp, 1, 1, self.sp_co, 1), ()))
+
+            self.add.shard(((self.dp, 1, 1, self.sp_co, 1), (self.dp, self.sp_ds, self.mp, self.sp_co, 1)))
+            self.add.add_prim_attr(
+                "layout",
+                {
+                    "dev_matrix": (self.dp, self.sp_co, self.sp_ds, self.mp, 1),
+                    "input_tensor_map": ((4, -1, -1, 3, 0), (4, 2, 1, 3, 0)),
+                },
+            )
 
 
 class SpatialNorm(nn.Cell):
@@ -272,6 +411,205 @@ class MultiHeadAttention(nn.Cell):
             out = self._rearange_out(out, h)
 
         return self.to_out(out).to(x_dtype)
+
+
+class SeqParallelMultiHeadAttention(nn.Cell):
+    def __init__(
+        self,
+        query_dim: int,
+        cross_attention_dim: Optional[int] = None,
+        heads: int = 8,
+        dim_head: int = 64,
+        dropout: float = 0.0,
+        attn_drop: float = 0.0,
+        bias: bool = False,
+        upcast_attention: bool = False,
+        upcast_softmax: bool = True,
+        out_bias: bool = True,
+        only_cross_attention: bool = False,
+        dtype=ms.float32,
+        enable_flash_attention=False,
+        parallel_config: Dict[str, Any] = {},
+    ):
+        super().__init__()
+        assert query_dim % heads == 0, "query dim must be divisible by num_heads"
+
+        self.inner_dim = dim_head * heads
+        self.cross_attention_dim = cross_attention_dim if cross_attention_dim is not None else query_dim
+        self.dropout = dropout
+        self.heads = heads
+        self.dtype = dtype
+
+        self.only_cross_attention = only_cross_attention
+        self.parallel_config = parallel_config
+        self.enable_flash_attention = enable_flash_attention
+
+        self.to_q = nn.Dense(query_dim, self.inner_dim, has_bias=bias)
+
+        if not self.only_cross_attention:
+            # only relevant for the `AddedKVProcessor` classes
+            self.to_k = nn.Dense(self.cross_attention_dim, self.inner_dim, has_bias=bias)
+            self.to_v = nn.Dense(self.cross_attention_dim, self.inner_dim, has_bias=bias)
+        else:
+            self.to_k = None
+            self.to_v = None
+
+        self.to_out = nn.SequentialCell(nn.Dense(self.inner_dim, query_dim, has_bias=out_bias), nn.Dropout(p=dropout))
+
+        self.transpose = ops.Transpose()
+        self.reshape = ops.Reshape()
+        self.transpose_a2a = ops.Transpose()
+        self.merge_head_transpose_a2a = ops.Transpose()
+        self.tile = ops.Tile()
+        self.tile_fa = ops.Tile()
+
+        self.pad = ops.Pad(((0, 0), (0, 0), (0, 0), (0, 8)))
+        # FIXME: stride_slice does not support non-zero mask in semi-parallel mode? Remove it once FA supports dim=72.
+        self.stride_slice = ops.StridedSlice(15, 7, 0, 0, 0)  # for head_dim=72 only
+        self.shard()
+        self.enable_flash_attention = (
+            enable_flash_attention and FLASH_IS_AVAILABLE and (ms.context.get_context("device_target") == "Ascend")
+        )
+        if self.enable_flash_attention:
+            self.attention = FlashAttentionSP(
+                head_num=dim_head,
+                keep_prob=1 - attn_drop,
+                scale_value=dim_head**-0.5,
+                input_layout="BSH",
+                use_attention_mask=True,
+                dp=self.dp,
+                mp=self.sp_ds * self.mp,
+                sp=self.sp_co,
+            )
+        else:
+            self.attention = SeqParallelAttention(
+                self.heads,
+                dim_head,
+                attn_drop=attn_drop,
+                has_mask=True,
+                parallel_config=parallel_config,
+                upcast_attention=upcast_attention,
+                upcast_softmax=upcast_softmax,
+            )
+
+    def _rearange_in(self, x, b, n, h, transpose=False):
+        # (b*n, h*d) -> (b, h/mp, mp, n, d)
+        x = ops.reshape(x, (b, n, self.mp, h // self.mp, -1))
+        x = self.transpose_a2a(x, (0, 1, 3, 2, 4))
+        if not transpose:
+            x = self.transpose(x, (0, 2, 3, 1, 4))
+        else:
+            x = self.transpose(x, (0, 2, 3, 4, 1))
+        return x
+
+    def _rearange_in_fa(self, x, b, n, h):
+        # (b*n, h*d) -> (b, n, h*d)
+        if self.sp_ds > 1:
+            # (b*n, h*d) -> (b, n, h/mp, mp, d)
+            x = ops.reshape(x, (b, n, self.mp, h // self.mp, -1))
+            x = self.transpose_a2a(x, (0, 1, 3, 2, 4))
+            x = self.transpose(x, (0, 1, 2, 3, 4))
+        x = ops.reshape(x, (b, n, h, -1))
+        # x = self.pad(x, (0, 8), 0)
+        x = self.pad(x)
+        x = ops.reshape(x, (b, n, -1))
+        return x
+
+    def _rearange_out_fa(self, x, b, n, h):
+        # (b, n, d) -> (b*n, h*d)
+        if self.sp_ds > 1:
+            x = ops.reshape(x, (b, n, h // self.mp, self.mp, -1))
+            x = self.transpose(x, (0, 1, 2, 3, 4))
+            x = self.merge_head_transpose_a2a(x, (0, 1, 3, 2, 4))
+        x = ops.reshape(x, (b, n, h, -1))
+        x = self.stride_slice(x, (0, 0, 0, 0), (0, 0, 0, self.head_dim), (1, 1, 1, 1))
+        x = ops.reshape(x, (b * n, -1))
+        return x
+
+    def construct(
+        self,
+        x,
+        encoder_hidden_states: Optional[ms.Tensor] = None,
+        attention_mask: Optional[ms.Tensor] = None,
+    ):
+        """
+        Inputs:
+            x: (B, N, C), N=seq_len=h*w*t, C = hidden_size = head_dim * num_heads
+            encoder_hidden_states: (1, B*N_tokens, C) (B, N_tokens, C)
+            attention_mask : (B, N_tokens), 1 - valid tokens, 0 - padding tokens
+        Return:
+            (B, N, C)
+        """
+        x_dtype = x.dtype
+        h = self.heads
+        mask = attention_mask
+
+        b, n, d = x.shape
+        context = encoder_hidden_states if encoder_hidden_states is not None else x
+        n_c = context.shape[1]
+
+        x = ops.reshape(x, (-1, x.shape[-1]))  # (B*N, C)
+        context = ops.reshape(context, (-1, context.shape[-1]))  # (B*N, C)
+
+        q = self.to_q(x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        if not self.enable_flash_attention:
+            q = self._rearange_in(q, b, n, h)
+            k = self._rearange_in(k, b, n_c, h, transpose=True)
+            v = self._rearange_in(v, b, n_c, h)
+            if mask is not None:
+                mask = ops.reshape(mask, (b, 1, 1, 1, n_c))
+                mask = self.tile(mask, (1, 1, 1, n, 1))
+            out = self.attention(q, k, v, mask)
+        else:
+            q = self._rearange_in_fa(q, b, n, h).to(ms.float16)
+            k = self._rearange_in_fa(k, b, n_c, h).to(ms.float16)
+            v = self._rearange_in_fa(v, b, n_c, h).to(ms.float16)
+            if mask is not None:
+                mask = ops.reshape(mask, (b, 1, 1, n_c))
+                mask = self.tile_fa(mask, (1, 1, n, 1)).to(ms.uint8)
+                mask = ops.stop_gradient(mask)
+            out = self.attention(q, k, v, mask)
+            out = self._rearange_out_fa(out, b, n, h).to(x.dtype)
+
+        return self.to_out(out).to(x_dtype)
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+
+        if self.sp > self.heads // self.mp:
+            self.sp_ds = self.heads // self.mp
+            self.sp_co = self.sp // self.sp_ds
+        else:
+            self.sp_ds = self.sp
+            self.sp_co = 1
+
+        self.to_q.matmul.shard(((self.dp * self.sp, 1), (self.mp, 1)))
+        self.to_k.matmul.shard(((self.dp * self.sp, 1), (self.mp, 1)))
+        self.to_v.matmul.shard(((self.dp * self.sp, 1), (self.mp, 1)))
+        if self.has_bias:
+            self.to_q.bias_add.shard(((self.dp * self.sp, self.mp), (self.mp,)))
+            self.to_k.bias_add.shard(((self.dp * self.sp, self.mp), (self.mp,)))
+            self.to_v.bias_add.shard(((self.dp * self.sp, self.mp), (self.mp,)))
+
+        self.transpose_a2a.shard(((self.dp, self.sp, self.mp, 1, 1),))
+        self.transpose.shard(((self.dp, self.sp_co, self.sp_ds, self.mp, 1),))
+        self.merge_head_transpose_a2a.shard(((self.dp, self.sp, 1, self.mp, 1),))
+
+        self.tile.shard(((self.dp, 1, 1, self.sp_co, 1),))
+        self.tile_fa.shard(((self.dp, 1, self.sp_co, 1),))
+
+        self.to_out[0].matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
+        self.to_out[0].bias_add.shard(((self.dp * self.sp, 1), (1,)))
+
+        self.to_out[1].dropout.shard(((self.dp * self.sp, 1),))
+
+        self.pad.shard(((self.dp, self.sp_co, self.sp_ds * self.mp, 1),))
+        self.stride_slice.shard(((self.dp, self.sp, self.mp, 1),))
 
 
 class CaptionProjection(nn.Cell):
@@ -481,6 +819,69 @@ class FeedForward(nn.Cell):
             else:
                 hidden_states = module(hidden_states)
         return hidden_states
+
+
+class SeqParallelFeedForward(nn.Cell):
+    def __init__(
+        self,
+        dim: int,
+        dim_out: Optional[int] = None,
+        mult: int = 4,
+        dropout: float = 0.0,
+        activation_fn: str = "geglu",
+        final_dropout: bool = False,
+        parallel_config: Dict[str, Any] = {},
+    ):
+        super().__init__()
+        inner_dim = int(dim * mult)
+        dim_out = dim_out if dim_out is not None else dim
+        linear_cls = nn.Dense
+        self.final_dropout = final_dropout
+
+        if activation_fn == "gelu":
+            act_fn = GELU(dim, inner_dim)
+        if activation_fn == "gelu-approximate":
+            act_fn = GELU(dim, inner_dim, approximate="tanh")
+        elif activation_fn == "geglu":
+            act_fn = GEGLU(dim, inner_dim)
+        elif activation_fn == "geglu-approximate":
+            act_fn = ApproximateGELU(dim, inner_dim)
+
+        self.net = nn.CellList([])
+        # project in
+        self.net.append(act_fn)
+        # project dropout
+        self.net.append(nn.Dropout(p=dropout))
+        # project out
+        self.net.append(linear_cls(inner_dim, dim_out))
+        # FF as used in Vision Transformer, MLP-Mixer, etc. have a final dropout
+        if self.final_dropout:
+            self.net.append(nn.Dropout(p=dropout))
+
+        self.parallel_config = parallel_config
+        self.shard()
+
+    def construct(self, hidden_states: ms.Tensor, scale: float = 1.0) -> ms.Tensor:
+        compatible_cls = GEGLU
+        for module in self.net:
+            if isinstance(module, compatible_cls):
+                hidden_states = module(hidden_states, scale)
+            else:
+                hidden_states = module(hidden_states)
+        return hidden_states
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+
+        self.net[0].shard(((self.dp * self.sp, self.mp),))  # act_layer
+        self.net[1].dropout.shard(((self.dp * self.sp, 1),))
+
+        self.net[2].matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
+        self.net[3].bias_add.shard(((self.dp * self.sp, 1), (1,)))
+        if self.final_dropout:
+            self.net[-1].dropout.shard(((self.dp * self.sp, 1),))
 
 
 class BasicTransformerBlock_(nn.Cell):
@@ -705,6 +1106,226 @@ class BasicTransformerBlock_(nn.Cell):
             hidden_states = hidden_states.squeeze(1)
 
         return hidden_states
+
+
+class SeqParallelBasicTransformerBlock_(nn.Cell):
+    def __init__(
+        self,
+        dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        dropout=0.0,
+        cross_attention_dim: Optional[int] = None,
+        activation_fn: str = "geglu",
+        num_embeds_ada_norm: Optional[int] = None,
+        attention_bias: bool = False,
+        only_cross_attention: bool = False,
+        double_self_attention: bool = False,
+        upcast_attention: bool = False,
+        norm_elementwise_affine: bool = True,
+        norm_type: str = "layer_norm",  # 'layer_norm', 'ada_norm', 'ada_norm_zero', 'ada_norm_single'
+        norm_eps: float = 1e-5,
+        final_dropout: bool = False,
+        attention_type: str = "default",
+        positional_embeddings: Optional[str] = None,
+        num_positional_embeddings: Optional[int] = None,
+        enable_flash_attention: bool = False,
+        parallel_config={},
+    ):
+        super().__init__()
+        self.only_cross_attention = only_cross_attention
+
+        self.use_ada_layer_norm_zero = (num_embeds_ada_norm is not None) and norm_type == "ada_norm_zero"
+        self.use_ada_layer_norm = (num_embeds_ada_norm is not None) and norm_type == "ada_norm"
+        self.use_ada_layer_norm_single = norm_type == "ada_norm_single"
+        self.use_layer_norm = norm_type == "layer_norm"
+
+        if norm_type in ("ada_norm", "ada_norm_zero") and num_embeds_ada_norm is None:
+            raise ValueError(
+                f"`norm_type` is set to {norm_type}, but `num_embeds_ada_norm` is not defined. Please make sure to"
+                f" define `num_embeds_ada_norm` if setting `norm_type` to {norm_type}."
+            )
+
+        if positional_embeddings and (num_positional_embeddings is None):
+            raise ValueError(
+                "If `positional_embedding` type is defined, `num_positition_embeddings` must also be defined."
+            )
+
+        if positional_embeddings == "sinusoidal":
+            self.pos_embed = SinusoidalPositionalEmbedding(dim, max_seq_length=num_positional_embeddings)
+        else:
+            self.pos_embed = None
+
+        # Define 3 blocks. Each block has its own normalization layer.
+        # 1. Self-Attn
+        if self.use_ada_layer_norm:
+            self.norm1_ada = AdaLayerNorm(dim, num_embeds_ada_norm)
+            self.norm1_ada.norm = LayerNorm(dim, elementwise_affine=False)
+        elif self.use_ada_layer_norm_zero:
+            self.norm1_ada_zero = AdaLayerNormZero(dim, num_embeds_ada_norm)
+            self.norm1_ada_zero.norm = LayerNorm(dim, elementwise_affine=False)
+        else:
+            self.norm1_ln = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
+
+        self.attn1 = SeqParallelMultiHeadAttention(
+            query_dim=dim,
+            heads=num_attention_heads,
+            dim_head=attention_head_dim,
+            dropout=dropout,
+            bias=attention_bias,
+            cross_attention_dim=cross_attention_dim if only_cross_attention else None,
+            upcast_attention=upcast_attention,
+            enable_flash_attention=enable_flash_attention,
+            parallel_config=parallel_config,
+        )
+
+        self.norm3 = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
+
+        self.ff = SeqParallelFeedForward(
+            dim,
+            dropout=dropout,
+            activation_fn=activation_fn,
+            final_dropout=final_dropout,
+            parallel_config=parallel_config,
+        )
+
+        # 4. Fuser
+        if attention_type == "gated" or attention_type == "gated-text-image":
+            self.fuser = GatedSelfAttentionDense(dim, cross_attention_dim, num_attention_heads, attention_head_dim)
+
+        # 5. Scale-shift for PixArt-Alpha.
+        if self.use_ada_layer_norm_single:
+            self.scale_shift_table = ms.Parameter(ops.randn(6, dim) / dim**0.5)
+
+        # let chunk size default to None
+        self._chunk_size = None
+        self._chunk_dim = 0
+        self.add = ops.Add()
+        self.mult = ops.Mul()
+        self.split = ops.Split(axis=1, output_num=6)
+        self.parallel_config = parallel_config
+        self.shard()
+
+    def construct(
+        self,
+        hidden_states: ms.Tensor,
+        attention_mask: Optional[ms.Tensor] = None,
+        encoder_hidden_states: Optional[ms.Tensor] = None,
+        encoder_attention_mask: Optional[ms.Tensor] = None,
+        timestep: Optional[ms.Tensor] = None,
+        cross_attention_kwargs: Dict[str, Any] = None,
+        class_labels: Optional[ms.Tensor] = None,
+    ) -> ms.Tensor:
+        # Notice that normalization is always applied before the real computation in the following blocks.
+        # 0. Self-Attention
+        batch_size = hidden_states.shape[0]
+
+        gate_msa, shift_mlp, scale_mlp, gate_mlp = None, None, None, None
+        if self.use_ada_layer_norm:
+            norm_hidden_states = self.norm1_ada(hidden_states, timestep)
+        elif self.use_ada_layer_norm_zero:
+            norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1_ada_zero(
+                hidden_states, timestep, class_labels, hidden_dtype=hidden_states.dtype
+            )
+        elif self.use_layer_norm:
+            norm_hidden_states = self.norm1_ln(hidden_states)
+        elif self.use_ada_layer_norm_single:
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
+                self.add(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+            )
+            norm_hidden_states = self.norm1_ln(hidden_states)
+            norm_hidden_states = norm_hidden_states * (1 + scale_msa) + shift_msa
+            # norm_hidden_states = norm_hidden_states.squeeze(1)  # error message
+        else:
+            raise ValueError("Incorrect norm used")
+
+        if self.pos_embed is not None:
+            norm_hidden_states = self.pos_embed(norm_hidden_states)
+
+        # 1. Retrieve lora scale.
+        lora_scale = cross_attention_kwargs.get("scale", 1.0) if cross_attention_kwargs is not None else 1.0
+
+        # 2. Prepare GLIGEN inputs
+        cross_attention_kwargs = cross_attention_kwargs.copy() if cross_attention_kwargs is not None else {}
+        if "gligen" in cross_attention_kwargs:
+            gligen_kwargs = cross_attention_kwargs["gligen"]
+            # del cross_attention_kwargs["gligen"]
+        else:
+            gligen_kwargs = None
+        attn_output = self.attn1(
+            norm_hidden_states,
+            encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
+            attention_mask=attention_mask,
+            **cross_attention_kwargs,
+        )
+        if self.use_ada_layer_norm_zero:
+            attn_output = self.mult(gate_msa.unsqueeze(1), attn_output)
+        elif self.use_ada_layer_norm_single:
+            attn_output = self.mult(gate_msa, attn_output)
+
+        hidden_states = self.add(attn_output, hidden_states)
+        if hidden_states.ndim == 4:
+            hidden_states = hidden_states.squeeze(1)
+
+        # 2.5 GLIGEN Control
+        if gligen_kwargs is not None:
+            hidden_states = self.fuser(hidden_states, gligen_kwargs["objs"])
+
+        if self.use_ada_layer_norm_zero:
+            norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+
+        if self.use_ada_layer_norm_single:
+            # norm_hidden_states = self.norm2(hidden_states)
+            norm_hidden_states = self.norm3(hidden_states)
+            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp)), shift_mlp)
+
+        if self._chunk_size is not None:
+            # "feed_forward_chunk_size" can be used to save memory
+            if norm_hidden_states.shape[self._chunk_dim] % self._chunk_size != 0:
+                raise ValueError(
+                    f"`hidden_states` dimension to be chunked: {norm_hidden_states.shape[self._chunk_dim]}"
+                    f"has to be divisible by chunk size: {self._chunk_size}. Make sure to set an"
+                    f"appropriate `chunk_size` when calling `unet.enable_forward_chunking`."
+                )
+
+            num_chunks = norm_hidden_states.shape[self._chunk_dim] // self._chunk_size
+            ff_output = ops.cat(
+                [
+                    self.ff(hid_slice, scale=lora_scale)
+                    for hid_slice in norm_hidden_states.chunk(num_chunks, axis=self._chunk_dim)
+                ],
+                dim=self._chunk_dim,
+            )
+        else:
+            ff_output = self.ff(norm_hidden_states, scale=lora_scale)
+
+        if self.use_ada_layer_norm_zero:
+            ff_output = self.mult(gate_mlp.unsqueeze(1), ff_output)
+        elif self.use_ada_layer_norm_single:
+            ff_output = self.mult(gate_mlp, ff_output)
+
+        hidden_states = self.add(ff_output, hidden_states)
+        if hidden_states.ndim == 4:
+            hidden_states = hidden_states.squeeze(1)
+
+        return hidden_states
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+
+        self.add.shard(((self.dp, self.sp, 1), (self.dp, self.sp, 1)))
+        self.mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
+
+        self.split.shard(((self.dp, 1, 1),))
+
+        if self.use_ada_layer_norm_single:
+            # current only implement this layernorm
+            self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+        else:
+            raise NotImplementedError
 
 
 class BasicTransformerBlock(nn.Cell):
@@ -969,6 +1590,263 @@ class BasicTransformerBlock(nn.Cell):
             hidden_states = hidden_states.squeeze(1)
 
         return hidden_states
+
+
+class SeqParallelBasicTransformerBlock(nn.Cell):
+    def __init__(
+        self,
+        dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        dropout=0.0,
+        cross_attention_dim: Optional[int] = None,
+        activation_fn: str = "geglu",
+        num_embeds_ada_norm: Optional[int] = None,
+        attention_bias: bool = False,
+        only_cross_attention: bool = False,
+        double_self_attention: bool = False,
+        upcast_attention: bool = False,
+        norm_elementwise_affine: bool = True,
+        norm_type: str = "layer_norm",  # 'layer_norm', 'ada_norm', 'ada_norm_zero', 'ada_norm_single'
+        norm_eps: float = 1e-5,
+        final_dropout: bool = False,
+        attention_type: str = "default",
+        positional_embeddings: Optional[str] = None,
+        num_positional_embeddings: Optional[int] = None,
+        enable_flash_attention: bool = False,
+        parallel_config={},
+    ):
+        super().__init__()
+        self.only_cross_attention = only_cross_attention
+
+        self.use_ada_layer_norm_zero = (num_embeds_ada_norm is not None) and norm_type == "ada_norm_zero"
+        self.use_ada_layer_norm = (num_embeds_ada_norm is not None) and norm_type == "ada_norm"
+        self.use_ada_layer_norm_single = norm_type == "ada_norm_single"
+        self.use_layer_norm = norm_type == "layer_norm"
+
+        if norm_type in ("ada_norm", "ada_norm_zero") and num_embeds_ada_norm is None:
+            raise ValueError(
+                f"`norm_type` is set to {norm_type}, but `num_embeds_ada_norm` is not defined. Please make sure to"
+                f" define `num_embeds_ada_norm` if setting `norm_type` to {norm_type}."
+            )
+
+        if positional_embeddings and (num_positional_embeddings is None):
+            raise ValueError(
+                "If `positional_embedding` type is defined, `num_positition_embeddings` must also be defined."
+            )
+
+        if positional_embeddings == "sinusoidal":
+            self.pos_embed = SinusoidalPositionalEmbedding(dim, max_seq_length=num_positional_embeddings)
+        else:
+            self.pos_embed = None
+
+        # Define 3 blocks. Each block has its own normalization layer.
+        # 1. Self-Attn
+        if self.use_ada_layer_norm:
+            self.norm1_ada = AdaLayerNorm(dim, num_embeds_ada_norm)
+            self.norm1_ada.norm = LayerNorm(dim, elementwise_affine=False)
+        elif self.use_ada_layer_norm_zero:
+            self.norm1_ada_zero = AdaLayerNormZero(dim, num_embeds_ada_norm)
+            self.norm1_ada_zero.norm = LayerNorm(dim, elementwise_affine=False)
+        else:
+            self.norm1_ln = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
+
+        self.attn1 = SeqParallelMultiHeadAttention(
+            query_dim=dim,
+            heads=num_attention_heads,
+            dim_head=attention_head_dim,
+            dropout=dropout,
+            bias=attention_bias,
+            cross_attention_dim=cross_attention_dim if only_cross_attention else None,
+            upcast_attention=upcast_attention,
+            enable_flash_attention=enable_flash_attention,
+            parallel_config=parallel_config,
+        )
+
+        # 2. Cross-Attn
+        if cross_attention_dim is not None or double_self_attention:
+            # We currently only use AdaLayerNormZero for self attention where there will only be one attention block.
+            # I.e. the number of returned modulation chunks from AdaLayerZero would not make sense if returned during
+            # the second cross attention block.
+            if self.use_ada_layer_norm:
+                self.norm2_ada = AdaLayerNorm(dim, num_embeds_ada_norm)
+                self.norm2_ada.norm = LayerNorm(dim, elementwise_affine=False)
+            else:
+                self.norm2_ln = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
+
+            self.attn2 = SeqParallelMultiHeadAttention(
+                query_dim=dim,
+                cross_attention_dim=cross_attention_dim if not double_self_attention else None,
+                heads=num_attention_heads,
+                dim_head=attention_head_dim,
+                dropout=dropout,
+                bias=attention_bias,
+                upcast_attention=upcast_attention,
+                enable_flash_attention=enable_flash_attention,
+                parallel_config=parallel_config,
+            )  # is self-attn if encoder_hidden_states is none
+        else:
+            self.norm2 = None
+            self.attn2 = None
+
+        # 3. Feed-forward
+        if not self.use_ada_layer_norm_single:
+            self.norm3 = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
+
+        self.ff = SeqParallelFeedForward(
+            dim,
+            dropout=dropout,
+            activation_fn=activation_fn,
+            final_dropout=final_dropout,
+            parallel_config=parallel_config,
+        )
+
+        # 4. Fuser
+        if attention_type == "gated" or attention_type == "gated-text-image":
+            self.fuser = GatedSelfAttentionDense(dim, cross_attention_dim, num_attention_heads, attention_head_dim)
+
+        # 5. Scale-shift for PixArt-Alpha.
+        if self.use_ada_layer_norm_single:
+            self.scale_shift_table = ms.Parameter(ops.randn(6, dim) / dim**0.5)
+
+        # let chunk size default to None
+        self._chunk_size = None
+        self._chunk_dim = 0
+        self.add = ops.Add()
+        self.mult = ops.Mul()
+        self.split = ops.Split(axis=1, output_num=6)
+
+        self.parallel_config = parallel_config
+        self.shard()
+
+    def construct(
+        self,
+        hidden_states: ms.Tensor,
+        attention_mask: Optional[ms.Tensor] = None,
+        encoder_hidden_states: Optional[ms.Tensor] = None,
+        encoder_attention_mask: Optional[ms.Tensor] = None,
+        timestep: Optional[ms.Tensor] = None,
+        cross_attention_kwargs: Dict[str, Any] = None,
+        class_labels: Optional[ms.Tensor] = None,
+    ) -> ms.Tensor:
+        # Notice that normalization is always applied before the real computation in the following blocks.
+        # 0. Self-Attention
+        batch_size = hidden_states.shape[0]
+        gate_msa, shift_mlp, scale_mlp, gate_mlp = None, None, None, None
+        if self.use_ada_layer_norm:
+            norm_hidden_states = self.norm1_ada(hidden_states, timestep)
+        elif self.use_ada_layer_norm_zero:
+            norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1_ada_zero(
+                hidden_states, timestep, class_labels, hidden_dtype=hidden_states.dtype
+            )
+        elif self.use_layer_norm:
+            norm_hidden_states = self.norm1_ln(hidden_states)
+        elif self.use_ada_layer_norm_single:
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
+                self.add(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+            )
+            norm_hidden_states = self.norm1_ln(hidden_states)
+            norm_hidden_states = norm_hidden_states * (1 + scale_msa) + shift_msa
+            # norm_hidden_states = norm_hidden_states.squeeze(1)  # error message
+        else:
+            raise ValueError("Incorrect norm used")
+
+        if self.pos_embed is not None:
+            norm_hidden_states = self.pos_embed(norm_hidden_states)
+
+        # 1. Retrieve lora scale.
+        lora_scale = cross_attention_kwargs.get("scale", 1.0) if cross_attention_kwargs is not None else 1.0
+
+        # 2. Prepare GLIGEN inputs
+        cross_attention_kwargs = cross_attention_kwargs.copy() if cross_attention_kwargs is not None else {}
+        if "gligen" in cross_attention_kwargs:
+            gligen_kwargs = cross_attention_kwargs["gligen"]
+            # del cross_attention_kwargs["gligen"]
+        else:
+            gligen_kwargs = None
+        attn_output = self.attn1(
+            norm_hidden_states,
+            encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
+            attention_mask=attention_mask,
+            **cross_attention_kwargs,
+        )
+        if self.use_ada_layer_norm_zero:
+            attn_output = self.add(gate_msa.unsqueeze(1), attn_output)
+        elif self.use_ada_layer_norm_single:
+            attn_output = self.add(gate_msa, attn_output)
+
+        hidden_states = self.add(attn_output, hidden_states)
+        if hidden_states.ndim == 4:
+            hidden_states = hidden_states.squeeze(1)
+
+        # 2.5 GLIGEN Control
+        if gligen_kwargs is not None:
+            hidden_states = self.fuser(hidden_states, gligen_kwargs["objs"])
+
+        # 3. Cross-Attention
+        if self.attn2 is not None:
+            if self.use_ada_layer_norm:
+                norm_hidden_states = self.norm2_ada(hidden_states, timestep)
+            elif self.use_ada_layer_norm_zero or self.use_layer_norm:
+                norm_hidden_states = self.norm2_ln(hidden_states)
+            elif self.use_ada_layer_norm_single:
+                # For PixArt norm2 isn't applied here:
+                # https://github.com/PixArt-alpha/PixArt-alpha/blob/0f55e922376d8b797edd44d25d0e7464b260dcab/diffusion/model/nets/PixArtMS.py#L70C1-L76C103
+                norm_hidden_states = hidden_states
+            else:
+                raise ValueError("Incorrect norm")
+
+            if self.pos_embed is not None and self.use_ada_layer_norm_single is False:
+                norm_hidden_states = self.pos_embed(norm_hidden_states)
+
+            attn_output = self.attn2(
+                norm_hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                attention_mask=encoder_attention_mask,
+                **cross_attention_kwargs,
+            )
+            hidden_states = self.add(attn_output, hidden_states)
+
+        # 4. Feed-forward
+        if not self.use_ada_layer_norm_single:
+            norm_hidden_states = self.norm3(hidden_states)
+
+        if self.use_ada_layer_norm_zero:
+            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp[:, None])), shift_mlp[:, None])
+
+        if self.use_ada_layer_norm_single:
+            norm_hidden_states = self.norm2_ln(hidden_states)
+            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp)), shift_mlp)
+
+        ff_output = self.ff(norm_hidden_states, scale=lora_scale)
+
+        if self.use_ada_layer_norm_zero:
+            ff_output = self.mult(gate_mlp.unsqueeze(1), ff_output)
+        elif self.use_ada_layer_norm_single:
+            ff_output = self.mult(gate_mlp, ff_output)
+
+        hidden_states = self.add(ff_output, hidden_states)
+        if hidden_states.ndim == 4:
+            hidden_states = hidden_states.squeeze(1)
+
+        return hidden_states
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+
+        self.add.shard(((self.dp, self.sp, 1), (self.dp, self.sp, 1)))
+        self.mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
+
+        self.split.shard(((self.dp, 1, 1),))
+
+        if self.use_ada_layer_norm_single:
+            # current only implement this layernorm
+            self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+        else:
+            raise NotImplementedError
 
 
 class Latte(ModelMixin, ConfigMixin):
@@ -1613,6 +2491,8 @@ class LatteT2V(ModelMixin, ConfigMixin):
         video_length: int = 16,
         enable_flash_attention: bool = False,
         use_recompute=False,
+        enable_sequence_parallelism=False,
+        parallel_config={},
     ):
         super().__init__()
         # self.use_linear_projection = use_linear_projection
@@ -1622,7 +2502,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
         self.video_length = video_length
         self.norm_type = norm_type
         self.use_recompute = use_recompute
-
+        self.enable_sequence_parallelism = enable_sequence_parallelism
         conv_cls = nn.Conv2d  # if USE_PEFT_BACKEND else LoRACompatibleConv
         linear_cls = nn.Dense  # if USE_PEFT_BACKEND else LoRACompatibleLinear
 
@@ -1704,54 +2584,105 @@ class LatteT2V(ModelMixin, ConfigMixin):
             )
 
         # 3. Define transformers blocks, spatial attention
-        self.transformer_blocks = nn.CellList(
-            [
-                BasicTransformerBlock(
-                    inner_dim,
-                    num_attention_heads,
-                    attention_head_dim,
-                    dropout=dropout,
-                    cross_attention_dim=cross_attention_dim,
-                    activation_fn=activation_fn,
-                    num_embeds_ada_norm=num_embeds_ada_norm,
-                    attention_bias=attention_bias,
-                    only_cross_attention=only_cross_attention,
-                    double_self_attention=double_self_attention,
-                    upcast_attention=upcast_attention,
-                    norm_type=norm_type,
-                    norm_elementwise_affine=norm_elementwise_affine,
-                    norm_eps=norm_eps,
-                    attention_type=attention_type,
-                    enable_flash_attention=enable_flash_attention,
-                )
-                for d in range(num_layers)
-            ]
-        )
-
+        if not enable_sequence_parallelism:
+            self.transformer_blocks = nn.CellList(
+                [
+                    BasicTransformerBlock(
+                        inner_dim,
+                        num_attention_heads,
+                        attention_head_dim,
+                        dropout=dropout,
+                        cross_attention_dim=cross_attention_dim,
+                        activation_fn=activation_fn,
+                        num_embeds_ada_norm=num_embeds_ada_norm,
+                        attention_bias=attention_bias,
+                        only_cross_attention=only_cross_attention,
+                        double_self_attention=double_self_attention,
+                        upcast_attention=upcast_attention,
+                        norm_type=norm_type,
+                        norm_elementwise_affine=norm_elementwise_affine,
+                        norm_eps=norm_eps,
+                        attention_type=attention_type,
+                        enable_flash_attention=enable_flash_attention,
+                    )
+                    for d in range(num_layers)
+                ]
+            )
+        else:
+            self.transformer_blocks = nn.CellList(
+                [
+                    SeqParallelBasicTransformerBlock(
+                        inner_dim,
+                        num_attention_heads,
+                        attention_head_dim,
+                        dropout=dropout,
+                        cross_attention_dim=cross_attention_dim,
+                        activation_fn=activation_fn,
+                        num_embeds_ada_norm=num_embeds_ada_norm,
+                        attention_bias=attention_bias,
+                        only_cross_attention=only_cross_attention,
+                        double_self_attention=double_self_attention,
+                        upcast_attention=upcast_attention,
+                        norm_type=norm_type,
+                        norm_elementwise_affine=norm_elementwise_affine,
+                        norm_eps=norm_eps,
+                        attention_type=attention_type,
+                        enable_flash_attention=enable_flash_attention,
+                        parallel_config=parallel_config,
+                    )
+                    for d in range(num_layers)
+                ]
+            )
         # Define temporal transformers blocks
-        self.temporal_transformer_blocks = nn.CellList(
-            [
-                BasicTransformerBlock_(  # one attention
-                    inner_dim,
-                    num_attention_heads,  # num_attention_heads
-                    attention_head_dim,  # attention_head_dim 72
-                    dropout=dropout,
-                    cross_attention_dim=None,
-                    activation_fn=activation_fn,
-                    num_embeds_ada_norm=num_embeds_ada_norm,
-                    attention_bias=attention_bias,
-                    only_cross_attention=only_cross_attention,
-                    double_self_attention=False,
-                    upcast_attention=upcast_attention,
-                    norm_type=norm_type,
-                    norm_elementwise_affine=norm_elementwise_affine,
-                    norm_eps=norm_eps,
-                    attention_type=attention_type,
-                    enable_flash_attention=enable_flash_attention,
-                )
-                for d in range(num_layers)
-            ]
-        )
+        if not enable_sequence_parallelism:
+            self.temporal_transformer_blocks = nn.CellList(
+                [
+                    BasicTransformerBlock_(  # one attention
+                        inner_dim,
+                        num_attention_heads,  # num_attention_heads
+                        attention_head_dim,  # attention_head_dim 72
+                        dropout=dropout,
+                        cross_attention_dim=None,
+                        activation_fn=activation_fn,
+                        num_embeds_ada_norm=num_embeds_ada_norm,
+                        attention_bias=attention_bias,
+                        only_cross_attention=only_cross_attention,
+                        double_self_attention=False,
+                        upcast_attention=upcast_attention,
+                        norm_type=norm_type,
+                        norm_elementwise_affine=norm_elementwise_affine,
+                        norm_eps=norm_eps,
+                        attention_type=attention_type,
+                        enable_flash_attention=enable_flash_attention,
+                    )
+                    for d in range(num_layers)
+                ]
+            )
+        else:
+            self.temporal_transformer_blocks = nn.CellList(
+                [
+                    SeqParallelBasicTransformerBlock_(  # one attention
+                        inner_dim,
+                        num_attention_heads,  # num_attention_heads
+                        attention_head_dim,  # attention_head_dim 72
+                        dropout=dropout,
+                        cross_attention_dim=None,
+                        activation_fn=activation_fn,
+                        num_embeds_ada_norm=num_embeds_ada_norm,
+                        attention_bias=attention_bias,
+                        only_cross_attention=only_cross_attention,
+                        double_self_attention=False,
+                        upcast_attention=upcast_attention,
+                        norm_type=norm_type,
+                        norm_elementwise_affine=norm_elementwise_affine,
+                        norm_eps=norm_eps,
+                        attention_type=attention_type,
+                        enable_flash_attention=enable_flash_attention,
+                        parallel_config=parallel_config,
+                    )
+                    for d in range(num_layers)
+                ]
+            )
         # 4. Define output layers
         self.out_channels = in_channels if out_channels is None else out_channels
         if self.is_input_continuous:
