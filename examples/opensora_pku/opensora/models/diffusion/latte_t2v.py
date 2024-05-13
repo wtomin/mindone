@@ -891,9 +891,8 @@ class SeqParallelFeedForward(nn.Cell):
             raise NotImplementedError
 
         self.net[1].dropout.shard(((self.dp * self.sp, 1),))
-
         self.net[2].matmul.shard(((self.dp * self.sp, self.mp), (1, self.mp)))
-        self.net[3].bias_add.shard(((self.dp * self.sp, 1), (1,)))
+        self.net[2].bias_add.shard(((self.dp * self.sp, 1), (1,)))
         if self.final_dropout:
             self.net[-1].dropout.shard(((self.dp * self.sp, 1),))
 
