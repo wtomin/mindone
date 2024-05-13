@@ -107,17 +107,26 @@ def init_env(
             rank_id = get_rank()
             logger.debug(f"rank_id: {rank_id}, device_num: {device_num}")
             assert use_sequence_parallel, "Expect to enable sequence parallel"
+            dataset_strategy = (
+                (data_parallel, 1, 1, 1, 1),  # video or latent
+                (data_parallel, 1, 1),  # text embed
+                (data_parallel, 1),  # text mask
+            )
+            if args.use_image_num != 0:
+                # use image-video joint training. text_embed shape (bs, 1 + use_image_num, len, C).
+                # text mask: (bs. 1 + use_image_num, len)
+                dataset_strategy = (
+                    (data_parallel, 1, 1, 1, 1),  # video or latent
+                    (data_parallel, 1, 1, 1),  # text embed
+                    (data_parallel, 1, 1),  # text mask
+                )
             ms.set_auto_parallel_context(
                 parallel_mode=ms.ParallelMode.SEMI_AUTO_PARALLEL,
                 gradients_mean=False,
                 enable_parallel_optimizer=True,
                 enable_alltoall=True,
                 device_num=device_num,
-                dataset_strategy=(
-                    (data_parallel, 1, 1, 1, 1),  # video or latent
-                    (data_parallel, 1, 1),  # text embed
-                    (data_parallel, 1),  # text mask
-                ),
+                dataset_strategy=dataset_strategy,
                 strategy_ckpt_config={"save_file": os.path.join(outdir, "src_strategy.ckpt")},
             )
 
