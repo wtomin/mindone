@@ -176,9 +176,9 @@ class ResnetBlock3D(nn.Cell):
         if self.micro_batch_size is None:
             return self.cal_batch(x)
         else:
-            y = ()
+            y = []
             for x_batch in ops.split(x, self.micro_batch_size, axis=0):
-                y = y + (self.cal_batch(x_batch))
+                y.append(self.cal_batch(x_batch))
             return ops.concat(y, axis=0)
 
 
