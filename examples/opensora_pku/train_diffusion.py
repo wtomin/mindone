@@ -155,13 +155,27 @@ def check_sequence_parallel_condition(args, device_num):
         if args.model_parallel > 12:
             raise ValueError(f"Model parallel ({args.model_parallel}) can not be larger than the number of heads (12)")
 
+    spatial_parallel_config = dict(
+        data_parallel=args.data_parallel,
+        model_parallel=args.model_parallel,
+        sequence_parallel=args.sequence_parallel,
+    )
+    temporal_parallel_config = dict(
+        data_parallel=args.data_parallel,
+        model_parallel=args.model_parallel,
+        sequence_parallel=args.sequence_parallel,
+    )
     if args.num_frames % args.sequence_parallel != 0:
-        raise ValueError(
+        logger.info(
             f"Number of frames `{args.num_frames}` must be divisible by the sequence parallel `{args.sequence_parallel}`."
         )
-
+        logger.info(
+            "Disable sequence parallel for temporal attention and enable sequence parallel for spatial attention only."
+        )
+        temporal_parallel_config["sequence_parallel"] = 1
     if args.model_parallel > 1:
         raise NotImplementedError("Model parallel is not supported yet.")
+    return spatial_parallel_config, temporal_parallel_config
 
 
 def set_all_reduce_fusion(
@@ -206,7 +220,9 @@ def main(args):
         log_level=eval(args.log_level),
     )
     if args.enable_sequence_parallelism:
-        check_sequence_parallel_condition(args, device_num)
+        spatial_parallel_config, temporal_parallel_config = check_sequence_parallel_condition(args, device_num)
+    else:
+        spatial_parallel_config, temporal_parallel_config = {}, {}
     train_with_vae_latent = args.vae_latent_folder is not None and os.path.exists(args.vae_latent_folder)
     if train_with_vae_latent:
         logger.info("Train with vae latent cache.")
@@ -255,11 +271,8 @@ def main(args):
         enable_flash_attention=args.enable_flash_attention,
         use_recompute=args.use_recompute,
         enable_sequence_parallelism=args.enable_sequence_parallelism,
-        parallel_config=dict(
-            data_parallel=args.data_parallel,
-            model_parallel=args.model_parallel,
-            sequence_parallel=args.sequence_parallel,
-        ),
+        spatial_parallel_config=spatial_parallel_config,
+        temporal_parallel_config=temporal_parallel_config,
     )
 
     # mixed precision

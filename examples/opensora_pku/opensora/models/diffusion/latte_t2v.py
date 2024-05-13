@@ -2492,7 +2492,8 @@ class LatteT2V(ModelMixin, ConfigMixin):
         enable_flash_attention: bool = False,
         use_recompute=False,
         enable_sequence_parallelism=False,
-        parallel_config={},
+        temporal_parallel_config={},
+        spatial_parallel_config={},
     ):
         super().__init__()
         # self.use_linear_projection = use_linear_projection
@@ -2628,7 +2629,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
                         norm_eps=norm_eps,
                         attention_type=attention_type,
                         enable_flash_attention=enable_flash_attention,
-                        parallel_config=parallel_config,
+                        parallel_config=spatial_parallel_config,
                     )
                     for d in range(num_layers)
                 ]
@@ -2678,7 +2679,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
                         norm_eps=norm_eps,
                         attention_type=attention_type,
                         enable_flash_attention=enable_flash_attention,
-                        parallel_config=parallel_config,
+                        parallel_config=temporal_parallel_config,
                     )
                     for d in range(num_layers)
                 ]
