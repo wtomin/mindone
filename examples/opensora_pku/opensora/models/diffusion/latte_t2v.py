@@ -1332,11 +1332,11 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
         self.mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
 
         self.split.shard(((self.dp, 1, 1),))
+        self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
 
         if self.use_ada_layer_norm_single:
             # current only implement this layernorm
             self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
-            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
         else:
             raise NotImplementedError
 
@@ -1854,12 +1854,14 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
 
         self.split.shard(((self.dp, 1, 1),))
 
+        if not self.use_ada_layer_norm:
+            self.norm2_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+
         if self.use_ada_layer_norm_single:
             # current only implement this layernorm
             self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
-            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
         else:
-            raise NotImplementedError
+            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
 
 
 class Latte(ModelMixin, ConfigMixin):
