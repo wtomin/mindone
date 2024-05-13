@@ -147,8 +147,6 @@ class SeqParallelAttention(nn.Cell):
 
         if mask is not None:
             assert self.has_mask
-            mask = self.sub(self.one, mask.to(ms.float32))
-            mask = self.mul_mask(mask, self.minus_inf)
             sim = self.add(mask, sim)
 
         attn = self.softmax(sim).astype(v.dtype)
@@ -539,8 +537,8 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         """
         Inputs:
             x: (B, N, C), N=seq_len=h*w*t, C = hidden_size = head_dim * num_heads
-            encoder_hidden_states: (1, B*N_tokens, C) (B, N_tokens, C)
-            attention_mask : (B, N_tokens), 1 - valid tokens, 0 - padding tokens
+            encoder_hidden_states: (B, N_tokens, C)
+            attention_mask : (B, 1, N_tokens). Padded token is already filled with -inf value.
         Return:
             (B, N, C)
         """
@@ -552,8 +550,8 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         context = encoder_hidden_states if encoder_hidden_states is not None else x
         n_c = context.shape[1]
 
-        x = ops.reshape(x, (-1, x.shape[-1]))  # (B*N, C)
-        context = ops.reshape(context, (-1, context.shape[-1]))  # (B*N, C)
+        x = ops.reshape(x, (-1, x.shape[-1]))  # (B*q_n, C)
+        context = ops.reshape(context, (-1, context.shape[-1]))  # (B*k_n, C)
 
         q = self.to_q(x)
         k = self.to_k(context)
