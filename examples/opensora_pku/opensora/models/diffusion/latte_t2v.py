@@ -435,6 +435,7 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         assert query_dim % heads == 0, "query dim must be divisible by num_heads"
 
         self.inner_dim = dim_head * heads
+        self.head_dim = dim_head
         self.cross_attention_dim = cross_attention_dim if cross_attention_dim is not None else query_dim
         self.dropout = dropout
         self.heads = heads
@@ -443,6 +444,7 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         self.only_cross_attention = only_cross_attention
         self.parallel_config = parallel_config
         self.enable_flash_attention = enable_flash_attention
+        self.has_bias = bias
 
         self.to_q = nn.Dense(query_dim, self.inner_dim, has_bias=bias)
 
