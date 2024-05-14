@@ -475,7 +475,7 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         )
         if self.enable_flash_attention:
             self.attention = FlashAttentionSP(
-                head_num=dim_head,
+                head_num=self.heads,
                 keep_prob=1 - attn_drop,
                 scale_value=dim_head**-0.5,
                 input_layout="BSH",
