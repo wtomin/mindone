@@ -431,6 +431,7 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         dtype=ms.float32,
         enable_flash_attention=False,
         parallel_config: Dict[str, Any] = {},
+        use_attention_mask=False,
     ):
         super().__init__()
         assert query_dim % heads == 0, "query dim must be divisible by num_heads"
@@ -479,7 +480,7 @@ class SeqParallelMultiHeadAttention(nn.Cell):
                 keep_prob=1 - attn_drop,
                 scale_value=dim_head**-0.5,
                 input_layout="BSH",
-                use_attention_mask=True,
+                use_attention_mask=use_attention_mask,
                 dp=self.dp,
                 mp=self.sp_ds * self.mp,
                 sp=self.sp_co,
@@ -1193,6 +1194,7 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             upcast_attention=upcast_attention,
             enable_flash_attention=enable_flash_attention,
             parallel_config=parallel_config,
+            use_attention_mask=False,  # the first attention is a self-attention without masking. If using causal mask, set this to true
         )
 
         self.norm3 = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
@@ -1693,6 +1695,7 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             upcast_attention=upcast_attention,
             enable_flash_attention=enable_flash_attention,
             parallel_config=parallel_config,
+            use_attention_mask=False,  # the first attention is a self-attention without masking. If using causal mask, set this to true
         )
 
         # 2. Cross-Attn
@@ -1716,6 +1719,7 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
                 upcast_attention=upcast_attention,
                 enable_flash_attention=enable_flash_attention,
                 parallel_config=parallel_config,
+                use_attention_mask=True,
             )  # is self-attn if encoder_hidden_states is none
         else:
             self.norm2 = None
