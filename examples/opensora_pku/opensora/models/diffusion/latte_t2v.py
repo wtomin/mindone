@@ -133,11 +133,12 @@ class SeqParallelAttention(nn.Cell):
     def _merge_head(self, x: Tensor) -> Tensor:
         x = self.transpose(x, (0, 3, 1, 2, 4))  # (b, n, h/mp, mp, d)
         x = self.transpose_a2a(x, (0, 1, 3, 2, 4))
-        x = ops.reshape(x, (-1, self.num_heads * self.dim_head))
+        x = ops.reshape(x, (-1, self.num_heads * self.dim_head))  # (b*n, h*d)
         return x
 
     def construct(self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        # mask: (b 1 1 1 n_k), 1 - keep, 0 indicates discard.
+        # mask: (b 1 1 n_q n_k), padded items are filled with negative inf value
+        # q (b, n, h/mp, mp, d)
         if self.upcast_attention:
             q, k, v = [x.astype(ms.float32) for x in (q, k, v)]
         sim = self.bmm(q, k)
@@ -558,13 +559,13 @@ class SeqParallelMultiHeadAttention(nn.Cell):
         v = self.to_v(context)
 
         if not self.enable_flash_attention:
-            q = self._rearange_in(q, b, n, h)
+            q = self._rearange_in(q, b, n, h)  # (b*n, h*d) -> (b, h/mp, mp, n, d)
             k = self._rearange_in(k, b, n_c, h, transpose=True)
             v = self._rearange_in(v, b, n_c, h)
             if mask is not None:
                 mask = ops.reshape(mask, (b, 1, 1, 1, n_c))
                 mask = self.tile(mask, (1, 1, 1, n, 1))
-            out = self.attention(q, k, v, mask)
+            out = self.attention(q, k, v, mask)  # (b*n, h*d)
         else:
             q = self._rearange_in_fa(q, b, n, h).to(ms.float16)
             k = self._rearange_in_fa(k, b, n_c, h).to(ms.float16)
@@ -574,9 +575,10 @@ class SeqParallelMultiHeadAttention(nn.Cell):
                 mask = self.tile_fa(mask, (1, 1, n, 1)).to(ms.uint8)
                 mask = ops.stop_gradient(mask)
             out = self.attention(q, k, v, mask)
-            out = self._rearange_out_fa(out, b, n, h).to(x.dtype)
-
-        return self.to_out(out).to(x_dtype)
+            out = self._rearange_out_fa(out, b, n, h).to(x.dtype)  # (b*n, h*d)
+        out = self.to_out(out).to(x_dtype)
+        out = ops.reshape(out, (b, n, d))
+        return out
 
     def shard(self):
         self.dp = self.parallel_config.get("data_parallel", 1)
