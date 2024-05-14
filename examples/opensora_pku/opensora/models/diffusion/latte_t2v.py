@@ -868,11 +868,14 @@ class SeqParallelFeedForward(nn.Cell):
 
     def construct(self, hidden_states: ms.Tensor, scale: float = 1.0) -> ms.Tensor:
         compatible_cls = GEGLU
+        original_shape = hidden_states.shape
+        hidden_states = ops.reshape(hidden_states, (-1, hidden_states.shape[-1]))  # (b*n, c)
         for module in self.net:
             if isinstance(module, compatible_cls):
                 hidden_states = module(hidden_states, scale)
             else:
                 hidden_states = module(hidden_states)
+        hidden_states = ops.reshape(hidden_states, original_shape)
         return hidden_states
 
     def shard(self):
