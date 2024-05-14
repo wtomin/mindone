@@ -1817,9 +1817,9 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             **cross_attention_kwargs,
         )
         if self.use_ada_layer_norm_zero:
-            attn_output = self.add(gate_msa.unsqueeze(1), attn_output)
+            attn_output = self.mult(attn_output, gate_msa.unsqueeze(1))
         elif self.use_ada_layer_norm_single:
-            attn_output = self.add(gate_msa, attn_output)
+            attn_output = self.mult(attn_output, gate_msa)
 
         hidden_states = self.add(attn_output, hidden_states)
         if hidden_states.ndim == 4:
