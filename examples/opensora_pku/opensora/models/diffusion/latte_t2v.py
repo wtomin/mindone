@@ -1260,7 +1260,7 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             norm_hidden_states = self.norm1_ln(hidden_states)
         elif self.use_ada_layer_norm_single:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
-                self.add_1(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+                self.add_1(timestep.reshape(batch_size, 6, -1), self.scale_shift_table[None])
             )
             norm_hidden_states = self.norm1_ln(hidden_states)
             norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_msa, scale_msa)
@@ -1288,9 +1288,9 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             **cross_attention_kwargs,
         )
         if self.use_ada_layer_norm_zero:
-            attn_output = self.mult(gate_msa.unsqueeze(1), attn_output)
+            attn_output = self.mult(attn_output, gate_msa.unsqueeze(1))
         elif self.use_ada_layer_norm_single:
-            attn_output = self.mult(gate_msa, attn_output)
+            attn_output = self.mult(attn_output, gate_msa)
 
         hidden_states = self.add(attn_output, hidden_states)
         if hidden_states.ndim == 4:
@@ -1329,9 +1329,9 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             ff_output = self.ff(norm_hidden_states, scale=lora_scale)
 
         if self.use_ada_layer_norm_zero:
-            ff_output = self.mult(gate_mlp.unsqueeze(1), ff_output)
+            ff_output = self.mult(ff_output, gate_mlp.unsqueeze(1))
         elif self.use_ada_layer_norm_single:
-            ff_output = self.mult(gate_mlp, ff_output)
+            ff_output = self.mult(ff_output, gate_mlp)
 
         hidden_states = self.add(ff_output, hidden_states)
         if hidden_states.ndim == 4:
@@ -1789,7 +1789,7 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             norm_hidden_states = self.norm1_ln(hidden_states)
         elif self.use_ada_layer_norm_single:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
-                self.add_1(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+                self.add_1(timestep.reshape(batch_size, 6, -1), self.scale_shift_table[None])
             )
             norm_hidden_states = self.norm1_ln(hidden_states)
             norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_msa, scale_msa)
@@ -1867,9 +1867,9 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
         ff_output = self.ff(norm_hidden_states, scale=lora_scale)
 
         if self.use_ada_layer_norm_zero:
-            ff_output = self.mult(gate_mlp.unsqueeze(1), ff_output)
+            ff_output = self.mult(ff_output, gate_mlp.unsqueeze(1))
         elif self.use_ada_layer_norm_single:
-            ff_output = self.mult(gate_mlp, ff_output)
+            ff_output = self.mult(ff_output, gate_mlp)
 
         hidden_states = self.add(ff_output, hidden_states)
         if hidden_states.ndim == 4:
