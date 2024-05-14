@@ -1217,10 +1217,21 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
         self._chunk_size = None
         self._chunk_dim = 0
         self.add = ops.Add()
+        self.add_1 = ops.Add()
         self.mult = ops.Mul()
         self.split = ops.Split(axis=1, output_num=6)
+        self.t2i_modulate_add_0 = ops.Add()
+        self.t2i_modulate_mult = ops.Mul()
+        self.t2i_modulate_add_1 = ops.Add()
+
         self.parallel_config = parallel_config
         self.shard()
+
+    def t2i_modulate(self, x, shift, scale):
+        a = self.t2i_modulate_add_0(scale, 1)
+        x = self.t2i_modulate_mult(x, a)
+        x = self.t2i_modulate_add_1(x, shift)
+        return x
 
     def construct(
         self,
@@ -1247,10 +1258,10 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             norm_hidden_states = self.norm1_ln(hidden_states)
         elif self.use_ada_layer_norm_single:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
-                self.add(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+                self.add_1(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
             )
             norm_hidden_states = self.norm1_ln(hidden_states)
-            norm_hidden_states = norm_hidden_states * (1 + scale_msa) + shift_msa
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_msa, scale_msa)
             # norm_hidden_states = norm_hidden_states.squeeze(1)  # error message
         else:
             raise ValueError("Incorrect norm used")
@@ -1288,12 +1299,12 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
             hidden_states = self.fuser(hidden_states, gligen_kwargs["objs"])
 
         if self.use_ada_layer_norm_zero:
-            norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_mlp[:, None], scale_mlp[:, None])
 
         if self.use_ada_layer_norm_single:
             # norm_hidden_states = self.norm2(hidden_states)
             norm_hidden_states = self.norm3(hidden_states)
-            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp)), shift_mlp)
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_mlp, scale_mlp)
 
         if self._chunk_size is not None:
             # "feed_forward_chunk_size" can be used to save memory
@@ -1334,14 +1345,19 @@ class SeqParallelBasicTransformerBlock_(nn.Cell):
         self.add.shard(((self.dp, self.sp, 1), (self.dp, self.sp, 1)))
         self.mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
 
+        self.add_1.shard(((self.dp, 1, 1), (1, 1, 1)))
         self.split.shard(((self.dp, 1, 1),))
         self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
 
         if self.use_ada_layer_norm_single:
             # current only implement this layernorm
             self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+            self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
         else:
             raise NotImplementedError
+        self.t2i_modulate_add_0.shard(((self.dp, 1, 1), ()))
+        self.t2i_modulate_mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
+        self.t2i_modulate_add_1.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
 
 
 class BasicTransformerBlock(nn.Cell):
@@ -1729,11 +1745,21 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
         self._chunk_size = None
         self._chunk_dim = 0
         self.add = ops.Add()
+        self.add_1 = ops.Add()
         self.mult = ops.Mul()
         self.split = ops.Split(axis=1, output_num=6)
+        self.t2i_modulate_add_0 = ops.Add()
+        self.t2i_modulate_mult = ops.Mul()
+        self.t2i_modulate_add_1 = ops.Add()
 
         self.parallel_config = parallel_config
         self.shard()
+
+    def t2i_modulate(self, x, shift, scale):
+        a = self.t2i_modulate_add_0(scale, 1)
+        x = self.t2i_modulate_mult(x, a)
+        x = self.t2i_modulate_add_1(x, shift)
+        return x
 
     def construct(
         self,
@@ -1759,10 +1785,10 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             norm_hidden_states = self.norm1_ln(hidden_states)
         elif self.use_ada_layer_norm_single:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.split(
-                self.add(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
+                self.add_1(self.scale_shift_table[None], timestep.reshape(batch_size, 6, -1))
             )
             norm_hidden_states = self.norm1_ln(hidden_states)
-            norm_hidden_states = norm_hidden_states * (1 + scale_msa) + shift_msa
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_msa, scale_msa)
             # norm_hidden_states = norm_hidden_states.squeeze(1)  # error message
         else:
             raise ValueError("Incorrect norm used")
@@ -1828,11 +1854,11 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             norm_hidden_states = self.norm3(hidden_states)
 
         if self.use_ada_layer_norm_zero:
-            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp[:, None])), shift_mlp[:, None])
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_mlp[:, None], scale_mlp[:, None])
 
         if self.use_ada_layer_norm_single:
             norm_hidden_states = self.norm2_ln(hidden_states)
-            norm_hidden_states = self.add(self.mult(norm_hidden_states, (1 + scale_mlp)), shift_mlp)
+            norm_hidden_states = self.t2i_modulate(norm_hidden_states, shift_mlp, scale_mlp)
 
         ff_output = self.ff(norm_hidden_states, scale=lora_scale)
 
@@ -1854,7 +1880,7 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
 
         self.add.shard(((self.dp, self.sp, 1), (self.dp, self.sp, 1)))
         self.mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
-
+        self.add_1.shard(((self.dp, 1, 1), (1, 1, 1)))
         self.split.shard(((self.dp, 1, 1),))
 
         if not self.use_ada_layer_norm:
@@ -1865,6 +1891,9 @@ class SeqParallelBasicTransformerBlock(nn.Cell):
             self.norm1_ln.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
         else:
             self.norm3.layer_norm.shard(((self.dp, self.sp, 1), (1,), (1,)))
+        self.t2i_modulate_add_0.shard(((self.dp, 1, 1), ()))
+        self.t2i_modulate_mult.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
+        self.t2i_modulate_add_1.shard(((self.dp, self.sp, 1), (self.dp, 1, 1)))
 
 
 class Latte(ModelMixin, ConfigMixin):
@@ -2449,6 +2478,101 @@ class LatteT2VBlock(nn.Cell):
         return hidden_states
 
 
+class SeqParallelLatteT2VBlock(nn.Cell):
+    def __init__(self, block_id, temp_pos_embed, spatial_block, temp_block, parallel_config={}):
+        super().__init__()
+        self.spatial_block = spatial_block
+        self.temp_block = temp_block
+        self.is_first_block = block_id == 0
+        self.temp_pos_embed = temp_pos_embed
+
+        self.add_1 = ops.Add()
+        self.transpose = ops.Transpose()
+        self.parallel_config = parallel_config
+        self.shard()
+
+    def construct(
+        self,
+        hidden_states: ms.Tensor,
+        class_labels: Optional[ms.Tensor] = None,
+        cross_attention_kwargs: Dict[str, Any] = None,
+        attention_mask: Optional[ms.Tensor] = None,
+        encoder_hidden_states_spatial: Optional[ms.Tensor] = None,
+        timestep_spatial: Optional[ms.Tensor] = None,
+        timestep_temp: Optional[ms.Tensor] = None,
+        encoder_attention_mask: Optional[ms.Tensor] = None,
+        use_image_num: int = 0,
+        input_batch_size: int = 0,
+        frame: int = 0,
+        enable_temporal_attentions: bool = True,
+    ):
+        hidden_states = self.spatial_block(
+            hidden_states,
+            attention_mask,
+            encoder_hidden_states_spatial,
+            encoder_attention_mask,
+            timestep_spatial,
+            cross_attention_kwargs,
+            class_labels,
+        )
+
+        if enable_temporal_attentions:
+            # b c f h w, f = 16 + 4
+            # rearrange in: (b f) t d -> (b t) f d
+            hidden_states = ops.reshape(
+                hidden_states, (input_batch_size, frame + use_image_num, -1, hidden_states.shape[-1])
+            )
+            hidden_states = self.transpose(hidden_states, (0, 2, 1, 3))
+            hidden_states = ops.reshape(hidden_states, (-1, frame + use_image_num, hidden_states.shape[-1]))
+
+            if use_image_num != 0 and self.training:
+                hidden_states_video = hidden_states[:, :frame, ...]
+                hidden_states_image = hidden_states[:, frame:, ...]
+                if self.is_first_block:
+                    hidden_states_video = self.add_1(hidden_states_video, self.temp_pos_embed)
+
+                hidden_states_video = self.temp_block(
+                    hidden_states_video,
+                    None,  # attention_mask
+                    None,  # encoder_hidden_states
+                    None,  # encoder_attention_mask
+                    timestep_temp,
+                    cross_attention_kwargs,
+                    class_labels,
+                )
+
+                hidden_states = ops.cat([hidden_states_video, hidden_states_image], axis=1)
+            else:
+                if self.is_first_block:
+                    hidden_states = self.add_1(hidden_states, self.temp_pos_embed)
+
+                hidden_states = self.temp_block(
+                    hidden_states,
+                    None,  # attention_mask
+                    None,  # encoder_hidden_states
+                    None,  # encoder_attention_mask
+                    timestep_temp,
+                    cross_attention_kwargs,
+                    class_labels,
+                )
+            # rearrange out: (b t) f d -> (b f) t d
+            hidden_states = ops.reshape(
+                hidden_states, (input_batch_size, -1, frame + use_image_num, hidden_states.shape[-1])
+            )
+            hidden_states = self.transpose(hidden_states, (0, 2, 1, 3))
+            hidden_states = ops.reshape(
+                hidden_states, (input_batch_size * (frame + use_image_num), -1, hidden_states.shape[-1])
+            )
+        return hidden_states
+
+    def shard(self):
+        self.dp = self.parallel_config.get("data_parallel", 1)
+        self.mp = self.parallel_config.get("model_parallel", 1)
+        self.sp = self.parallel_config.get("sequence_parallel", 1)
+        self.transpose.shard(((self.dp, 1, 1, 1),))
+        self.add_1.shard(((self.dp, 1, 1), (1, 1, 1)))
+
+
 class LatteT2V(ModelMixin, ConfigMixin):
     _supports_gradient_checkpointing = True
 
@@ -2747,13 +2871,28 @@ class LatteT2V(ModelMixin, ConfigMixin):
         )  # 1152 hidden size
 
         self.temp_pos_embed = ms.Tensor(temp_pos_embed).float().unsqueeze(0)
-
-        self.blocks = nn.CellList(
-            [
-                LatteT2VBlock(d, self.temp_pos_embed, self.transformer_blocks[d], self.temporal_transformer_blocks[d])
-                for d in range(num_layers)
-            ]
-        )
+        if not enable_sequence_parallelism:
+            self.blocks = nn.CellList(
+                [
+                    LatteT2VBlock(
+                        d, self.temp_pos_embed, self.transformer_blocks[d], self.temporal_transformer_blocks[d]
+                    )
+                    for d in range(num_layers)
+                ]
+            )
+        else:
+            self.blocks = nn.CellList(
+                [
+                    SeqParallelLatteT2VBlock(
+                        d,
+                        self.temp_pos_embed,
+                        self.transformer_blocks[d],
+                        self.temporal_transformer_blocks[d],
+                        parallel_config=spatial_parallel_config,
+                    )
+                    for d in range(num_layers)
+                ]
+            )
 
         if self.use_recompute:
             for block in self.blocks:
