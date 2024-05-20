@@ -230,6 +230,8 @@ def main(args):
     )
     if args.enable_sequence_parallelism:
         spatial_parallel_config, temporal_parallel_config = check_sequence_parallel_condition(args, device_num)
+        logger.info(f"Spatial blocks parallel config: {spatial_parallel_config}")
+        logger.info(f"Temporal blocks parallel config: {temporal_parallel_config}")
     else:
         spatial_parallel_config, temporal_parallel_config = {}, {}
     train_with_vae_latent = args.vae_latent_folder is not None and os.path.exists(args.vae_latent_folder)
