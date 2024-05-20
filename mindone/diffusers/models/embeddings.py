@@ -471,14 +471,17 @@ class PatchEmbed(nn.Cell):
         # (For PixArt-Alpha: https://github.com/PixArt-alpha/PixArt-alpha/\
         # blob/0f55e922376d8b797edd44d25d0e7464b260dcab/diffusion/model/nets/PixArtMS.py#L162C151-L162C160)
         if self.height != height or self.width != width:
-            pos_embed = get_2d_sincos_pos_embed(
-                embed_dim=self.pos_embed.shape[-1],
-                grid_size=(height, width),
-                base_size=self.base_size,
-                interpolation_scale=self.interpolation_scale,
+            # pos_embed = get_2d_sincos_pos_embed(
+            #     embed_dim=self.pos_embed.shape[-1],
+            #     grid_size=(height, width),
+            #     base_size=self.base_size,
+            #     interpolation_scale=self.interpolation_scale,
+            # )
+            # pos_embed = ms.Tensor(pos_embed)
+            # pos_embed = pos_embed.float().unsqueeze(0)
+            raise ValueError(
+                f"Cannot do pos_embed_interpolate! Please check if the input height and weight are ({self.height}, {self.width})"
             )
-            pos_embed = ms.Tensor(pos_embed)
-            pos_embed = pos_embed.float().unsqueeze(0)
         else:
             pos_embed = self.pos_embed
 
