@@ -43,7 +43,6 @@ class CausalConv3d(nn.Cell):
         **kwargs,
     ):
         super().__init__()
-        assert isinstance(padding, int)
         kernel_size = cast_tuple(kernel_size, 3)
         time_kernel_size, height_kernel_size, width_kernel_size = kernel_size
 
@@ -298,18 +297,11 @@ class SpatialDownsample2x(nn.Cell):
             self.chan_out,
             (1,) + self.kernel_size,
             stride=(1,) + stride,
-            padding=0,
+            padding=(0, 0, 0, 1, 0, 1),
         )
-
-        # no asymmetric padding, must do it ourselves
-        # order (width_pad, width_pad, height_pad, height_pad, time_pad, 0)
-        # self.padding = (0,1,0,1,0,0) # not compatible for ms2.2
-        self.pad = ops.Pad(paddings=((0, 0), (0, 0), (0, 0), (0, 1), (0, 1)))
 
     def construct(self, x):
         # x shape: (b c t h w)
-        # x = ops.pad(x, self.padding, mode="constant", value=0)
-        x = self.pad(x)
         x = self.conv(x)
         return x
 
