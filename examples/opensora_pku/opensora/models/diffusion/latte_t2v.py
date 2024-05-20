@@ -2732,104 +2732,96 @@ class LatteT2V(ModelMixin, ConfigMixin):
 
         # 3. Define transformers blocks, spatial attention
         if not enable_sequence_parallelism:
-            self.transformer_blocks = nn.CellList(
-                [
-                    BasicTransformerBlock(
-                        inner_dim,
-                        num_attention_heads,
-                        attention_head_dim,
-                        dropout=dropout,
-                        cross_attention_dim=cross_attention_dim,
-                        activation_fn=activation_fn,
-                        num_embeds_ada_norm=num_embeds_ada_norm,
-                        attention_bias=attention_bias,
-                        only_cross_attention=only_cross_attention,
-                        double_self_attention=double_self_attention,
-                        upcast_attention=upcast_attention,
-                        norm_type=norm_type,
-                        norm_elementwise_affine=norm_elementwise_affine,
-                        norm_eps=norm_eps,
-                        attention_type=attention_type,
-                        enable_flash_attention=enable_flash_attention,
-                    )
-                    for d in range(num_layers)
-                ]
-            )
+            self.transformer_blocks = [
+                BasicTransformerBlock(
+                    inner_dim,
+                    num_attention_heads,
+                    attention_head_dim,
+                    dropout=dropout,
+                    cross_attention_dim=cross_attention_dim,
+                    activation_fn=activation_fn,
+                    num_embeds_ada_norm=num_embeds_ada_norm,
+                    attention_bias=attention_bias,
+                    only_cross_attention=only_cross_attention,
+                    double_self_attention=double_self_attention,
+                    upcast_attention=upcast_attention,
+                    norm_type=norm_type,
+                    norm_elementwise_affine=norm_elementwise_affine,
+                    norm_eps=norm_eps,
+                    attention_type=attention_type,
+                    enable_flash_attention=enable_flash_attention,
+                )
+                for d in range(num_layers)
+            ]
         else:
-            self.transformer_blocks = nn.CellList(
-                [
-                    SeqParallelBasicTransformerBlock(
-                        inner_dim,
-                        num_attention_heads,
-                        attention_head_dim,
-                        dropout=dropout,
-                        cross_attention_dim=cross_attention_dim,
-                        activation_fn=activation_fn,
-                        num_embeds_ada_norm=num_embeds_ada_norm,
-                        attention_bias=attention_bias,
-                        only_cross_attention=only_cross_attention,
-                        double_self_attention=double_self_attention,
-                        upcast_attention=upcast_attention,
-                        norm_type=norm_type,
-                        norm_elementwise_affine=norm_elementwise_affine,
-                        norm_eps=norm_eps,
-                        attention_type=attention_type,
-                        enable_flash_attention=enable_flash_attention,
-                        parallel_config=spatial_parallel_config,
-                    )
-                    for d in range(num_layers)
-                ]
-            )
+            self.transformer_blocks = [
+                SeqParallelBasicTransformerBlock(
+                    inner_dim,
+                    num_attention_heads,
+                    attention_head_dim,
+                    dropout=dropout,
+                    cross_attention_dim=cross_attention_dim,
+                    activation_fn=activation_fn,
+                    num_embeds_ada_norm=num_embeds_ada_norm,
+                    attention_bias=attention_bias,
+                    only_cross_attention=only_cross_attention,
+                    double_self_attention=double_self_attention,
+                    upcast_attention=upcast_attention,
+                    norm_type=norm_type,
+                    norm_elementwise_affine=norm_elementwise_affine,
+                    norm_eps=norm_eps,
+                    attention_type=attention_type,
+                    enable_flash_attention=enable_flash_attention,
+                    parallel_config=spatial_parallel_config,
+                )
+                for d in range(num_layers)
+            ]
         # Define temporal transformers blocks
         if not enable_sequence_parallelism:
-            self.temporal_transformer_blocks = nn.CellList(
-                [
-                    BasicTransformerBlock_(  # one attention
-                        inner_dim,
-                        num_attention_heads,  # num_attention_heads
-                        attention_head_dim,  # attention_head_dim 72
-                        dropout=dropout,
-                        cross_attention_dim=None,
-                        activation_fn=activation_fn,
-                        num_embeds_ada_norm=num_embeds_ada_norm,
-                        attention_bias=attention_bias,
-                        only_cross_attention=only_cross_attention,
-                        double_self_attention=False,
-                        upcast_attention=upcast_attention,
-                        norm_type=norm_type,
-                        norm_elementwise_affine=norm_elementwise_affine,
-                        norm_eps=norm_eps,
-                        attention_type=attention_type,
-                        enable_flash_attention=enable_flash_attention,
-                    )
-                    for d in range(num_layers)
-                ]
-            )
+            self.temporal_transformer_blocks = [
+                BasicTransformerBlock_(  # one attention
+                    inner_dim,
+                    num_attention_heads,  # num_attention_heads
+                    attention_head_dim,  # attention_head_dim 72
+                    dropout=dropout,
+                    cross_attention_dim=None,
+                    activation_fn=activation_fn,
+                    num_embeds_ada_norm=num_embeds_ada_norm,
+                    attention_bias=attention_bias,
+                    only_cross_attention=only_cross_attention,
+                    double_self_attention=False,
+                    upcast_attention=upcast_attention,
+                    norm_type=norm_type,
+                    norm_elementwise_affine=norm_elementwise_affine,
+                    norm_eps=norm_eps,
+                    attention_type=attention_type,
+                    enable_flash_attention=enable_flash_attention,
+                )
+                for d in range(num_layers)
+            ]
         else:
-            self.temporal_transformer_blocks = nn.CellList(
-                [
-                    SeqParallelBasicTransformerBlock_(  # one attention
-                        inner_dim,
-                        num_attention_heads,  # num_attention_heads
-                        attention_head_dim,  # attention_head_dim 72
-                        dropout=dropout,
-                        cross_attention_dim=None,
-                        activation_fn=activation_fn,
-                        num_embeds_ada_norm=num_embeds_ada_norm,
-                        attention_bias=attention_bias,
-                        only_cross_attention=only_cross_attention,
-                        double_self_attention=False,
-                        upcast_attention=upcast_attention,
-                        norm_type=norm_type,
-                        norm_elementwise_affine=norm_elementwise_affine,
-                        norm_eps=norm_eps,
-                        attention_type=attention_type,
-                        enable_flash_attention=enable_flash_attention,
-                        parallel_config=temporal_parallel_config,
-                    )
-                    for d in range(num_layers)
-                ]
-            )
+            self.temporal_transformer_blocks = [
+                SeqParallelBasicTransformerBlock_(  # one attention
+                    inner_dim,
+                    num_attention_heads,  # num_attention_heads
+                    attention_head_dim,  # attention_head_dim 72
+                    dropout=dropout,
+                    cross_attention_dim=None,
+                    activation_fn=activation_fn,
+                    num_embeds_ada_norm=num_embeds_ada_norm,
+                    attention_bias=attention_bias,
+                    only_cross_attention=only_cross_attention,
+                    double_self_attention=False,
+                    upcast_attention=upcast_attention,
+                    norm_type=norm_type,
+                    norm_elementwise_affine=norm_elementwise_affine,
+                    norm_eps=norm_eps,
+                    attention_type=attention_type,
+                    enable_flash_attention=enable_flash_attention,
+                    parallel_config=temporal_parallel_config,
+                )
+                for d in range(num_layers)
+            ]
         # 4. Define output layers
         self.out_channels = in_channels if out_channels is None else out_channels
         if self.is_input_continuous:
