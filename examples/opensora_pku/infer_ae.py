@@ -87,7 +87,9 @@ def main(args):
         logger.info(f"Set mixed precision to O2 with dtype={args.dtype}")
     else:
         amp_level = "O0"
-
+    if args.enable_tiling:
+        model.enable_tiling()
+        model.tile_overlap_factor = args.tile_overlap_factor
     ds_config = dict(
         csv_path=args.csv_path,
         data_folder=args.data_path,
@@ -261,6 +263,8 @@ def parse_args():
                 if bf16 or fp16, amp_level==O2, part of layers will compute in bf16 or fp16 such as matmul, dense, conv.",
     )
     parser.add_argument("--device_target", type=str, default="Ascend", help="Ascend or GPU")
+    parser.add_argument("--enable_tiling", action="store_true")
+    parser.add_argument("--tile_overlap_factor", type=float, default=0.25)
 
     args = parser.parse_args()
 
