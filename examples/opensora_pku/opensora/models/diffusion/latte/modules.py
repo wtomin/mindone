@@ -163,13 +163,12 @@ class MultiHeadAttention(nn.Cell):
             self.to_k = None
             self.to_v = None
 
-        self.to_out = nn.SequentialCell(nn.Dense(self.inner_dim, query_dim, has_bias=out_bias), nn.Dropout(p=dropout))
-
         self.enable_flash_attention = (
             enable_flash_attention and FLASH_IS_AVAILABLE and (ms.context.get_context("device_target") == "Ascend")
         )
 
         if self.enable_flash_attention:
+            attn_dtype = self.fa_attn_dtype
             self.flash_attention = MSFlashAttention(
                 head_dim=dim_head,
                 head_num=heads,
@@ -178,9 +177,14 @@ class MultiHeadAttention(nn.Cell):
                 dtype=self.fa_attn_dtype,
             )
         else:
+            attn_dtype = self.attn_dtype
             self.attention = Attention(
                 dim_head=dim_head, attn_drop=attn_drop, upcast_attention=upcast_attention, upcast_softmax=upcast_softmax
             )
+
+        self.to_out = nn.SequentialCell(
+            nn.Dense(self.inner_dim, query_dim, has_bias=out_bias), nn.Dropout(p=dropout)
+        ).to_float(attn_dtype)
 
     @staticmethod
     def _rearange_in(x, h):
