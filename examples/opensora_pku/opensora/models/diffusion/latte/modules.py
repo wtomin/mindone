@@ -139,7 +139,8 @@ class MultiHeadAttention(nn.Cell):
         upcast_softmax: bool = True,
         out_bias: bool = True,
         only_cross_attention: bool = False,
-        dtype=ms.float32,
+        attn_dtype=ms.float32,
+        fa_attn_dtype=ms.bfloat16,
         enable_flash_attention=False,
     ):
         super().__init__()
@@ -147,7 +148,8 @@ class MultiHeadAttention(nn.Cell):
         self.cross_attention_dim = cross_attention_dim if cross_attention_dim is not None else query_dim
         self.dropout = dropout
         self.heads = heads
-        self.dtype = dtype
+        self.attn_dtype = attn_dtype
+        self.fa_attn_dtype = fa_attn_dtype
 
         self.only_cross_attention = only_cross_attention
 
@@ -169,7 +171,11 @@ class MultiHeadAttention(nn.Cell):
 
         if self.enable_flash_attention:
             self.flash_attention = MSFlashAttention(
-                head_dim=dim_head, head_num=heads, fix_head_dims=[72], attention_dropout=attn_drop
+                head_dim=dim_head,
+                head_num=heads,
+                fix_head_dims=[72],
+                attention_dropout=attn_drop,
+                dtype=self.fa_attn_dtype,
             )
         else:
             self.attention = Attention(
@@ -235,7 +241,9 @@ class MultiHeadAttention(nn.Cell):
                 if mask.shape[-2] == 1:
                     mask = mask.repeat(q_n, axis=-2)
                 mask = ops.expand_dims(mask, axis=1)  # (q_b, 1, q_n, k_n)
-            out = self.flash_attention(q, k, v, mask)
+            out = self.flash_attention(
+                q.to(self.fa_attn_dtype), k.to(self.fa_attn_dtype), v.to(self.fa_attn_dtype), mask
+            )
             b, h, n, d = out.shape
             # reshape FA output to original attn input format, (b h n d) -> (b n h*d)
             out = out.transpose(0, 2, 1, 3).view(b, n, -1)

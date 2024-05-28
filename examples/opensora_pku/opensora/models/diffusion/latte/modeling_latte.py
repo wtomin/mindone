@@ -91,6 +91,7 @@ class BasicTransformerBlock_(nn.Cell):
         positional_embeddings: Optional[str] = None,
         num_positional_embeddings: Optional[int] = None,
         enable_flash_attention: bool = False,
+        fa_attn_dtype=ms.bfloat16,
     ):
         super().__init__()
         self.only_cross_attention = only_cross_attention
@@ -136,6 +137,7 @@ class BasicTransformerBlock_(nn.Cell):
             cross_attention_dim=cross_attention_dim if only_cross_attention else None,
             upcast_attention=upcast_attention,
             enable_flash_attention=enable_flash_attention,
+            fa_attn_dtype=fa_attn_dtype,
         )
 
         self.norm3 = LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
@@ -315,6 +317,7 @@ class BasicTransformerBlock(nn.Cell):
         positional_embeddings: Optional[str] = None,
         num_positional_embeddings: Optional[int] = None,
         enable_flash_attention: bool = False,
+        fa_attn_dtype=ms.bfloat16,
     ):
         super().__init__()
         self.only_cross_attention = only_cross_attention
@@ -360,6 +363,7 @@ class BasicTransformerBlock(nn.Cell):
             cross_attention_dim=cross_attention_dim if only_cross_attention else None,
             upcast_attention=upcast_attention,
             enable_flash_attention=enable_flash_attention,
+            fa_attn_dtype=fa_attn_dtype,
         )
 
         # 2. Cross-Attn
@@ -382,6 +386,7 @@ class BasicTransformerBlock(nn.Cell):
                 bias=attention_bias,
                 upcast_attention=upcast_attention,
                 enable_flash_attention=enable_flash_attention,
+                fa_attn_dtype=fa_attn_dtype,
             )  # is self-attn if encoder_hidden_states is none
         else:
             self.norm2 = None
@@ -1164,6 +1169,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
         caption_channels: int = None,
         video_length: int = 16,
         enable_flash_attention: bool = False,
+        fa_attn_dtype=ms.bfloat16,  # default to use bf16 for flash-attention score.
         use_recompute=False,
     ):
         super().__init__()
@@ -1274,6 +1280,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
                 norm_eps=norm_eps,
                 attention_type=attention_type,
                 enable_flash_attention=enable_flash_attention,
+                fa_attn_dtype=fa_attn_dtype,
             )
             for d in range(num_layers)
         ]
@@ -1297,6 +1304,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
                 norm_eps=norm_eps,
                 attention_type=attention_type,
                 enable_flash_attention=enable_flash_attention,
+                fa_attn_dtype=fa_attn_dtype,
             )
             for d in range(num_layers)
         ]
