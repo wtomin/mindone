@@ -128,7 +128,9 @@ class DiffusionWithLoss(nn.Cell):
             raise ValueError("Incorrect Dimensions of x")
         return z
 
-    def construct(self, x: ms.Tensor, text_tokens: ms.Tensor, mask: ms.Tensor = None):
+    def construct(
+        self, x: ms.Tensor, text_tokens: ms.Tensor, mask: ms.Tensor = None, t: ms.Tensor = None, noise: ms.Tensor = None
+    ):
         """
         Video diffusion model forward and loss computation for training
 
@@ -159,7 +161,7 @@ class DiffusionWithLoss(nn.Cell):
         else:
             text_embed = text_tokens  # dataset retunrs text embeddings instead of text tokens
 
-        loss = self.compute_loss(x, text_embed, mask)
+        loss = self.compute_loss(x, text_embed, mask, t, noise)
 
         return loss
 
@@ -199,9 +201,9 @@ class DiffusionWithLoss(nn.Cell):
 
         return vb
 
-    def compute_loss(self, x, text_embed, mask):
-        t = ops.randint(0, self.diffusion.num_timesteps, (x.shape[0],))
-        noise = ops.randn_like(x)
+    def compute_loss(self, x, text_embed, mask, t, noise):
+        # t = ops.randint(0, self.diffusion.num_timesteps, (x.shape[0],))
+        # noise = ops.randn_like(x)
         x_t = self.diffusion.q_sample(x, t, noise=noise)
 
         # latte forward input match

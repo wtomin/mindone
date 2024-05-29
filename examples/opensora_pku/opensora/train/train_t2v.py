@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 import sys
 
+import numpy as np
 import yaml
 
 import mindspore as ms
@@ -11,7 +13,7 @@ from mindspore.train.callback import TimeMonitor
 mindone_lib_path = os.path.abspath(os.path.abspath("../../"))
 sys.path.insert(0, mindone_lib_path)
 sys.path.append("./")
-from opensora.dataset.t2v_dataset import create_dataloader
+from opensora.dataset.t2v_dataset import TextVideoDataset, create_dataloader
 from opensora.models.ae import ae_channel_config, ae_stride_config, getae_model_config, getae_wrapper
 from opensora.models.ae.videobase.causal_vae.modeling_causalvae import TimeDownsample2x, TimeUpsample2x
 from opensora.models.diffusion.diffusion import create_diffusion_T as create_diffusion
@@ -36,6 +38,24 @@ os.environ["HCCL_CONNECT_TIMEOUT"] = "6000"
 os.environ["MS_ASCEND_CHECK_OVERFLOW_MODE"] = "INFNAN_MODE"
 
 logger = logging.getLogger(__name__)
+
+
+class TextVideoDatasetFixRandomness(TextVideoDataset):
+    def __init__(self, *args, **kwargs):
+        assert "timesteps" in kwargs
+        self.timesteps = kwargs["timesteps"]
+        del kwargs["timesteps"]
+        assert "noise" in kwargs
+        self.noise = kwargs["noise"]
+        del kwargs["noise"]
+        super().__init__(*args, **kwargs)
+
+    def __getitem__(self, idx):
+        batch = super().__getitem__(idx)
+        timestep = self.timesteps[idx]
+        noise = self.noise
+        batch += (timestep, noise)
+        return batch
 
 
 def set_all_reduce_fusion(
@@ -71,6 +91,7 @@ def main(args):
         strategy_ckpt_save_file=os.path.join(args.output_dir, "src_strategy.ckpt") if save_src_strategy else "",
         optimizer_weight_shard_size=args.optimizer_weight_shard_size,
     )
+    ms.set_context(deterministic="ON")  # control randomness
     set_logger(output_dir=args.output_dir, rank=rank_id, log_level=eval(args.log_level))
     if args.use_deepspeed:
         raise NotImplementedError
@@ -191,15 +212,41 @@ def main(args):
         text_encoder=text_encoder,
         cond_stage_trainable=False,
         text_emb_cached=use_text_embed,
-        video_emb_cached=False,
+        video_emb_cached=train_with_vae_latent,
         use_image_num=args.use_image_num,
         dtype=model_dtype,
     )
 
     # 3. create dataset
     assert args.dataset == "t2v", "Support t2v dataset only."
+    num_samples = 16
+    # make a fake video dataset with only one video repeated for n times
+    video_data = json.load(open(args.data_path, "r"))
+    video_data = video_data[0:1] * num_samples
+    new_json_file = os.path.join(args.output_dir, "created_dataset", f"rank_{rank_id}", "data.json")
+    os.makedirs(os.path.dirname(new_json_file), exist_ok=True)
+    with open(new_json_file, "w") as f:
+        json.dump(video_data, f)
+
+    # create a list of
+    use_single_timestep = False  # whether to use single time steps
+    if use_single_timestep:
+        timesteps = np.array([500] * num_samples).astype(np.int32)
+    else:
+        timesteps = np.linspace(0, diffusion.num_timesteps, num_samples).astype(np.int32)
+    # create/load a random noise tensor (for diffusion forward steps)
+    noise_fp = "noise.npy"
+    assert os.path.exists(noise_fp), f"{noise_fp} does not exist!"
+    if not os.path.exists(noise_fp):
+        noise = np.random.randn(
+            4, video_length + args.use_image_num, latent_size[0], latent_size[1]
+        )  # random noise added to the latent features
+        np.save(noise_fp, noise)
+    else:
+        noise = np.load(noise_fp)
+        logger.info(f"Load noise from {noise_fp}")
     ds_config = dict(
-        data_file_path=args.data_path,
+        data_file_path=new_json_file,
         video_folder=args.video_folder,
         text_emb_folder=args.text_embed_folder,
         return_text_emb=use_text_embed,
@@ -215,18 +262,36 @@ def main(args):
         disable_flip=not args.enable_flip,
         use_image_num=args.use_image_num,
         token_max_length=args.model_max_length,
+        timesteps=timesteps,
+        noise=noise.astype(np.float32),
     )
+    dataset_fix = TextVideoDatasetFixRandomness(**ds_config)
+    column_names = ["video", "text", "mask", "timestep", "noise"]
     dataset = create_dataloader(
-        ds_config,
+        dataset_fix,
+        column_names=column_names,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,
         device_num=device_num,
         rank_id=rank_id,
         num_parallel_workers=args.num_parallel_workers,
         max_rowsize=args.max_rowsize,
     )
-    dataset_size = dataset.get_dataset_size()
+    dataset_size = len(dataset_fix) // (device_num * args.batch_size)
     assert dataset_size > 0, "Incorrect dataset size. Please check your dataset size and your global batch size"
+
+    # check if each batch is the same
+    pre_load_batch = None
+    for i, batch in enumerate(dataset):
+        if pre_load_batch is None:
+            pre_load_batch = batch
+        else:
+            for j, (item0, item1) in enumerate(zip(pre_load_batch, batch)):
+                if j != 3:
+                    assert np.allclose(item0.asnumpy(), item1.asnumpy()), f"Mismatch between batch0 and batch{i}"
+                else:
+                    print(f"time step is {item1} for {i}th batch")
+    logger.info("The dataset randomness test has passed. The randomness from dataloader is removed.")
 
     # 4. build training utils: lr, optim, callbacks, trainer
     if args.max_train_steps is not None and args.max_train_steps > 0:

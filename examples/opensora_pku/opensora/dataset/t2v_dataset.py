@@ -205,7 +205,8 @@ class TextVideoDataset:
 
         if not self.is_image:
             clip_length = min(video_length, (self.sample_n_frames - 1) * self.sample_stride + 1)
-            start_idx = random.randint(0, video_length - clip_length)
+            # start_idx = random.randint(0, video_length - clip_length)
+            start_idx = 0
             batch_index = np.linspace(start_idx, start_idx + clip_length - 1, self.sample_n_frames, dtype=int)
         else:
             batch_index = [random.randint(0, video_length - 1)]
@@ -423,8 +424,9 @@ class TextVideoDataset:
 
 
 def create_dataloader(
-    ds_config,
+    dataset,
     batch_size,
+    column_names=["video", "text", "mask"],
     ds_name="text_video",
     num_parallel_workers=12,
     max_rowsize=64,
@@ -434,11 +436,11 @@ def create_dataloader(
     drop_remainder=True,
     return_dataset=False,
 ):
-    if ds_name == "text_video":
-        dataset = TextVideoDataset(**ds_config)
-        column_names = ["video", "text", "mask"]
-    else:
-        raise NotImplementedError
+    # if ds_name == "text_video":
+    #     dataset = TextVideoDataset(**ds_config)
+    #     column_names = ["video", "text", "mask"]
+    # else:
+    #     raise NotImplementedError
 
     dataloader = ms.dataset.GeneratorDataset(
         source=dataset,
