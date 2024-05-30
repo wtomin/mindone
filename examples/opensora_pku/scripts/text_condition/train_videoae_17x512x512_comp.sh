@@ -16,10 +16,9 @@ amp_level="O1"
 enable_flash_attention="True"
 batch_size=2
 lr="2e-05"
-output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dtype-FA$enable_flash_attention-bs$batch_size-t5
+output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dtype-$amp_level-FA$enable_flash_attention-bs$batch_size-t5
 
-# msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --log_dir=$output_dir/parallel_logs opensora/train/train_t2v.py \
-python opensora/train/train_t2v.py \
+msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --log_dir=$output_dir/parallel_logs opensora/train/train_t2v.py \
       --data_path /home_host/ddd/workspace/datasets/sharegpt4v_path_cap_64x512x512-vid16.json \
       --video_folder /home_host/ddd/workspace/datasets/vid16/videos \
       --text_embed_folder /home_host/ddd/workspace/datasets/vid16/t5-len=300 \
@@ -49,5 +48,5 @@ python opensora/train/train_t2v.py \
     --use_image_num $use_image_num \
     --use_img_from_vid \
     --amp_level $amp_level \
-    # --use_parallel True \
-    # --parallel_mode "optim" \
+    --use_parallel True \
+    --parallel_mode "optim" \

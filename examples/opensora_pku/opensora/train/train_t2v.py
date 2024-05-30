@@ -169,7 +169,7 @@ def main(args):
                 latte_model,
                 amp_level=args.amp_level,
                 dtype=model_dtype,
-                custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU],
+                custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU] if model_dtype == ms.float16 else [],
             )
             logger.info(f"Set mixed precision to {args.amp_level} with dtype={args.precision}")
         else:
@@ -233,7 +233,7 @@ def main(args):
     if use_single_timestep:
         timesteps = np.array([500] * num_samples).astype(np.int32)
     else:
-        timesteps = np.linspace(0, diffusion.num_timesteps, num_samples).astype(np.int32)
+        timesteps = np.linspace(0, diffusion.num_timesteps - 1, num_samples).astype(np.int32)
     # create/load a random noise tensor (for diffusion forward steps)
     noise_fp = "noise.npy"
     assert os.path.exists(noise_fp), f"{noise_fp} does not exist!"
