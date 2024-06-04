@@ -11,8 +11,8 @@ export GLOG_v=2
 image_size=512
 use_image_num=4
 num_frames=17
-model_dtype="fp16"
-amp_level="O1"
+model_dtype="bf16"
+amp_level="O2"
 enable_flash_attention="True"
 batch_size=2
 lr="2e-05"
@@ -50,3 +50,4 @@ msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --
     --amp_level $amp_level \
     --use_parallel True \
     --parallel_mode "optim" \
+    --optim_eps 1e-6 \
