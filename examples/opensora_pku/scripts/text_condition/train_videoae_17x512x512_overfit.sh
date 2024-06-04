@@ -14,15 +14,15 @@ num_frames=17
 model_dtype="bf16"
 amp_level="O2"
 enable_flash_attention="True"
-batch_size=4
+batch_size=2
 lr="2e-05"
 output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dtype-$amp_level-FA$enable_flash_attention-bs$batch_size-t5
 
 msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --log_dir=$output_dir/parallel_logs opensora/train/train_t2v.py \
-      --data_path /remote-home1/dataset/sharegpt4v_path_cap_64x512x512.json \
-      --video_folder /remote-home1/dataset/data_split_tt \
-      --text_embed_folder /path/to/text-embed-folder \
-      --pretrained pretrained/t2v.ckpt \
+      --data_path /home_host/ddd/workspace/datasets/sharegpt4v_path_cap_64x512x512-vid64.json \
+      --video_folder /home_host/ddd/workspace/datasets/vid64/videos/ \
+      --text_embed_folder /home_host/ddd/workspace/datasets/vid64/t5-len=300 \
+      --pretrained LanguageBind/Open-Sora-Plan-v1.0.0/17x256x256/LatteT2V-17x256x256.ckpt \
     --model LatteT2V-XL/122 \
     --text_encoder_name DeepFloyd/t5-v1_1-xxl \
     --dataset t2v \
@@ -36,7 +36,7 @@ msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --
     --batch_size=$batch_size \
     --num_parallel_workers 10 \
     --gradient_accumulation_steps=1 \
-    --max_train_steps=1000000 \
+    --max_train_steps=40000 \
     --start_learning_rate=$lr \
     --lr_scheduler="constant" \
     --lr_warmup_steps=0 \
