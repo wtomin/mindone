@@ -21,7 +21,7 @@ from opensora.models.diffusion.latte.modules import Attention
 from opensora.models.diffusion.latte.net_with_loss import DiffusionWithLoss
 from opensora.models.text_encoder.t5 import T5Embedder
 from opensora.train.commons import create_loss_scaler, init_env, parse_args
-from opensora.utils.utils import get_precision
+from opensora.utils.utils import get_precision, parse_env
 
 from mindone.trainers.callback import EvalSaveCallback, OverflowMonitor, ProfilerCallback
 from mindone.trainers.checkpoint import resume_train_network
@@ -165,7 +165,8 @@ def main(args):
             logger.info(f"Using global bf16 for latte t2v model. Force model dtype from {model_dtype} to ms.bfloat16")
             model_dtype = ms.bfloat16
     # load checkpoint
-    if len(args.pretrained) > 0:
+    if args.pretrained is not None and len(args.pretrained) > 0:
+        assert os.path.exists(args.pretrained), f"The provided pretrained ckpt path {args.pretrained} is not existent!"
         logger.info(f"Loading ckpt {args.pretrained}...")
         latte_model.load_from_checkpoint(args.pretrained)
     else:
@@ -501,4 +502,5 @@ def parse_t2v_train_args(parser):
 if __name__ == "__main__":
     logger.debug("process id:", os.getpid())
     args = parse_args(additional_parse_args=parse_t2v_train_args)
+    parse_env(args.kernel_engine)
     main(args)
