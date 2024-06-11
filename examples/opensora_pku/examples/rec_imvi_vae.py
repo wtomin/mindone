@@ -168,7 +168,7 @@ def main(args):
     x_vae = preprocess(read_video(args.video_path, args.num_frames, args.sample_rate), args.resolution, args.crop_size)
     dtype = get_precision(args.precision)
     if not os.path.exists("x_vae_ms.npy"):
-        np.save("x_vae_ms.npy", x_vae.asnumpy())
+        np.save("x_vae_ms.npy", x_vae)
     x_vae = np.load("x_vae_ms.npy")
     x_vae = ms.Tensor(x_vae, dtype).unsqueeze(0)  # b c t h w
 
@@ -181,7 +181,7 @@ def main(args):
         latents = ms.Tensor(np.load("latents_ms.npy"))
         latents = latents.to(dtype)
         video_recon = vae.decode(latents)  # b t c h w
-        np.save("video_recon_ms.npy", video_recon.asnumpy())
+        np.save("video_recon_ms.npy", video_recon.float().asnumpy())
 
     exit
 

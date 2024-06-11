@@ -453,12 +453,19 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # infer
+    if not os.path.exists("latents.npy"):
+        latents = ms.ops.randn((1, 17, 4, 64, 64))
+        np.save("latents.npy", latents.asnumpy())
+    else:
+        latents = np.load("latents.npy")
+        latents = ms.Tensor(latents)
+
     for step, data in tqdm(enumerate(ds_iter), total=dataset_size):
         prompt = [x for x in data["caption"]]
         file_paths = data["file_path"]
         videos = (
             pipeline(
-                prompt,
+                prompt,  # only input one prompt
                 num_frames=args.num_frames,
                 height=args.height,
                 width=args.width,
@@ -467,6 +474,7 @@ if __name__ == "__main__":
                 enable_temporal_attentions=not args.force_images,
                 mask_feature=False,
                 output_type="latents" if args.save_latents else "pil",
+                latents=latents,  # control initial noise
             )
             .video.to(ms.float32)
             .asnumpy()

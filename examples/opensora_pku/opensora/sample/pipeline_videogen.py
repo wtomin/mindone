@@ -20,6 +20,8 @@ import urllib.parse as ul
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
 
+import numpy as np
+
 import mindspore as ms
 from mindspore import ops
 
@@ -659,6 +661,10 @@ class VideoGenPipeline(DiffusionPipeline):
             prompt_embeds = ops.cat([negative_prompt_embeds, prompt_embeds], axis=0)
             if prompt_embeds_mask is not None:
                 prompt_embeds_mask = prompt_embeds_mask.repeat_interleave(2, 0)
+        # save prompt embeddings
+        np.save("prompt_embeds.npy", prompt_embeds.float().asnumpy())
+        np.save("prompt_embeds_mask.npy", prompt_embeds_mask.float().asnumpy())
+        np.save("negative_prompt_embeds.npy", negative_prompt_embeds.float().asnumpy())
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps)
@@ -713,6 +719,8 @@ class VideoGenPipeline(DiffusionPipeline):
                     enable_temporal_attentions=enable_temporal_attentions,
                     encoder_attention_mask=prompt_embeds_mask,  # (b n)
                 )
+                np.save("noise_pred.npy", noise_pred.float().asnumpy())
+                exit
 
                 # perform guidance
                 if do_classifier_free_guidance:
