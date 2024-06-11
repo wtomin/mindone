@@ -2,7 +2,7 @@ export MS_ENABLE_ACLNN=1
 export GRAPH_OP_RUN=1
 python examples/rec_imvi_vae.py \
     --model_path LanguageBind/Open-Sora-Plan-v1.1.0/vae \
-    --video_path mixkit-aerial-view-of-rocks-in-the-countryside-2789_003.mp4 \
+    --video_path /home_host/ddd/workspace/datasets/vid16/mixkit/sky/mixkit-aerial-view-of-rocks-in-the-countryside-2789_003.mp4 \
     --rec_path rec.mp4 \
     --device Ascend \
     --sample_rate 1 \
