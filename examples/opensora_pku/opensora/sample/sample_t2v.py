@@ -454,7 +454,7 @@ if __name__ == "__main__":
 
     # infer
     if not os.path.exists("latents.npy"):
-        latents = ms.ops.randn((1, 17, 4, 64, 64))
+        latents = ms.ops.randn((1, 4, 17, 64, 64))
         np.save("latents.npy", latents.asnumpy())
     else:
         latents = np.load("latents.npy")

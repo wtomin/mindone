@@ -657,14 +657,15 @@ class VideoGenPipeline(DiffusionPipeline):
         else:
             # text embed has been masked
             prompt_embeds_mask = None
-        if do_classifier_free_guidance:
-            prompt_embeds = ops.cat([negative_prompt_embeds, prompt_embeds], axis=0)
-            if prompt_embeds_mask is not None:
-                prompt_embeds_mask = prompt_embeds_mask.repeat_interleave(2, 0)
         # save prompt embeddings
         np.save("prompt_embeds.npy", prompt_embeds.float().asnumpy())
         np.save("prompt_embeds_mask.npy", prompt_embeds_mask.float().asnumpy())
         np.save("negative_prompt_embeds.npy", negative_prompt_embeds.float().asnumpy())
+
+        if do_classifier_free_guidance:
+            prompt_embeds = ops.cat([negative_prompt_embeds, prompt_embeds], axis=0)
+            if prompt_embeds_mask is not None:
+                prompt_embeds_mask = prompt_embeds_mask.repeat_interleave(2, 0)
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps)
