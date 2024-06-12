@@ -116,8 +116,9 @@ if __name__ == "__main__":
     # 1. init env
     mode = 0
     FA = True
-    precision = "bf16"
+    precision = "fp16"
     parse_env("kbk")
+    print(f"FA {FA}, precision {precision}")
 
     # 1. init
     rank_id, device_num = init_env(
@@ -175,5 +176,5 @@ if __name__ == "__main__":
     )
 
     compare_torch_ms_npy(
-        os.path.join(torch_folder, "noise_pred_torch.npy"), noise_pred.asnumpy(), "noise_pred (first step)"
+        os.path.join(torch_folder, "noise_pred_torch.npy"), noise_pred.float().asnumpy(), "noise_pred (first step)"
     )
