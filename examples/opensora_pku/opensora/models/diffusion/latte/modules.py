@@ -64,6 +64,7 @@ class Attention(nn.Cell):
         if self.upcast_softmax:
             sim = sim.astype(ms.float32)
         if mask is not None:
+            mask = ops.zerso(mask.shape).masked_fill(mask, -10000.0)
             sim += mask
 
         # use fp32 for exponential inside
@@ -491,7 +492,8 @@ class MultiHeadAttention(nn.Cell):
         v_b, v_n, _ = v.shape
         if self.use_rope:
             self.apply_rope(q, k, v, position_q, position_k)
-
+        if mask is not None:
+            mask = 1 - mask
         if self.enable_flash_attention:
             # reshape qkv shape ((b n h*d) -> (b h n d))and mask dtype for FA input format
             q = q.view(q_b, q_n, h, -1).transpose(0, 2, 1, 3)
