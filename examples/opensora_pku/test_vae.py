@@ -7,12 +7,14 @@ import numpy as np
 import mindspore as ms
 from mindspore import nn
 
+mindone_lib_path = os.path.abspath("../../")
+sys.path.insert(0, mindone_lib_path)
 from mindone.utils.amp import auto_mixed_precision
 
 sys.path.append(".")
 from opensora.models.ae import getae_wrapper
 from opensora.models.ae.videobase.modules.updownsample import TrilinearInterpolate
-from opensora.utils.utils import get_precision
+from opensora.utils.utils import get_precision, parse_env
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ def compare_torch_ms_npy(torch_data, ms_data, data_name=""):
 
     abs_diff = np.abs(torch_data - ms_data)
     rel_diff = (abs_diff / (np.abs(torch_data) + 1e-8)).mean()
-    print(f"{data_name}: abs diff {abs_diff}, relative diff {rel_diff}")
+    print(f"{data_name}: abs diff {abs_diff.mean()}, relative diff {rel_diff}")
 
 
 def main():
@@ -45,6 +47,7 @@ def main():
     precision = "bf16"
     print(f"mode {mode}, dtype {precision}")
     init_env(mode)
+    parse_env("kbk")
 
     vae = getae_wrapper("CausalVAEModel_4x8x8")("LanguageBind/Open-Sora-Plan-v1.1.0/vae")
     vae.vae.enable_tiling()
@@ -63,16 +66,18 @@ def main():
         amp_level = "O0"
     else:
         raise ValueError(f"Unsupported precision {precision}")
-    torch_folder = "torch_npy_20260612/"
+    torch_folder = "torch_npy_20240612/"
     x_vae = np.load(os.path.join(torch_folder, "x_vae.npy"))
     x_vae = ms.Tensor(x_vae, dtype)  # b c t h w
 
     latents = vae.encode(x_vae)
-    compare_torch_ms_npy(os.path.join(torch_folder, "latents_torch.npy"), latents.asnumpy(), "encoder output")
+    compare_torch_ms_npy(os.path.join(torch_folder, "latents_torch.npy"), latents.float().asnumpy(), "encoder output")
 
     latents = latents.to(dtype)
     video_recon = vae.decode(latents)  # b t c h w
-    compare_torch_ms_npy(os.path.join(torch_folder, "video_recon_torch.npy"), video_recon.asnumpy(), "decoder output")
+    compare_torch_ms_npy(
+        os.path.join(torch_folder, "video_recon_torch.npy"), video_recon.float().asnumpy(), "decoder output"
+    )
 
 
 if __name__ == "__main__":
