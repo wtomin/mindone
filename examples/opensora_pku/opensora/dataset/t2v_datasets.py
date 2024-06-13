@@ -24,6 +24,7 @@ class T2V_dataset(object):
         use_img_from_vid: bool = False,
         model_max_length: int = 300,
         transform=None,
+        filter_nonexistent: bool = True,
     ):
         self.image_data = image_data
         self.video_data = video_data
@@ -33,6 +34,7 @@ class T2V_dataset(object):
         self.temporal_sample = temporal_sample
         self.tokenizer = tokenizer
         self.model_max_length = model_max_length
+        self.filter_nonexistent = filter_nonexistent
 
         self.v_decoder = DecordInit()
 
@@ -162,12 +164,24 @@ class T2V_dataset(object):
             with open(anno, "r") as f:
                 vid_cap_list = json.load(f)
             print(f"Building {anno}...")
+
+            new_vid_cap_list = []
+            filtered_samples = 0
             for i in tqdm(range(len(vid_cap_list))):
                 path = opj(folder, vid_cap_list[i]["path"])
                 if os.path.exists(path.replace(".mp4", "_resize_1080p.mp4")):
                     path = path.replace(".mp4", "_resize_1080p.mp4")
                 vid_cap_list[i]["path"] = path
-            vid_cap_lists += vid_cap_list
+                if self.filter_nonexistent:
+                    if os.path.exists(path):
+                        new_vid_cap_list.append(vid_cap_list[i])
+                    else:
+                        filtered_samples += 1
+                else:
+                    new_vid_cap_list.append(vid_cap_list[i])
+            vid_cap_lists += new_vid_cap_list
+        if self.filter_nonexistent:
+            print(f"Number of filtered samples :{filtered_samples}")
         return vid_cap_lists
 
     def get_img_cap_list(self):

@@ -428,7 +428,8 @@ def main(args):
 def parse_t2v_train_args(parser):
     parser.add_argument("--output_dir", default="outputs/", help="The directory where training results are saved.")
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--data_path", type=str, required=True)
+    parser.add_argument("--image_data", type=str, required=True)
+    parser.add_argument("--video_data", type=str, required=True)
     parser.add_argument(
         "--text_embed_folder", type=str, default=None, help="the folder path to the t5 text embeddings and masks"
     )
