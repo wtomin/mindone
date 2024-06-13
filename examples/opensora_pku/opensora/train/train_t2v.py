@@ -11,8 +11,10 @@ from mindspore.train.callback import TimeMonitor
 mindone_lib_path = os.path.abspath(os.path.abspath("../../"))
 sys.path.insert(0, mindone_lib_path)
 sys.path.append("./")
+from opensora.dataset import getdataset
+
 # from mindcv.optim.adamw import AdamW
-from opensora.dataset.t2v_dataset import create_dataloader
+from opensora.dataset.t2v_datasets import create_dataloader
 from opensora.models.ae import ae_channel_config, ae_stride_config, getae_wrapper
 from opensora.models.ae.videobase.modules.updownsample import TrilinearInterpolate
 from opensora.models.diffusion.diffusion import create_diffusion_T as create_diffusion
@@ -21,6 +23,7 @@ from opensora.models.diffusion.latte.modules import Attention
 from opensora.models.diffusion.latte.net_with_loss import DiffusionWithLoss
 from opensora.models.text_encoder.t5 import T5Embedder
 from opensora.train.commons import create_loss_scaler, init_env, parse_args
+from opensora.utils.dataset_utils import Collate
 from opensora.utils.utils import get_precision
 
 from mindone.trainers.callback import EvalSaveCallback, OverflowMonitor, ProfilerCallback
@@ -213,32 +216,17 @@ def main(args):
 
     # 3. create dataset
     assert args.dataset == "t2v", "Support t2v dataset only."
-    ds_config = dict(
-        data_file_path=args.data_path,
-        video_folder=args.video_folder,
-        text_emb_folder=args.text_embed_folder,
-        return_text_emb=use_text_embed,
-        vae_latent_folder=args.vae_latent_folder,
-        return_vae_latent=train_with_vae_latent,
-        vae_scale_factor=args.sd_scale_factor,
-        sample_size=args.max_image_size,
-        sample_stride=args.sample_rate,
-        sample_n_frames=args.num_frames,
-        tokenizer=tokenizer,
-        video_column=args.video_column,
-        caption_column=args.caption_column,
-        disable_flip=not args.enable_flip,
-        use_image_num=args.use_image_num,
-        token_max_length=args.model_max_length,
-    )
+    dataset = getdataset(args, tokenizer)
     dataset = create_dataloader(
-        ds_config,
+        dataset,
         batch_size=args.batch_size,
         shuffle=True,
         device_num=device_num,
         rank_id=rank_id,
         num_parallel_workers=args.num_parallel_workers,
         max_rowsize=args.max_rowsize,
+        collate_fn=Collate(args),
+        output_columns=["video", "text", "cond_mask", "attention_mask"],
     )
     dataset_size = dataset.get_dataset_size()
     assert dataset_size > 0, "Incorrect dataset size. Please check your dataset size and your global batch size"

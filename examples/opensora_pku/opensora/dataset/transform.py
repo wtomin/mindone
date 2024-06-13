@@ -1,9 +1,12 @@
 import html
+import random
 import re
 import urllib.parse as ul
 
 import albumentations
+import cv2
 import ftfy
+import numpy as np
 from bs4 import BeautifulSoup
 
 __all__ = ["create_video_transforms", "t5_text_preprocessing"]
@@ -196,3 +199,115 @@ def clean_caption(caption):
     caption = re.sub(r"^\.\S+$", "", caption)
 
     return caption.strip()
+
+
+#  ------------------------------------------------------------
+#  ---------------------  Sampling  ---------------------------
+#  ------------------------------------------------------------
+class TemporalRandomCrop(object):
+    """Temporally crop the given frame indices at a random location.
+
+    Args:
+        size (int): Desired length of frames will be seen in the model.
+    """
+
+    def __init__(self, size):
+        self.size = size
+
+    def __call__(self, total_frames):
+        rand_end = max(0, total_frames - self.size - 1)
+        begin_index = random.randint(0, rand_end)
+        end_index = min(begin_index + self.size, total_frames)
+        return begin_index, end_index
+
+
+class DynamicSampleDuration(object):
+    """Temporally crop the given frame indices at a random location.
+
+    Args:
+        size (int): Desired length of frames will be seen in the model.
+    """
+
+    def __init__(self, t_stride, extra_1):
+        self.t_stride = t_stride
+        self.extra_1 = extra_1
+
+    def __call__(self, t, h, w):
+        if self.extra_1:
+            t = t - 1
+        truncate_t_list = list(range(t + 1))[t // 2 :][:: self.t_stride]  # need half at least
+        truncate_t = random.choice(truncate_t_list)
+        if self.extra_1:
+            truncate_t = truncate_t + 1
+        return 0, truncate_t
+
+
+def crop(clip, i, j, h, w):
+    """
+    Args:
+        clip (numpy.ndarray): Video clip to be cropped. Size is (T, C, H, W)
+    """
+    if len(clip.shape) != 4:
+        raise ValueError("clip should be a 4D tensor")
+    return clip[..., i : i + h, j : j + w]
+
+
+def center_crop_using_short_edge(clip):
+    h, w = clip.shape[-2], clip.shape[-1]
+    if h < w:
+        th, tw = h, h
+        i = 0
+        j = int(round((w - tw) / 2.0))
+    else:
+        th, tw = w, w
+        i = int(round((h - th) / 2.0))
+        j = 0
+    return crop(clip, i, j, th, tw)
+
+
+def resize(clip, target_size, interpolation_mode):
+    if len(target_size) != 2:
+        raise ValueError(f"target size should be tuple (height, width), instead got {target_size}")
+    mapping = {"bilinear": cv2.INTER_LINEAR, "bicubic": cv2.INTER_CUBIC}
+    interpolation_mode = mapping[interpolation_mode]
+    return np.array([cv2.resize(image, target_size, interpolation=interpolation_mode) for image in clip])  # (T H W C)
+
+    # return torch.nn.functional.interpolate(clip, size=target_size, mode=interpolation_mode, align_corners=True, antialias=True)
+
+
+class CenterCropResizeVideo:
+    """
+    First use the short side for cropping length,
+    center crop video, then resize to the specified size
+    """
+
+    def __init__(
+        self,
+        size,
+        interpolation_mode="bilinear",
+    ):
+        if isinstance(size, tuple):
+            if len(size) != 2:
+                raise ValueError(f"size should be tuple (height, width), instead got {size}")
+            self.size = size
+        else:
+            self.size = (size, size)
+
+        self.interpolation_mode = interpolation_mode
+
+    def __call__(self, clip):
+        """
+        Args:
+            clip (numpy.ndarray): Video clip to be cropped. Size is (T, C, H, W)
+        Returns:
+            numpy.ndarray: scale resized / center cropped video clip.
+                size is (T, C, crop_size, crop_size)
+        """
+        clip_center_crop = center_crop_using_short_edge(clip)  # (T, C, H, W)
+        clip_center_crop_resize = resize(
+            clip_center_crop, target_size=self.size, interpolation_mode=self.interpolation_mode
+        )
+        return clip_center_crop_resize
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(size={self.size}, interpolation_mode={self.interpolation_mode}"

@@ -157,7 +157,7 @@ class Collate:
             cond_mask_img = ops.stack([i["image_data"]["cond_mask"] for i in batch])  # b image_num l
         return batch_tubes_vid, input_ids_vid, cond_mask_vid, batch_tubes_img, input_ids_img, cond_mask_img
 
-    def __call__(self, batch):
+    def __call__(self, batch, batchinfo):
         batch_tubes_vid, input_ids_vid, cond_mask_vid, batch_tubes_img, input_ids_img, cond_mask_img = self.package(
             batch
         )
