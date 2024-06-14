@@ -1,4 +1,4 @@
-import mindspore.dataset.transforms.vision.py_transforms as py_transforms
+from mindspore.dataset import transforms, vision
 
 from .t2v_datasets import T2V_dataset
 from .transform import CenterCropResizeVideo, TemporalRandomCrop
@@ -21,7 +21,7 @@ def getdataset(args, tokenizer):
             resize = [
                 CenterCropResizeVideo(args.max_image_size),
             ]
-        transform = py_transforms.ComposeOp([*resize, py_transforms.ToTensor(), norm_fun])
+        transform = transforms.Compose([*resize, vision.ToTensor(), norm_fun])
         return T2V_dataset(
             image_data=args.image_data,
             video_data=args.video_data,

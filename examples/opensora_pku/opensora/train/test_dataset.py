@@ -68,7 +68,7 @@ def main(args):
             args.vae_latent_folder
         ), f"The provided vae latent folder {args.vae_latent_folder} is not existent!"
         logger.info("Train with vae latent cache.")
-        vae = None
+
     else:
         logger.info("vae init")
 
@@ -90,8 +90,6 @@ def main(args):
         ), f"Image size must be divisible by ae_stride_h, but found max_image_size ({args.max_image_size}), "
         " ae_stride_h ({ae_stride_h})."
 
-        latent_size = (args.max_image_size // ae_stride_h, args.max_image_size // ae_stride_w)
-        vae.latent_size = latent_size
         args.stride_t = ae_stride_t * patch_size_t
         args.stride = ae_stride_h * patch_size_h
 

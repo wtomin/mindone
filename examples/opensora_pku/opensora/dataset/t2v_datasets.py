@@ -189,12 +189,12 @@ class T2V_dataset(object):
         img_cap_lists = []
         with open(self.image_data, "r") as f:
             folder_anno = [i.strip().split(",") for i in f.readlines() if len(i.strip()) > 0]
+        filtered_samples = 0
         for folder, anno in folder_anno:
             with open(anno, "r") as f:
                 img_cap_list = json.load(f)
             print(f"Building {anno}...")
             new_img_cap_list = []
-            filtered_samples = 0
             for i in tqdm(range(len(img_cap_list))):
                 img_cap_list[i]["path"] = opj(folder, img_cap_list[i]["path"])
                 if self.filter_nonexistent:

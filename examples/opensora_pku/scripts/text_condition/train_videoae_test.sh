@@ -47,6 +47,3 @@ python opensora/train/test_dataset.py \
     --model_max_length 300 \
     --clip_grad True \
     --use_image_num $use_image_num \
-    --use_img_from_vid \
-    --use_parallel True \
-    --parallel_mode "data" \
