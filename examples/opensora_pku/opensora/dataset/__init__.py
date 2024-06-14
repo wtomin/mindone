@@ -1,7 +1,7 @@
-from mindspore.dataset import transforms, vision
+from mindspore.dataset import transforms
 
 from .t2v_datasets import T2V_dataset
-from .transform import CenterCropResizeVideo, TemporalRandomCrop
+from .transform import CenterCropResizeVideo, TemporalRandomCrop, ToTensorVideo
 
 ae_norm = {
     "CausalVAEModel_4x8x8": lambda x: 2.0 * x - 1.0,
@@ -21,7 +21,7 @@ def getdataset(args, tokenizer):
             resize = [
                 CenterCropResizeVideo(args.max_image_size),
             ]
-        transform = transforms.Compose([*resize, vision.ToTensor(), norm_fun])
+        transform = transforms.Compose([*resize, ToTensorVideo(), norm_fun])
         return T2V_dataset(
             image_data=args.image_data,
             video_data=args.video_data,

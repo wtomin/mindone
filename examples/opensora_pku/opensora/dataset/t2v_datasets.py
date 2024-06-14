@@ -72,10 +72,10 @@ class T2V_dataset(object):
     def get_video(self, idx):
         video_path = self.vid_cap_list[idx]["path"]
         frame_idx = self.vid_cap_list[idx]["frame_idx"]
-        video = self.decord_read(video_path, frame_idx)  # T H W C
-        video = self.transform(video)  # T H W C -> T C H W
+        video = self.decord_read(video_path, frame_idx)  # T C H W
+        video = self.transform(video)  # T C H W -> T C H W
 
-        video = video.transpose(0, 1)  # T C H W -> C T H W
+        video = video.transpose(1, 0, 2, 3)  # T C H W -> C T H W
         text = self.vid_cap_list[idx]["cap"]
 
         text = text_preprocessing(text)
@@ -153,7 +153,8 @@ class T2V_dataset(object):
         # frame_indice = np.linspace(0, 63, self.num_frames, dtype=int)
 
         video_data = decord_vr.get_batch(frame_indice).asnumpy()
-        return video_data  # (T H W C)
+        video_data = video_data.transpose(0, 3, 1, 2)  # (T, H, W, C) -> (T C H W)
+        return video_data  # (T C H W)
 
     def get_vid_cap_list(self):
         vid_cap_lists = []
