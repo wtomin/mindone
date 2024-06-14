@@ -143,21 +143,21 @@ class Collate:
         self.max_1hw = (1, self.max_image_size, self.max_image_size)
 
     def package(self, batch):
-        batch_tubes_vid, input_ids_vid, cond_mask_vid = None, None, None
-        batch_tubes_img, input_ids_img, cond_mask_img = None, None, None
+        batch_tubes_vid, text_data_vid, cond_mask_vid = None, None, None
+        batch_tubes_img, text_data_img, cond_mask_img = None, None, None
         # import ipdb;ipdb.set_trace()
         if self.num_frames > 1:
             batch_tubes_vid = [i["video_data"]["video"] for i in batch]  # b [c t h w]
-            input_ids_vid = np.stack([i["video_data"]["input_ids"] for i in batch])  # b 1 l
+            text_data_vid = np.stack([i["video_data"]["text_data"] for i in batch])  # b 1 l
             cond_mask_vid = np.stack([i["video_data"]["cond_mask"] for i in batch])  # b 1 l
         if self.num_frames == 1 or self.use_image_num != 0:
             batch_tubes_img = [j for i in batch for j in i["image_data"]["image"]]  # b*num_img [c 1 h w]
-            input_ids_img = np.stack([i["image_data"]["input_ids"] for i in batch])  # b image_num l
+            text_data_img = np.stack([i["image_data"]["text_data"] for i in batch])  # b image_num l
             cond_mask_img = np.stack([i["image_data"]["cond_mask"] for i in batch])  # b image_num l
-        return batch_tubes_vid, input_ids_vid, cond_mask_vid, batch_tubes_img, input_ids_img, cond_mask_img
+        return batch_tubes_vid, text_data_vid, cond_mask_vid, batch_tubes_img, text_data_img, cond_mask_img
 
     def __call__(self, batch, batchinfo):
-        batch_tubes_vid, input_ids_vid, cond_mask_vid, batch_tubes_img, input_ids_img, cond_mask_img = self.package(
+        batch_tubes_vid, text_data_vid, cond_mask_vid, batch_tubes_img, text_data_img, cond_mask_img = self.package(
             batch
         )
 
@@ -174,8 +174,8 @@ class Collate:
                 extra_1=True,
             )
             # attention_mask: b t h w
-            # input_ids, cond_mask = input_ids_vid.squeeze(1), cond_mask_vid.squeeze(1)  # b 1 l -> b l
-            input_ids, cond_mask = input_ids_vid, cond_mask_vid  # b 1 l
+
+            text_data, cond_mask = text_data_vid, cond_mask_vid  # b 1 l
         elif self.num_frames > 1 and self.use_image_num != 0:
             pad_batch_tubes_vid, attention_mask_vid = self.process(
                 batch_tubes_vid,
@@ -204,7 +204,7 @@ class Collate:
             )  # concat at temporal, video first
             # attention_mask_img: b num_img h w
             attention_mask = np.concatenate([attention_mask_vid, attention_mask_img], axis=1)  # b t+num_img h w
-            input_ids = np.concatenate([input_ids_vid, input_ids_img], axis=1)  # b 1+num_img hw
+            text_data = np.concatenate([text_data_vid, text_data_img], axis=1)  # b 1+num_img hw
             cond_mask = np.concatenate([cond_mask_vid, cond_mask_img], axis=1)  # b 1+num_img hw
         else:
             # import ipdb;ipdb.set_trace()
@@ -215,11 +215,11 @@ class Collate:
             # attention_mask = rearrange(attention_mask_img, '(b i) 1 h w -> b i h w', i=1)
             pad_batch_tubes = pad_batch_tubes_img
             attention_mask = attention_mask_img
-            input_ids, cond_mask = input_ids_img, cond_mask_img  # b 1 l
+            text_data, cond_mask = text_data_img, cond_mask_img  # b 1 l
         return (
             pad_batch_tubes.astype(np.float32),
             attention_mask.astype(np.float32),
-            input_ids.astype(np.int32),
+            text_data.astype(np.float32),
             cond_mask.astype(np.float32),
         )
 

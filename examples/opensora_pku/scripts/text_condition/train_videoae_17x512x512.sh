@@ -22,7 +22,7 @@ output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dty
  python opensora/train/train_t2v.py \
       --video_data "scripts/train_data/single_video_data.txt" \
       --image_data "scripts/train_data/single_image_data.txt" \
-      --text_embed_folder "" \
+      --text_embed_cache True \
       --pretrained LanguageBind/Open-Sora-Plan-v1.0.0/t2v.ckpt \
     --model LatteT2V-XL/122 \
     --text_encoder_name DeepFloyd/t5-v1_1-xxl \
@@ -48,7 +48,7 @@ output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dty
     --model_max_length 300 \
     --clip_grad True \
     --use_image_num $use_image_num \
-    --mode 0
-    # --use_img_from_vid \
+    --mode 0 \
+    --use_img_from_vid \
     # --use_parallel True \
     # --parallel_mode "data" \

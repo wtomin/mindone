@@ -33,6 +33,7 @@ def getdataset(args, tokenizer):
             model_max_length=args.model_max_length,
             transform=transform,
             filter_nonexistent=getattr(args, "filter_nonexistent", True),
+            return_text_emb=args.text_embed_cache,
         )
 
     raise NotImplementedError(args.dataset)

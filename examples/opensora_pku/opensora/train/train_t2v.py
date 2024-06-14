@@ -178,8 +178,7 @@ def main(args):
         logger.info("Use random initialization for Latte")
     latte_model.set_train(True)
 
-    use_text_embed = args.text_embed_folder is not None and len(args.text_embed_folder) > 0
-    if not use_text_embed:
+    if not args.text_embed_cache:
         logger.info("T5 init")
         text_encoder = T5Embedder(
             dir_or_name=args.text_encoder_name,
@@ -194,9 +193,6 @@ def main(args):
 
         tokenizer = text_encoder.tokenizer
     else:
-        assert os.path.exists(
-            args.text_embed_folder
-        ), f"The provided text_embed_folder {args.text_embed_folder} is not existent!"
         text_encoder = None
         tokenizer = None
 
@@ -208,7 +204,7 @@ def main(args):
         vae=vae,
         condition="text",
         text_encoder=text_encoder,
-        text_emb_cached=use_text_embed,
+        text_emb_cached=args.text_embed_cache,
         video_emb_cached=False,
         use_image_num=args.use_image_num,
         dtype=model_dtype,
@@ -438,7 +434,10 @@ def parse_t2v_train_args(parser):
         help="Whether to filter out non-existent samples in image datasets and video datasets." "Defaults to True.",
     )
     parser.add_argument(
-        "--text_embed_folder", type=str, default=None, help="the folder path to the t5 text embeddings and masks"
+        "--text_embed_cache",
+        type=str2bool,
+        default=True,
+        help="Whether to use T5 embedding cache. Must be provided in image/video_data.",
     )
     parser.add_argument("--vae_latent_folder", default=None, type=str, help="root dir for the vae latent data")
     parser.add_argument("--model", type=str, default="DiT-XL/122")
