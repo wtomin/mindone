@@ -105,8 +105,8 @@ class T2V_dataset(object):
         select_image_idx = np.linspace(0, self.num_frames - 1, self.use_image_num, dtype=int)
         assert self.num_frames >= self.use_image_num
         image = [video_data["video"][:, i : i + 1] for i in select_image_idx]  # num_img [c, 1, h, w]
-        input_ids = video_data["input_ids"].repeat(self.use_image_num, 1)  # self.use_image_num, l
-        cond_mask = video_data["cond_mask"].repeat(self.use_image_num, 1)  # self.use_image_num, l
+        input_ids = video_data["input_ids"].repeat(self.use_image_num, axis=0)  # self.use_image_num, l
+        cond_mask = video_data["cond_mask"].repeat(self.use_image_num, axis=0)  # self.use_image_num, l
         return dict(image=image, input_ids=input_ids, cond_mask=cond_mask)
 
     def get_image(self, idx):
@@ -117,6 +117,7 @@ class T2V_dataset(object):
         image = [np.array(i)[None, ...] for i in image]  # num_img [1, h, w, c]
         image = [self.transform(i) for i in image]  # num_img [1 H W C] -> num_img [1 H W C]
         image = [i.transpose(3, 0, 1, 2) for i in image]  # num_img [1 H W C] -> num_img [C 1 H W]
+        image = np.array(image)
 
         caps = [i["cap"] for i in image_data]
         text = [text_preprocessing(cap) for cap in caps]
