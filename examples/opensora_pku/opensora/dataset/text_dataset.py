@@ -2,6 +2,7 @@ import csv
 import json
 import logging
 import random
+from pathlib import Path
 
 import numpy as np
 
@@ -51,6 +52,15 @@ class TextDataset:
         row = self.dataset[idx]
         caption = row[self.caption_column]
         file_path = row[self.file_column]
+        # extra keys are identifiers added to the original file path
+        for key in row.keys():
+            if key not in [self.caption_column, self.file_column]:
+                identifer = f"{key}-{row[key]}"
+                file_path = Path(str(file_path))
+                extension = file_path.suffix
+                file_path = file_path.with_suffix("") + identifer
+                file_path = file_path.with_suffix(extension)
+                file_path = str(file_path)
 
         if self.random_drop_text:
             if random.random() <= self.random_drop_text_ratio:
