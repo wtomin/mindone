@@ -55,12 +55,11 @@ class TextDataset:
         # extra keys are identifiers added to the original file path
         for key in row.keys():
             if key not in [self.caption_column, self.file_column]:
-                identifer = f"{key}-{row[key]}"
+                identifer = f"-{key}-{row[key]}"
                 file_path = Path(str(file_path))
                 extension = file_path.suffix
-                file_path = file_path.with_suffix("") + identifer
-                file_path = file_path.with_suffix(extension)
-                file_path = str(file_path)
+                file_path = str(file_path.with_suffix("")) + identifer
+                file_path = file_path + extension
 
         if self.random_drop_text:
             if random.random() <= self.random_drop_text_ratio:

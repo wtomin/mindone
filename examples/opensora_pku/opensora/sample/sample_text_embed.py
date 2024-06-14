@@ -289,13 +289,13 @@ def parse_args():
     )
     parser.add_argument(
         "--file_column",
-        default="video",
-        help="The column of file path in `data_file_path`. Defaults to `video`.",
+        default="path",
+        help="The column of file path in `data_file_path`. Defaults to `path`.",
     )
     parser.add_argument(
         "--caption_column",
-        default="caption",
-        help="The column of caption file path in `data_file_path`. Defaults to `caption`.",
+        default="cap",
+        help="The column of caption file path in `data_file_path`. Defaults to `cap`.",
     )
 
     parser.add_argument("--batch_size", default=8, type=int, help="batch size")
