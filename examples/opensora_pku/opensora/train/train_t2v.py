@@ -33,6 +33,7 @@ from mindone.trainers.lr_schedule import create_scheduler
 from mindone.trainers.optim import create_optimizer
 from mindone.trainers.train_step import TrainOneStepWrapper
 from mindone.utils.amp import auto_mixed_precision
+from mindone.utils.config import str2bool
 from mindone.utils.logger import set_logger
 from mindone.utils.params import count_params
 
@@ -402,6 +403,7 @@ def main(args):
                 f"EMA: {args.use_ema}",
                 f"EMA decay: {args.ema_decay}",
                 f"Enable flash attention: {args.enable_flash_attention}",
+                f"Enable vae tiling: {args.enable_tiling}",
                 f"Use recompute: {args.use_recompute}",
                 f"Dataset sink: {args.dataset_sink_mode}",
             ]
@@ -430,6 +432,12 @@ def parse_t2v_train_args(parser):
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--image_data", type=str, required=True)
     parser.add_argument("--video_data", type=str, required=True)
+    parser.add_argument(
+        "--filter_nonexistent",
+        type=str2bool,
+        default=True,
+        help="Whether to filter out non-existent samples in image datasets and video datasets." "Defaults to True.",
+    )
     parser.add_argument(
         "--text_embed_folder", type=str, default=None, help="the folder path to the t5 text embeddings and masks"
     )

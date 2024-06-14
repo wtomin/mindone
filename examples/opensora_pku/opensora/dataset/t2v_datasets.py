@@ -181,7 +181,7 @@ class T2V_dataset(object):
                     new_vid_cap_list.append(vid_cap_list[i])
             vid_cap_lists += new_vid_cap_list
         if self.filter_nonexistent:
-            print(f"Number of filtered samples :{filtered_samples}")
+            print(f"Number of filtered video samples :{filtered_samples}")
         return vid_cap_lists
 
     def get_img_cap_list(self):
@@ -193,9 +193,20 @@ class T2V_dataset(object):
             with open(anno, "r") as f:
                 img_cap_list = json.load(f)
             print(f"Building {anno}...")
+            new_img_cap_list = []
+            filtered_samples = 0
             for i in tqdm(range(len(img_cap_list))):
                 img_cap_list[i]["path"] = opj(folder, img_cap_list[i]["path"])
-            img_cap_lists += img_cap_list
+                if self.filter_nonexistent:
+                    if os.path.exists(img_cap_list[i]["path"]):
+                        new_img_cap_list.append(img_cap_list[i])
+                    else:
+                        filtered_samples += 1
+                else:
+                    new_img_cap_list.append(img_cap_list[i])
+            img_cap_lists += new_img_cap_list
+        if self.filter_nonexistent:
+            print(f"Number of filtered image samples :{filtered_samples}")
         img_cap_lists = [img_cap_lists[i : i + use_image_num] for i in range(0, len(img_cap_lists), use_image_num)]
         return img_cap_lists[:-1]  # drop last to avoid error length
 

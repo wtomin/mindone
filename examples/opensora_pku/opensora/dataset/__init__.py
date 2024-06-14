@@ -31,6 +31,7 @@ def getdataset(args, tokenizer):
             use_img_from_vid=args.use_img_from_vid,
             model_max_length=args.model_max_length,
             transform=transform,
+            filter_nonexistent=getattr(args, "filter_nonexistent", True),
         )
 
     raise NotImplementedError(args.dataset)
