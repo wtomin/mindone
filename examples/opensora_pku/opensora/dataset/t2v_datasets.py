@@ -109,7 +109,7 @@ class T2V_dataset(object):
         image_data = self.img_cap_list[idx]  # [{'path': path, 'cap': cap}, ...]
 
         image = [Image.open(i["path"]).convert("RGB") for i in image_data]  # num_img [h, w, c]
-        image = [np.array(i) for i in image]  # num_img [h, w, c]
+        image = [np.array(i)[None, ...] for i in image]  # num_img [1, h, w, c]
         image = [self.transform(i) for i in image]  # num_img [1 H W C] -> num_img [1 H W C]
         image = [i.transpose(3, 0, 1, 2) for i in image]  # num_img [1 H W C] -> num_img [C 1 H W]
 
@@ -124,12 +124,12 @@ class T2V_dataset(object):
                 truncation=True,
                 return_attention_mask=True,
                 add_special_tokens=True,
-                return_tensors="pt",
+                return_tensors=None,
             )
             input_ids.append(text_tokens_and_mask["input_ids"])
             cond_mask.append(text_tokens_and_mask["attention_mask"])
-        input_ids = np.concatentate(input_ids)  # self.use_image_num, l
-        cond_mask = np.concatentate(cond_mask)  # self.use_image_num, l
+        input_ids = np.concatenate(input_ids)  # self.use_image_num, l
+        cond_mask = np.concatenate(cond_mask)  # self.use_image_num, l
         return dict(image=image, input_ids=input_ids, cond_mask=cond_mask)
 
     def tv_read(self, path, frame_idx=None):

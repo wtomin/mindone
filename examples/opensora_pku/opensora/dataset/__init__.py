@@ -27,6 +27,7 @@ def getdataset(args, tokenizer):
             video_data=args.video_data,
             temporal_sample=temporal_sample,
             tokenizer=tokenizer,
+            num_frames=args.num_frames,
             use_image_num=args.use_image_num,
             use_img_from_vid=args.use_img_from_vid,
             model_max_length=args.model_max_length,

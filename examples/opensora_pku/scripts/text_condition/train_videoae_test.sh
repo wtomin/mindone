@@ -34,7 +34,7 @@ python opensora/train/test_dataset.py \
     --use_recompute True \
     --enable_flash_attention $enable_flash_attention \
     --batch_size=$batch_size \
-    --num_parallel_workers 10 \
+    --num_parallel_workers 0 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=1000000 \
     --start_learning_rate=$lr \
