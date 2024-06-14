@@ -27,7 +27,7 @@ msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --
     --text_encoder_name DeepFloyd/t5-v1_1-xxl \
     --dataset t2v \
     --ae CausalVAEModel_4x8x8 \
-    --ae_path LanguageBind/Open-Sora-Plan-v1.0.0 \
+    --ae_path LanguageBind/Open-Sora-Plan-v1.1.0 \
     --sample_rate 1 \
     --num_frames $num_frames \
     --max_image_size $image_size \

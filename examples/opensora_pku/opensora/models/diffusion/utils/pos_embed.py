@@ -153,7 +153,7 @@ try:
 
     RoPE1D = cuRoPE1D
 except ImportError:
-    print("Warning, cannot find cuda-compiled version of RoPE2D, using a slow pytorch version instead")
+    print("Warning, cannot find compiled version of RoPE2D, using a slow ms version instead")
 
     class RoPE1D(nn.Cell):
         def __init__(self, freq=10000.0, F0=1.0, scaling_factor=1.0):
