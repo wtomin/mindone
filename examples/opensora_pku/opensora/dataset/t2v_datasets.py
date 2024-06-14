@@ -90,10 +90,10 @@ class T2V_dataset(object):
         )
         input_ids = np.array(text_tokens_and_mask["input_ids"])
         cond_mask = np.array(text_tokens_and_mask["attention_mask"])
-        if input_ids.shape[0] == 1:
-            input_ids = input_ids.squeeze(0)
-        if cond_mask.shape[0] == 1:
-            cond_mask = cond_mask.squeeze(0)
+        if len(input_ids.shape) == 1:
+            input_ids = input_ids[None, :]
+        if len(cond_mask.shape) == 1:
+            cond_mask = cond_mask[None, :]
         return dict(video=video, input_ids=input_ids, cond_mask=cond_mask)
 
     def get_image_from_video(self, video_data):
@@ -126,8 +126,14 @@ class T2V_dataset(object):
                 add_special_tokens=True,
                 return_tensors=None,
             )
-            input_ids.append(text_tokens_and_mask["input_ids"])
-            cond_mask.append(text_tokens_and_mask["attention_mask"])
+            ids, mask = np.array(text_tokens_and_mask["input_ids"]), np.array(text_tokens_and_mask["attention_mask"])
+            if len(ids.shape) == 1:
+                ids = ids[None, :]
+            if len(mask.shape) == 1:
+                mask = mask[None, :]
+            input_ids.append(ids)
+            cond_mask.append(mask)
+
         input_ids = np.concatenate(input_ids)  # self.use_image_num, l
         cond_mask = np.concatenate(cond_mask)  # self.use_image_num, l
         return dict(image=image, input_ids=input_ids, cond_mask=cond_mask)

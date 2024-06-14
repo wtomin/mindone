@@ -216,7 +216,12 @@ class Collate:
             pad_batch_tubes = pad_batch_tubes_img
             attention_mask = attention_mask_img
             input_ids, cond_mask = input_ids_img, cond_mask_img  # b 1 l
-        return pad_batch_tubes, attention_mask, input_ids, cond_mask
+        return (
+            pad_batch_tubes.astype(np.float32),
+            attention_mask.astype(np.float32),
+            input_ids.astype(np.int32),
+            cond_mask.astype(np.float32),
+        )
 
     def process(self, batch_tubes, t_ds_stride, ds_stride, max_thw, ae_stride_thw, patch_size_thw, extra_1):
         # import ipdb;ipdb.set_trace()

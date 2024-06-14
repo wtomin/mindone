@@ -110,10 +110,9 @@ class DiffusionWithLoss(nn.Cell):
 
     def get_latents(self, x):
         if x.dim() == 5:
-            B, F, C, H, W = x.shape
+            B, C, F, H, W = x.shape
             if C != 3:
                 raise ValueError("Expect input shape (b f 3 h w), but get {}".format(x.shape))
-            x = x.permute(0, 2, 1, 3, 4)  # (b, c, f, h, w)
             if self.use_image_num == 0:
                 z = self.vae_encode(x)  # (b, c, f, h, w)
             else:
@@ -133,15 +132,15 @@ class DiffusionWithLoss(nn.Cell):
     def construct(
         self,
         x: ms.Tensor,
-        text_tokens: ms.Tensor,
-        encoder_attention_mask: ms.Tensor = None,
         attention_mask: ms.Tensor = None,
+        text_tokens: ms.Tensor = None,
+        encoder_attention_mask: ms.Tensor = None,
     ):
         """
         Video diffusion model forward and loss computation for training
 
         Args:
-            x: pixel values of video frames, resized and normalized to shape [bs, F, 3, 256, 256]
+            x: pixel values of video frames, resized and normalized to shape (b c f h w)
             text_tokens: text tokens padded to fixed shape [bs, 77]
             labels: the class labels
 
@@ -151,15 +150,11 @@ class DiffusionWithLoss(nn.Cell):
         Notes:
             - inputs should matches dataloder output order
             - assume model input/output shape: (b c f h w)
-                unet2d input/output shape: (b c h w)
         """
         # 1. get image/video latents z using vae
         x = x.to(self.dtype)
         if not self.video_emb_cached:
             x = ops.stop_gradient(self.get_latents(x))
-        else:
-            # (b f c h w) -> (b c f h w)
-            x = ops.transpose(x, (0, 2, 1, 3, 4))
 
         # 2. get conditions
         if not self.text_emb_cached:
