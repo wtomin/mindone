@@ -1,8 +1,7 @@
 import math
 
 import decord
-
-from mindspore import ops
+import numpy as np
 
 
 def create_video_transforms(
@@ -149,12 +148,12 @@ class Collate:
         # import ipdb;ipdb.set_trace()
         if self.num_frames > 1:
             batch_tubes_vid = [i["video_data"]["video"] for i in batch]  # b [c t h w]
-            input_ids_vid = ops.stack([i["video_data"]["input_ids"] for i in batch])  # b 1 l
-            cond_mask_vid = ops.stack([i["video_data"]["cond_mask"] for i in batch])  # b 1 l
+            input_ids_vid = np.stack([i["video_data"]["input_ids"] for i in batch])  # b 1 l
+            cond_mask_vid = np.stack([i["video_data"]["cond_mask"] for i in batch])  # b 1 l
         if self.num_frames == 1 or self.use_image_num != 0:
             batch_tubes_img = [j for i in batch for j in i["image_data"]["image"]]  # b*num_img [c 1 h w]
-            input_ids_img = ops.stack([i["image_data"]["input_ids"] for i in batch])  # b image_num l
-            cond_mask_img = ops.stack([i["image_data"]["cond_mask"] for i in batch])  # b image_num l
+            input_ids_img = np.stack([i["image_data"]["input_ids"] for i in batch])  # b image_num l
+            cond_mask_img = np.stack([i["image_data"]["cond_mask"] for i in batch])  # b image_num l
         return batch_tubes_vid, input_ids_vid, cond_mask_vid, batch_tubes_img, input_ids_img, cond_mask_img
 
     def __call__(self, batch, batchinfo):
@@ -193,20 +192,20 @@ class Collate:
                 batch_tubes_img, 1, ds_stride, self.max_1hw, self.ae_stride_1hw, self.patch_size_1hw, extra_1=False
             )
             # (b i) c 1 h w -> b c i h w
-            pad_batch_tubes_img = pad_batch_tubes_img.sqeeuze(2)
+            pad_batch_tubes_img = pad_batch_tubes_img.squeeze(2)
             _, c, h, w = pad_batch_tubes_img.shape
-            pad_batch_tubes_img = pad_batch_tubes_img.reshape(-1, self.use_image_num, c, h, w).permute(0, 2, 1, 3, 4)
+            pad_batch_tubes_img = pad_batch_tubes_img.reshape(-1, self.use_image_num, c, h, w).transpose(0, 2, 1, 3, 4)
             # (b i) 1 h w -> b i h w
-            attention_mask_img = attention_mask_img.squeeze(2)
+            attention_mask_img = attention_mask_img.squeeze(1)
             _, h, w = attention_mask_img.shape
             attention_mask_img = attention_mask_img.reshape(-1, self.use_image_num, h, w)
-            pad_batch_tubes = ops.cat(
+            pad_batch_tubes = np.concatenate(
                 [pad_batch_tubes_vid, pad_batch_tubes_img], axis=2
             )  # concat at temporal, video first
             # attention_mask_img: b num_img h w
-            attention_mask = ops.cat([attention_mask_vid, attention_mask_img], axis=1)  # b t+num_img h w
-            input_ids = ops.cat([input_ids_vid, input_ids_img], axis=1)  # b 1+num_img hw
-            cond_mask = ops.cat([cond_mask_vid, cond_mask_img], axis=1)  # b 1+num_img hw
+            attention_mask = np.concatenate([attention_mask_vid, attention_mask_img], axis=1)  # b t+num_img h w
+            input_ids = np.concatenate([input_ids_vid, input_ids_img], axis=1)  # b 1+num_img hw
+            cond_mask = np.concatenate([cond_mask_vid, cond_mask_img], axis=1)  # b 1+num_img hw
         else:
             # import ipdb;ipdb.set_trace()
             pad_batch_tubes_img, attention_mask_img = self.process(
@@ -232,20 +231,10 @@ class Collate:
         pad_max_t = pad_max_t + 1 if extra_1 else pad_max_t
         each_pad_t_h_w = [[pad_max_t - i.shape[1], pad_max_h - i.shape[2], pad_max_w - i.shape[3]] for i in batch_tubes]
         pad_batch_tubes = [
-            ops.pad(im, (0, pad_w, 0, pad_h, 0, pad_t), value=0)
+            np.pad(im, ((0, 0), (0, pad_t), (0, pad_h), (0, pad_w)), mode="constant", constant_values=0)  # (c t h w)
             for (pad_t, pad_h, pad_w), im in zip(each_pad_t_h_w, batch_tubes)
         ]
-        pad_batch_tubes = ops.stack(pad_batch_tubes, axis=0)
-
-        # make attention_mask
-        # first_channel_first_frame, first_channel_other_frame = pad_batch_tubes[:, :1, :1], pad_batch_tubes[:, :1, 1:]  # first channel to make attention_mask
-        # attention_mask_first_frame = F.max_pool3d(first_channel_first_frame, kernel_size=(1, *ae_stride_thw[1:]), stride=(1, *ae_stride_thw[1:]))
-        # if first_channel_other_frame.numel() != 0:
-        #     attention_mask_other_frame = F.max_pool3d(first_channel_other_frame, kernel_size=ae_stride_thw, stride=ae_stride_thw)
-        #     attention_mask = ops.cat([attention_mask_first_frame, attention_mask_other_frame], axis=2)
-        # else:
-        #     attention_mask = attention_mask_first_frame
-        # attention_mask = attention_mask[:, 0].bool().float()  # b t h w, do not channel
+        pad_batch_tubes = np.stack(pad_batch_tubes, axis=0)
 
         max_tube_size = [pad_max_t, pad_max_h, pad_max_w]
         max_latent_size = [
@@ -264,13 +253,14 @@ class Collate:
             for i in batch_input_size
         ]
         attention_mask = [
-            ops.pad(
-                ops.ones(i),
-                (0, max_latent_size[2] - i[2], 0, max_latent_size[1] - i[1], 0, max_latent_size[0] - i[0]),
-                value=0,
+            np.pad(
+                np.ones(i),  # (t h w)
+                ((0, max_latent_size[0] - i[0]), (0, max_latent_size[1] - i[1]), (0, max_latent_size[2] - i[2])),
+                mode="constant",
+                constant_values=0,
             )
             for i in valid_latent_size
         ]
-        attention_mask = ops.stack(attention_mask)  # b t h w
+        attention_mask = np.stack(attention_mask)  # b t h w
 
         return pad_batch_tubes, attention_mask
