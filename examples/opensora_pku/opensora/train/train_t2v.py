@@ -227,7 +227,7 @@ def main(args):
         num_parallel_workers=args.num_parallel_workers,
         max_rowsize=args.max_rowsize,
         collate_fn=Collate(args),
-        output_columns=["video", "text", "cond_mask", "attention_mask"],
+        output_columns=["video", "attention_mask", "text", "cond_mask"],
     )
     dataset_size = dataset.get_dataset_size()
     assert dataset_size > 0, "Incorrect dataset size. Please check your dataset size and your global batch size"

@@ -19,8 +19,8 @@ lr="2e-05"
 output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dtype-FA$enable_flash_attention-bs$batch_size-t5
 
 msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --log_dir=$output_dir/parallel_logs opensora/train/train_t2v.py \
-      --video_data "scripts/train_data/video_data.txt" \
-      --image_data "scripts/train_data/image_data.txt" \
+      --video_data "scripts/train_data/single_video_data.txt" \
+      --image_data "scripts/train_data/single_image_data.txt" \
       --text_embed_folder "" \
       --pretrained LanguageBind/Open-Sora-Plan-v1.0.0/t2v.ckpt \
     --model LatteT2V-XL/122 \

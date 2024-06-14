@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import random
 from os.path import join as opj
@@ -10,6 +11,8 @@ from PIL import Image
 from tqdm import tqdm
 
 import mindspore as ms
+
+logger = logging.getLogger()
 
 
 class T2V_dataset(object):
@@ -46,6 +49,8 @@ class T2V_dataset(object):
         else:
             self.img_cap_list = self.get_img_cap_list()
 
+        logger.info(f"Number of samples: {len(self)}")
+
     def __len__(self):
         if self.num_frames != 1:
             return len(self.vid_cap_list)
@@ -66,7 +71,7 @@ class T2V_dataset(object):
                 image_data = self.get_image(idx)  # 1 frame video as image
             return dict(video_data=video_data, image_data=image_data)
         except Exception as e:
-            print(f"Error with {e}")
+            logger.info(f"Error with {e}")
             return self.__getitem__(random.randint(0, self.__len__() - 1))
 
     def get_video(self, idx):
@@ -162,11 +167,11 @@ class T2V_dataset(object):
         vid_cap_lists = []
         with open(self.video_data, "r") as f:
             folder_anno = [i.strip().split(",") for i in f.readlines() if len(i.strip()) > 0]
-            # print(folder_anno)
+            # logger.info(folder_anno)
         for folder, anno in folder_anno:
             with open(anno, "r") as f:
                 vid_cap_list = json.load(f)
-            print(f"Building {anno}...")
+            logger.info(f"Building {anno}...")
 
             new_vid_cap_list = []
             filtered_samples = 0
@@ -184,7 +189,7 @@ class T2V_dataset(object):
                     new_vid_cap_list.append(vid_cap_list[i])
             vid_cap_lists += new_vid_cap_list
         if self.filter_nonexistent:
-            print(f"Number of filtered video samples :{filtered_samples}")
+            logger.info(f"Number of filtered video samples :{filtered_samples}")
         return vid_cap_lists
 
     def get_img_cap_list(self):
@@ -196,7 +201,7 @@ class T2V_dataset(object):
         for folder, anno in folder_anno:
             with open(anno, "r") as f:
                 img_cap_list = json.load(f)
-            print(f"Building {anno}...")
+            logger.info(f"Building {anno}...")
             new_img_cap_list = []
             for i in tqdm(range(len(img_cap_list))):
                 img_cap_list[i]["path"] = opj(folder, img_cap_list[i]["path"])
@@ -209,7 +214,7 @@ class T2V_dataset(object):
                     new_img_cap_list.append(img_cap_list[i])
             img_cap_lists += new_img_cap_list
         if self.filter_nonexistent:
-            print(f"Number of filtered image samples :{filtered_samples}")
+            logger.info(f"Number of filtered image samples :{filtered_samples}")
         img_cap_lists = [img_cap_lists[i : i + use_image_num] for i in range(0, len(img_cap_lists), use_image_num)]
         return img_cap_lists[:-1]  # drop last to avoid error length
 

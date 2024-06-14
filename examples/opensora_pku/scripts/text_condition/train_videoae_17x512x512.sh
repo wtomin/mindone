@@ -18,7 +18,7 @@ batch_size=2
 lr="2e-05"
 output_dir=t2v-f$num_frames-$image_size-img$use_image_num-videovae488-$model_dtype-FA$enable_flash_attention-bs$batch_size-t5
 
-python opensora/train/test_dataset.py \
+msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --log_dir=$output_dir/parallel_logs opensora/train/train_t2v.py \
       --video_data "scripts/train_data/single_video_data.txt" \
       --image_data "scripts/train_data/single_image_data.txt" \
       --text_embed_folder "" \
@@ -34,7 +34,7 @@ python opensora/train/test_dataset.py \
     --use_recompute True \
     --enable_flash_attention $enable_flash_attention \
     --batch_size=$batch_size \
-    --num_parallel_workers 1 \
+    --num_parallel_workers 10 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=1000000 \
     --start_learning_rate=$lr \
@@ -47,3 +47,6 @@ python opensora/train/test_dataset.py \
     --model_max_length 300 \
     --clip_grad True \
     --use_image_num $use_image_num \
+    --use_img_from_vid \
+    --use_parallel True \
+    --parallel_mode "data" \
