@@ -245,15 +245,17 @@ class DynamicSampleDuration(object):
 def crop(clip, i, j, h, w):
     """
     Args:
-        clip (numpy.ndarray): Video clip to be cropped. Size is (T, C, H, W)
+        clip (numpy.ndarray): Video clip to be cropped. Size is (T, H, W, C)
     """
     if len(clip.shape) != 4:
         raise ValueError("clip should be a 4D tensor")
-    return clip[..., i : i + h, j : j + w]
+    return clip[:, i : i + h, j : j + w, :]
 
 
 def center_crop_using_short_edge(clip):
-    h, w = clip.shape[-2], clip.shape[-1]
+    # clip shape (T, H, W, C)
+    assert len(clip.shape) == 4, f"Expect the input video to have 4 dimensions, but got {len(clip.shape)} dimensions"
+    h, w = clip.shape[1], clip.shape[2]
     if h < w:
         th, tw = h, h
         i = 0
@@ -298,12 +300,12 @@ class CenterCropResizeVideo:
     def __call__(self, clip):
         """
         Args:
-            clip (numpy.ndarray): Video clip to be cropped. Size is (T, C, H, W)
+            clip (numpy.ndarray): Video clip to be cropped. Size is (T, H, W, C)
         Returns:
             numpy.ndarray: scale resized / center cropped video clip.
-                size is (T, C, crop_size, crop_size)
+                size is (T, crop_size, crop_size, C)
         """
-        clip_center_crop = center_crop_using_short_edge(clip)  # (T, C, H, W)
+        clip_center_crop = center_crop_using_short_edge(clip)  # (T, H, W, C)
         clip_center_crop_resize = resize(
             clip_center_crop, target_size=self.size, interpolation_mode=self.interpolation_mode
         )
@@ -318,13 +320,12 @@ def to_tensor(clip):
     Convert tensor data type from uint8 to float, divide value by 255.0 and
     permute the dimensions of clip tensor
         Args:
-            clip (ms.Tensor, dtype=ms.uint8): Size is (T, C, H, W)
+            clip (ms.Tensor, dtype=ms.uint8): Size is (T, H, W, C)
         Return:
-            clip (ms.Tensor, dtype=ms.float): Size is (T, C, H, W)
+            clip (ms.Tensor, dtype=ms.float): Size is (T, H, W, C)
     """
     if clip.dtype != np.uint8:
         raise TypeError("clip tensor should have data type uint8. Got %s" % str(clip.dtype))
-    # return clip.float().permute(3, 0, 1, 2) / 255.0
     return clip.astype(np.float32) / 255.0
 
 
@@ -340,9 +341,9 @@ class ToTensorVideo:
     def __call__(self, clip):
         """
         Args:
-            clip (ms.Tensor, dtype=ms.uint8): Size is (T, C, H, W)
+            clip (ms.Tensor, dtype=ms.uint8): Size is (T, H, W, C)
         Return:
-            clip (ms.Tensor, dtype=ms.float): Size is (T, C, H, W)
+            clip (ms.Tensor, dtype=ms.float): Size is (T, H, W, C)
         """
         return to_tensor(clip)
 

@@ -72,10 +72,10 @@ class T2V_dataset(object):
     def get_video(self, idx):
         video_path = self.vid_cap_list[idx]["path"]
         frame_idx = self.vid_cap_list[idx]["frame_idx"]
-        video = self.decord_read(video_path, frame_idx)  # T C H W
-        video = self.transform(video)  # T C H W -> T C H W
+        video = self.decord_read(video_path, frame_idx)  # T H W C
+        video = self.transform(video)  # T H W C
 
-        video = video.transpose(1, 0, 2, 3)  # T C H W -> C T H W
+        video = video.transpose(3, 0, 1, 2)  # T H W C -> C T H W
         text = self.vid_cap_list[idx]["cap"]
 
         text = text_preprocessing(text)
@@ -110,11 +110,8 @@ class T2V_dataset(object):
 
         image = [Image.open(i["path"]).convert("RGB") for i in image_data]  # num_img [h, w, c]
         image = [np.array(i) for i in image]  # num_img [h, w, c]
-        # 'h w c -> c h w'
-        image = [i.transpose(2, 0, 1).unsqueeze(0) for i in image]  # num_img [1 c h w]
-        image = [self.transform(i) for i in image]  # num_img [1 C H W] -> num_img [1 C H W]
-
-        image = [i.transpose(0, 1) for i in image]  # num_img [1 C H W] -> num_img [C 1 H W]
+        image = [self.transform(i) for i in image]  # num_img [1 H W C] -> num_img [1 H W C]
+        image = [i.transpose(3, 0, 1, 2) for i in image]  # num_img [1 H W C] -> num_img [C 1 H W]
 
         caps = [i["cap"] for i in image_data]
         text = [text_preprocessing(cap) for cap in caps]
@@ -153,8 +150,7 @@ class T2V_dataset(object):
         # frame_indice = np.linspace(0, 63, self.num_frames, dtype=int)
 
         video_data = decord_vr.get_batch(frame_indice).asnumpy()
-        video_data = video_data.transpose(0, 3, 1, 2)  # (T, H, W, C) -> (T C H W)
-        return video_data  # (T C H W)
+        return video_data  # (T H W C)
 
     def get_vid_cap_list(self):
         vid_cap_lists = []
