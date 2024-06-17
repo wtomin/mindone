@@ -368,6 +368,7 @@ if __name__ == "__main__":
         subfolder=args.version,
         checkpoint_path=args.pretrained_ckpt,
         enable_flash_attention=args.enable_flash_attention,
+        FA_dtype=get_precision(args.precision) if get_precision(args.precision) != ms.float32 else ms.bfloat16,
     )
     transformer_model.force_images = args.force_images
     # mixed precision

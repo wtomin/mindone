@@ -2,9 +2,6 @@ export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export MS_ENABLE_NUMA=0
 export MS_MEMORY_STATISTIC=1
 
-# enable kbk
-export MS_ENABLE_ACLNN=1
-export GRAPH_OP_RUN=1
 export GLOG_v=2
 
 # hyper-parameters
@@ -51,3 +48,4 @@ msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --
     --use_img_from_vid \
     --use_parallel True \
     --parallel_mode "data" \
+    --max_device_memory "59GB" \

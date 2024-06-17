@@ -37,6 +37,7 @@ os.environ["HCCL_CONNECT_TIMEOUT"] = "6000"
 os.environ["MS_ASCEND_CHECK_OVERFLOW_MODE"] = "INFNAN_MODE"
 
 logger = logging.getLogger(__name__)
+ms.context.set_context(jit_config={"jit_level": "O1"})  # O0: KBK, O1:DVM, O2: GE
 
 
 def set_all_reduce_fusion(
@@ -145,6 +146,7 @@ def main(args):
         compress_kv_factor=args.compress_kv_factor,
         use_rope=args.use_rope,
         model_max_length=args.model_max_length,
+        FA_dtype=get_precision(args.precision) if get_precision(args.precision) != ms.float32 else ms.bfloat16,
     )
 
     # mixed precision
@@ -159,7 +161,7 @@ def main(args):
                 dtype=model_dtype,
                 custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU]
                 if model_dtype == ms.float16
-                else [nn.MaxPool2d],
+                else [nn.MaxPool2d, LayerNorm, nn.SiLU, nn.GELU],
             )
             logger.info(f"Set mixed precision to {args.amp_level} with dtype={args.precision}")
         else:
