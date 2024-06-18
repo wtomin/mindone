@@ -513,8 +513,9 @@ class MultiHeadAttention(nn.Cell):
             if mask is not None:
                 assert mask.dim() == 4, f"Expect to have 4-dim mask for FA, but got mask shape {mask.shape}"
                 # (b, h, 1, k_n) - > (b, h, q_n, k_n), manual broadcast
-                if mask.shape[-2] == 1:
-                    mask = mask.repeat(q_n, axis=-2)
+                assert (
+                    mask.shape[-2] == q_n
+                ), f"Expect to have the second last dimension of FA mask equals to query length, but got {mask.shape[-2]} and {q_n}"
             out = self.flash_attention(q, k, v, mask)
             b, h, n, d = out.shape
             # reshape FA output to original attn input format, (b h n d) -> (b n h*d)

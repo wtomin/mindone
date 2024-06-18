@@ -109,6 +109,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
         self.num_layers = num_layers
         self.config.hidden_size = model_max_length
         self.FA_dtype = FA_dtype
+        self.enable_flash_attention = enable_flash_attention
 
         assert not (self.compress_kv_factor != 1 and use_rope), "Can not both enable compressing kv and using rope"
 
@@ -314,6 +315,12 @@ class LatteT2V(ModelMixin, ConfigMixin):
         attention_mask = attention_mask.bool().to(dtype)
         return attention_mask
 
+    def tile_mask_to_target_length(self, mask, target_length):
+        # repeat the second last dim of mask to num_patches
+        assert mask.ndim == 3 and mask.shape[1] == 1, f"Expect that mask shape is (B, 1, L), but got {mask.shape}"
+        mask = mask.repeat_interleave(target_length, 1)
+        return mask  # (B, T, L)
+
     def construct(
         self,
         hidden_states: ms.Tensor,
@@ -399,7 +406,7 @@ class LatteT2V(ModelMixin, ConfigMixin):
             encoder_attention_mask_video = encoder_attention_mask_video.repeat_interleave(frame, dim=1)
             encoder_attention_mask_image = encoder_attention_mask[:, 1:, ...]
             encoder_attention_mask = ops.cat([encoder_attention_mask_video, encoder_attention_mask_image], axis=1)
-            # b n l -> (b n) l
+            # b n l -> (b n) 1 l
             encoder_attention_mask = encoder_attention_mask.view(-1, encoder_attention_mask.shape[-1]).unsqueeze(1)
             encoder_attention_mask = encoder_attention_mask.to(self.dtype)
 
@@ -412,6 +419,22 @@ class LatteT2V(ModelMixin, ConfigMixin):
         height, width = hidden_states.shape[-2] // self.patch_size, hidden_states.shape[-1] // self.patch_size
         hw = (height, width)
         num_patches = height * width
+
+        if self.enable_flash_attention:
+            # mask shape (B, 1, L) if mask is not None; Tile mask shape to (B, T, L), T corresponds to the query length (number of patches)
+            encoder_attention_mask = (
+                self.tile_mask_to_target_length(encoder_attention_mask, num_patches)
+                if encoder_attention_mask is not None
+                else None
+            )
+            attention_mask = (
+                self.tile_mask_to_target_length(attention_mask, num_patches) if attention_mask is not None else None
+            )
+            attention_mask_compress = (
+                self.tile_mask_to_target_length(attention_mask_compress, num_patches)
+                if attention_mask_compress is not None
+                else None
+            )
 
         hidden_states = self.pos_embed(hidden_states)  # alrady add positional embeddings
 
