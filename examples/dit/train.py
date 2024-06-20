@@ -44,6 +44,7 @@ from mindone.utils.params import count_params
 os.environ["HCCL_CONNECT_TIMEOUT"] = "6000"
 
 logger = logging.getLogger(__name__)
+ms.context.set_context(jit_config={"jit_level": "O0"})  # O0: KBK, O1:DVM, O2: GE
 
 
 def set_dit_all_params(dit_model, train=True, **kwargs):

@@ -152,7 +152,7 @@ class TextImageDataset:
             tokens = tokens[: CONTEXT_LEN - 1] + [eot_token]
         result[: len(tokens)] = tokens
 
-        return result.astype(np.int64)
+        return result.astype(np.int32)
 
     def _clip_tokenize(self, texts):
         batch_encoding = self.tokenizer(
@@ -192,12 +192,12 @@ class TextImageDataset:
             tokens = self.tokenize(caption)
             # print("D--: ", type(text_data))
             if isinstance(tokens, list):
-                tokens = np.array(tokens, dtype=np.int64)
+                tokens = np.array(tokens, dtype=np.int32)
             if len(tokens.shape) == 2:  # in case, the tokenizer output [1, 77]
                 tokens = tokens[0]
             text_data = tokens
         else:
-            text_data = np.array([49407], dtype=np.int64)  # dummy token ids as a placeholder. Do not return a string.
+            text_data = np.array([49407], dtype=np.int32)  # dummy token ids as a placeholder. Do not return a string.
         return pixel_values, class_label, text_data
 
 

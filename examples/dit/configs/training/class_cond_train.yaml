@@ -3,7 +3,7 @@ condition: "class"
 output_path: outputs/class_cond_train
 
 # system
-use_parallel: True
+use_parallel: False
 
 # model setting
 image_size: 256 # or 512
@@ -19,7 +19,7 @@ patch_embedder: "conv"
 
 # data setting
 imagenet_format: True
-data_path: imagenet_samples/images/
+data_path: ImageNet2012/train
 dataset_sink_mode: False
 num_parallel_workers: 4
 

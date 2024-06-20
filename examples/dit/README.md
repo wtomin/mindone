@@ -17,6 +17,11 @@ In this tutorial, we will introduce how to run inference and finetuning experime
 
 ### Environment Setup
 
+1. Use python>=3.7 [[install]](https://www.python.org/downloads/)
+
+2. Install MindSpore 2.3 master (0615daily) according to the [website](https://repo.mindspore.cn/mindspore/mindspore/version/202406/20240615/master_20240615020018_43ccb91e45899b64fe31d304497ab17e3ada3cea_newest/unified/) and use C18 CANN (0517) which can be downloaded from [here](https://repo.mindspore.cn/ascend/ascend910/20240517/).
+
+3. Install other dependencies:
 ```
 pip install -r requirements.txt
 ```
@@ -119,30 +124,35 @@ Then run `python sample.py -c config-file-path`.
 
 ## Model Training with ImageNet dataset
 
-You can start the distributed training with ImageNet dataset format using the following command
+First, please download the ImageNet-1K dataset from the [official website](https://www.image-net.org/download.php).
+
+Before training, you can adjust the hyper-parameters in the yaml file `configs/training/class_cond_train.yaml`:
+```yaml
+# training hyper-params
+start_learning_rate: 1e-4
+scheduler: "constant"
+warmup_steps: 100
+train_batch_size: 64
+gradient_accumulation_steps: 1
+weight_decay: 0.01
+epochs: 1400
+```
+Make sure you have set the `data_path` to the path of your ImageNet dataset, e.g. `ImageNet2012/train`.
+
+If you want to train the DiT with single card, you can start the training with:
+```bash
+python train.py --config configs/training/class_cond_train.yaml
+```
+
+If you want to start the distributed training, you can use the following command:
 
 ```bash
-export MS_ASCEND_CHECK_OVERFLOW_MODE="INFNAN_MODE"
-mpirun -n 4 python train.py \
+output_dir="outputs"
+msrun --master_port=8200 --worker_num=8 --local_worker_num=8 --log_dir=$output_dir  python train.py \
     -c configs/training/class_cond_train.yaml \
-    --dataset_path PATH_TO_YOUR_DATASET \
     --use_parallel True
 ```
-
-where `PATH_TO_YOUR_DATASET` is the path of your ImageNet dataset, e.g. `ImageNet2012/train`.
-
-For machine with Ascend devices, you can also start the distributed training using the rank table.
-Please run
-
-```bash
-bash scripts/run_distributed.sh path_of_the_rank_table 0 4 path_to_your_dataset
-```
-
-to launch a 4P training. For detail usage of the training script, please run
-
-```bash
-bash scripts/run_distributed.sh -h
-```
+To launch a 4P training, simply change `local_worker_num` and `worker_num` to 4.
 
 # References
 
