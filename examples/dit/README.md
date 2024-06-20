@@ -86,42 +86,6 @@ Some generated example images are shown below:
 <img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-207.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-279.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-360.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-387.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-417.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-88.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-974.png" width="12.5%" /><img src="https://raw.githubusercontent.com/wtomin/mindone-assets/main/dit/256x256/class-979.png" width="12.5%" />
 </p>
 
-## Model Finetuning
-
-Now, we support finetuning DiT model on a toy dataset `imagenet_samples/images/`. It consists of three sample images randomly selected from ImageNet dataset and their corresponding class labels. This toy dataset is stored at this [website](https://github.com/wtomin/mindone-assets/tree/main/dit/imagenet_samples). You can also download this toy dataset using:
-
-```bash
-bash scripts/download_toy_dataset.sh
-```
-Afterwards, the toy dataset is saved in `imagenet_samples/` folder.
-
-To finetune DiT model conditioned on class labels on Ascend devices, use:
-```bash
-python train.py --config configs/training/class_cond_finetune.yaml
-```
-
-You can adjust the hyper-parameters in the yaml file:
-```yaml
-# training hyper-params
-start_learning_rate: 5e-5  # small lr for finetuning exps. Change it to 1e-4 for regular training tasks.
-scheduler: "constant"
-warmup_steps: 10
-train_batch_size: 2
-gradient_accumulation_steps: 1
-weight_decay: 0.01
-epochs: 3000
-```
-
-After training, the checkpoints will be saved under `output_folder/ckpt/`.
-
-To run inference with a certain checkpoint file, please first revise `dit_checkpoint` path in the yaml files under `configs/inference/`, for example,
-```
-# dit-xl-2-256x256.yaml
-dit_checkpoint: "outputs/ckpt/DiT-3000.ckpt"
-```
-
-Then run `python sample.py -c config-file-path`.
-
 ## Model Training with ImageNet dataset
 
 First, please download the ImageNet-1K dataset from the [official website](https://www.image-net.org/download.php).
@@ -153,6 +117,17 @@ msrun --master_port=8200 --worker_num=8 --local_worker_num=8 --log_dir=$output_d
     --use_parallel True
 ```
 To launch a 4P training, simply change `local_worker_num` and `worker_num` to 4.
+
+
+After training, the checkpoints will be saved under `output_dir/ckpt/`.
+
+To run inference with a certain checkpoint file, please first revise `dit_checkpoint` path in the yaml files under `configs/inference/`, for example,
+```
+# dit-xl-2-256x256.yaml
+dit_checkpoint: "outputs/ckpt/DiT-3000.ckpt"
+```
+
+Then run `python sample.py -c config-file-path`.
 
 # References
 
