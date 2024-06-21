@@ -6,9 +6,9 @@ def nonlinearity(x, upcast=False):
     # swish
     ori_dtype = x.dtype
     if upcast:
-        return x * (ops.sigmoid(x.astype(ms.float32))).astype(ori_dtype)
+        return ops.silu(x.to(ms.float32)).astype(ori_dtype)
     else:
-        return x * (ops.sigmoid(x))
+        return ops.silu(x)
 
 
 def divisible_by(num, den):
