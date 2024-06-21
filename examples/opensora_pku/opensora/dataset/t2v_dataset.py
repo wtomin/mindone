@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 import numpy as np
-from decord import VideoReader
+from opensora.utils.dataset_utils import DecordInit
 from PIL import Image
 from tqdm import tqdm
 
@@ -67,6 +67,7 @@ class TextVideoDataset:
             backend=transform_backend,
             disable_flip=disable_flip,
         )
+        self.v_decoder = DecordInit()  # FIXME: rank_id % 8 ?
         # prepare replacement data
         max_attempts = 100
         self.prev_ok_sample = self.get_replace_data(max_attempts)
@@ -111,7 +112,7 @@ class TextVideoDataset:
     def parse_video_latent(self, *args):
         raise NotImplementedError
 
-    def video_read(self, video_path, frame_idx=None):
+    def decord_read(self, video_path, frame_idx=None):
         # read video files (.mp4 or .gif) and sample frames randomly or given the frame-idx in the format (start_idx:end_idx)
         if not video_path.endswith(".mp4") or video_path.endswith(".gif"):
             if video_path[-4] != ".":
@@ -119,7 +120,7 @@ class TextVideoDataset:
             else:
                 raise ValueError(f"video file format is not verified: {video_path}")
 
-        video_reader = VideoReader(video_path)
+        video_reader = self.v_decoder(video_path)
         video_length = len(video_reader)
 
         if frame_idx is not None:
@@ -136,7 +137,7 @@ class TextVideoDataset:
             pixel_values = video_reader[batch_index]  # shape: (f, h, w, c)
         else:
             pixel_values = video_reader.get_batch(batch_index).asnumpy()  # shape: (f, h, w, c)
-        return pixel_values, video_reader
+        return pixel_values
 
     def get_text_data_and_mask(self, data_item):
         if not self.return_text_emb:
@@ -167,8 +168,12 @@ class TextVideoDataset:
         video_path = self.vid_cap_list[idx]["path"]
         frame_idx = self.vid_cap_list[idx].get("frame_idx", None)
         if not self.return_vae_latent:
-            video, video_reader = self.video_read(video_path, frame_idx)
-            del video_reader
+            assert os.path.exists(video_path), f"Got non-existent video path for index {idx}: {video_path}!"
+            assert os.path.getsize(video_path) > 100, "Skip loading extra-small video file."
+            assert (
+                os.path.getsize(video_path) < 1024 * 1024 * 1024
+            ), f"Skip loading extra-large video file, get file size {os.path.getsize(video_path)/(1024 * 1024 * 1024)} GB."
+            video = self.decord_read(video_path, frame_idx)
         else:
             raise NotImplementedError
             # video = self.parse_video_latent(vae_latent_path)
