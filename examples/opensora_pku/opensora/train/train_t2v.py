@@ -281,15 +281,27 @@ def main(args):
 
     # build optimizer
     assert args.optim.lower() == "adamw", f"Not support optimizer {args.optim}!"
-    optimizer = create_optimizer(
-        latent_diffusion_with_loss.trainable_params(),
-        name=args.optim,
-        betas=args.betas,
-        eps=args.optim_eps,
-        group_strategy=args.group_strategy,
-        weight_decay=args.weight_decay,
-        lr=lr,
-    )
+    if not args.use_custom_adamw:
+        optimizer = create_optimizer(
+            latent_diffusion_with_loss.trainable_params(),
+            name=args.optim,
+            betas=args.betas,
+            eps=args.optim_eps,
+            group_strategy=args.group_strategy,
+            weight_decay=args.weight_decay,
+            lr=lr,
+        )
+    else:
+        from opensora.utils.adamw import AdamW
+
+        optimizer = AdamW(
+            latent_diffusion_with_loss.trainable_params(),
+            learning_rate=lr,
+            beta1=args.betas[0],
+            beta2=args.betas[1],
+            eps=args.optim_eps,
+            weight_decay=args.weight_decay,
+        )
 
     loss_scaler = create_loss_scaler(args)
     # resume ckpt
@@ -534,6 +546,12 @@ def parse_t2v_train_args(parser):
         type=str,
         choices=["bf16", "fp16"],
         help="what data type to use for T5 text encoder. Default is `bf16`, which corresponds to ms.bfloat16",
+    )
+    parser.add_argument(
+        "--use_custom_adamw",
+        type=str2bool,
+        default=True,
+        help="Whether to use custom adamw or ms.nn.optim.AdamWeightDecay",
     )
     return parser
 
