@@ -163,7 +163,8 @@ class TimeDownsample2x(nn.Cell):
         if not replace_avgpool3d:
             self.conv = nn.AvgPool3d((kernel_size, 1, 1), stride=(2, 1, 1))
         else:
-            self.conv = nn.AvgPool2d((kernel_size, 1), stride=(2, 1))
+            # elf.conv = nn.AvgPool2d((kernel_size, 1), stride=(2, 1))
+            self.conv = nn.AvgPool1d(kernel_size, stride=2)
         # print('D--: replace avgpool3d', replace_avgpool3d)
         self.time_pad = self.kernel_size - 1
 
@@ -177,9 +178,9 @@ class TimeDownsample2x(nn.Cell):
         else:
             # FIXME: only work when h, w stride is 1
             b, c, t, h, w = x.shape
-            x = ops.reshape(x, (b, c, t, h * w))
+            x = x.permute(0, 1, 3, 4, 2).reshape((b, c * h * w, t))  # b, c, t, h, w -> b, c*h*w, t
             x = self.conv(x)
-            x = ops.reshape(x, (b, c, -1, h, w))
+            x = ops.reshape(x, (b, c, h, w, -1)).permute(0, 1, 4, 2, 3)  # b, c*h*w, t -> b, c, t, h, w
             return x
 
 
@@ -216,7 +217,8 @@ class TimeDownsampleRes2x(nn.Cell):
         if not replace_avgpool3d:
             self.avg_pool = nn.AvgPool3d((kernel_size, 1, 1), stride=(2, 1, 1))
         else:
-            self.avg_pool = nn.AvgPool2d((kernel_size, 1), stride=(2, 1))
+            # self.avg_pool = nn.AvgPool2d((kernel_size, 1), stride=(2, 1))
+            self.avg_pool = nn.AvgPool1d(kernel_size, stride=2)
         self.time_pad = self.kernel_size[0] - 1
 
         self.conv = nn.Conv3d(
@@ -246,9 +248,9 @@ class TimeDownsampleRes2x(nn.Cell):
         else:
             # FIXME: only work when h, w stride is 1
             b, c, t, h, w = x.shape
-            x = ops.reshape(x, (b, c, t, h * w))
+            x = x.permute(0, 1, 3, 4, 2).reshape((b, c * h * w, t))  # b, c, t, h, w -> b, c*h*w, t
             x = self.avg_pool(x)
-            pool_out = ops.reshape(x, (b, c, -1, h, w))
+            pool_out = ops.reshape(x, (b, c, h, w, -1)).permute(0, 1, 4, 2, 3)  # b, c*h*w, t -> b, c, t, h, w
 
         return alpha * pool_out + (1 - alpha) * conv_out
 
