@@ -305,12 +305,21 @@ if __name__ == "__main__":
     else:
         skip_load_ckpt = False
     kwargs = {"enable_flash_attention": args.enable_flash_attention, "FA_dtype": FA_dtype}
+    model_version = args.model_path.split("/")[-1]
+    if model_version.split("x")[0] != args.num_frames:
+        logger.warning(
+            f"Detect that the loaded model version is {model_version}, but found a mismatched number of frames {model_version.split('x')[0]}"
+        )
+    if model_version.split("x")[1] != args.height:
+        logger.warning(
+            f"Detect that the loaded model version is {model_version}, but found a mismatched resolution {args.height}x{args.width}"
+        )
     transformer_model = OpenSoraT2V.from_pretrained(
         args.model_path,
         model_file=args.ms_checkpoint,
         cache_dir=args.cache_dir,
-        additional_config_kwargs=kwargs,
         skip_load_ckpt=skip_load_ckpt,
+        **kwargs,
     )
     if skip_load_ckpt:
         transformer_model.load_from_checkpoint(args.ms_checkpoint)
@@ -325,7 +334,7 @@ if __name__ == "__main__":
                 dtype=dtype,
                 custom_fp32_cells=[LayerNorm, Attention, nn.SiLU, nn.GELU]
                 if dtype == ms.float16
-                else [nn.MaxPool2d, LayerNorm, nn.SiLU, nn.GELU],
+                else [nn.MaxPool2d, nn.MaxPool3d, LayerNorm, nn.SiLU, nn.GELU],
             )
             logger.info(f"Set mixed precision to O2 with dtype={args.precision}")
         else:

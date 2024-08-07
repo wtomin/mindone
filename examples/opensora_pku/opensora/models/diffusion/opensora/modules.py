@@ -528,14 +528,7 @@ class MultiHeadAttention(nn.Cell):
         frame: int = 8,
         height: int = 16,
         width: int = 16,
-        *args,
-        **kwargs,
     ):
-        if len(args) > 0 or kwargs.get("scale", None) is not None:
-            deprecation_message = "The `scale` argument is deprecated and will be ignored. Please remove it, as passing it will raise an error in the future.、\
-                  `scale` should directly be passed while calling the underlying pipeline component i.e., via `cross_attention_kwargs`."
-            logger.info(deprecation_message)
-
         if self.downsampler is not None:
             hidden_states, attention_mask = self.downsampler(hidden_states, attention_mask, t=frame, h=height, w=width)
             frame, height, width = self.downsampler.t, self.downsampler.h, self.downsampler.w
@@ -545,12 +538,13 @@ class MultiHeadAttention(nn.Cell):
             hidden_states = self.spatial_norm(hidden_states, temb)
 
         input_ndim = hidden_states.ndim
+        batch_size = hidden_states.shape[0]
 
         if input_ndim == 4:
             batch_size, channel, height, width = hidden_states.shape
             hidden_states = hidden_states.view(batch_size, channel, height * width).swapaxes(1, 2)
         else:
-            batch_size, channel, height, width = None, None, None, None
+            channel = None
 
         if self.layout == "SBH":
             sequence_length, batch_size, _ = (
@@ -925,14 +919,14 @@ class FeedForward(nn.Cell):
         # project in
         self.net.append(act_fn)
         # project dropout
-        self.net.append(nn.Dropout(dropout))
+        self.net.append(nn.Dropout(p=dropout))
         # project out
         self.net.append(nn.Dense(inner_dim, dim_out, has_bias=bias))
         # FF as used in Vision Transformer, MLP-Mixer, etc. have a final dropout
         if final_dropout:
-            self.net.append(nn.Dropout(dropout))
+            self.net.append(nn.Dropout(p=dropout))
 
-    def forward(self, hidden_states: ms.Tensor, *args, **kwargs) -> ms.Tensor:
+    def construct(self, hidden_states: ms.Tensor, *args, **kwargs) -> ms.Tensor:
         if len(args) > 0 or kwargs.get("scale", None) is not None:
             deprecation_message = "The `scale` argument is deprecated and will be ignored. Please remove it, \
                 as passing it will raise an error in the future. `scale` should directly be passed while \
@@ -1625,7 +1619,7 @@ class AdaLayerNorm(nn.Cell):
 
     def construct(self, x: ms.Tensor, timestep: ms.Tensor) -> ms.Tensor:
         emb = self.linear(self.silu(self.emb(timestep)))
-        scale, shift = mint.chunk(emb, 2, axis=0)
+        scale, shift = mint.chunk(emb, 2, dim=0)
         x = self.norm(x) * (1 + scale) + shift
         return x
 
@@ -1656,7 +1650,7 @@ class AdaLayerNormZero(nn.Cell):
     ) -> Tuple[ms.Tensor, ms.Tensor, ms.Tensor, ms.Tensor, ms.Tensor]:
         emb = self.linear(self.silu(self.emb(timestep, class_labels, hidden_dtype=hidden_dtype)))
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = mint.chunk(
-            emb, 6, axis=1
+            emb, 6, dim=1
         )  # emb.chunk(6, dim=1)
         x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
@@ -1711,7 +1705,7 @@ class FeedForward_Conv2d(nn.Cell):
         self.project_out = nn.Dense(hidden_features, dim, has_bias=bias)
         self.gelu = nn.GELU(approximate=False)
 
-    def forward(self, x, t, h, w):
+    def construct(self, x, t, h, w):
         x = self.project_in(x)
         b, _, d = x.shape
         # b (t h w) d -> (b t) d h w
@@ -1960,11 +1954,11 @@ class BasicTransformerBlock(nn.Cell):
             if get_sequence_parallel_state():
                 batch_size = hidden_states.shape[1]  # S B H
                 shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = mint.chunk(
-                    self.scale_shift_table[:, None] + timestep.reshape(6, batch_size, -1), 6, axis=0
+                    self.scale_shift_table[:, None] + timestep.reshape(6, batch_size, -1), 6, dim=0
                 )
             else:
                 shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = mint.chunk(
-                    self.scale_shift_table[None] + timestep.reshape(batch_size, 6, -1), 6, axis=1
+                    self.scale_shift_table[None] + timestep.reshape(batch_size, 6, -1), 6, dim=1
                 )
             norm_hidden_states = self.norm1_ln(hidden_states)
             norm_hidden_states = norm_hidden_states * (1 + scale_msa) + shift_msa
@@ -1977,7 +1971,10 @@ class BasicTransformerBlock(nn.Cell):
 
         # 1. Prepare GLIGEN inputs
         cross_attention_kwargs = cross_attention_kwargs.copy() if cross_attention_kwargs is not None else {}
-        gligen_kwargs = cross_attention_kwargs.pop("gligen", None)
+        if "gligen" in cross_attention_kwargs:
+            gligen_kwargs = cross_attention_kwargs["gligen"]
+        else:
+            gligen_kwargs = None
         attn_output = self.attn1(
             norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,

@@ -286,7 +286,7 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
             )
         elif self.config.norm_type == "ada_norm_single":
             self.norm_out = LayerNorm(self.inner_dim, elementwise_affine=False, eps=1e-6)
-            self.scale_shift_table = nn.Parameter(ops.randn(2, self.inner_dim) / self.inner_dim**0.5)
+            self.scale_shift_table = ms.Parameter(ops.randn(2, self.inner_dim) / self.inner_dim**0.5)
             self.proj_out = nn.Dense(
                 self.inner_dim,
                 self.config.patch_size_t * self.config.patch_size * self.config.patch_size * self.out_channels,
@@ -355,8 +355,6 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
         """
         batch_size, c, frame, h, w = hidden_states.shape
         frame = frame - use_image_num  # 20-4=16
-        # b c f h w -> (b f) c h w
-        hidden_states = hidden_states.permute(0, 2, 1, 3, 4).reshape(batch_size * (frame + use_image_num), c, h, w)
         # ensure attention_mask is a bias, and give it a singleton query_tokens dimension.
         #   we may have done this conversion already, e.g. if we came here via UNet2DConditionModel#forward.
         #   we can tell by counting dims; if ndim == 2: it's a mask rather than a bias.
@@ -385,9 +383,10 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
                 attention_mask_img = attention_mask[:, frame:]  # b, use_image_num, h, w
 
             if attention_mask_vid.numel() > 0:
-                attention_mask_vid_first_frame = attention_mask_vid[:, :1].repeat(1, self.patch_size_t - 1, 1, 1)
-                attention_mask_vid = ops.cat([attention_mask_vid_first_frame, attention_mask_vid], axis=1)
-                attention_mask_vid = attention_mask_vid.unsqueeze(1)  # b 1 t h w
+                if self.patch_size_t - 1 > 0:
+                    attention_mask_vid_first_frame = attention_mask_vid[:, :1].repeat(self.patch_size_t - 1, axis=1)
+                    attention_mask_vid = ops.cat([attention_mask_vid_first_frame, attention_mask_vid], axis=1)
+                attention_mask_vid = attention_mask_vid[:, None, :, :, :]  # b 1 t h w
                 attention_mask_vid = self.max_pool3d(attention_mask_vid)
                 # b 1 t h w -> (b 1) 1 (t h w)
                 attention_mask_vid = attention_mask_vid.reshape(batch_size, 1, -1)
@@ -403,7 +402,13 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
                 attention_mask_img = attention_mask_vid
                 attention_mask_vid = None
         # convert encoder_attention_mask to a bias the same way we do for attention_mask
+        encoder_attention_mask_vid, encoder_attention_mask_img = None, None
+        if encoder_attention_mask is not None and encoder_attention_mask.ndim == 2:
+            encoder_attention_mask = encoder_attention_mask.unsqueeze(1)  # (b, l) -> (b, 1, l)
+            encoder_attention_mask = encoder_attention_mask.to(self.dtype)
+
         if encoder_attention_mask is not None and encoder_attention_mask.ndim == 3:
+            encoder_attention_mask = encoder_attention_mask.to(self.dtype)
             # b, 1+use_image_num, l -> a video with images
             # b, 1, l -> only images
             in_t = encoder_attention_mask.shape[1]
@@ -420,12 +425,12 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
                 encoder_attention_mask_img = encoder_attention_mask_vid
                 encoder_attention_mask_vid = None
 
-        if attention_mask_vid is not None:
-            attention_mask_vid = attention_mask_vid.repeat(1, attention_mask_vid.shape[-1], 1)
-            encoder_attention_mask_vid = encoder_attention_mask_vid.repeat(1, attention_mask_vid.shape[-2], 1)
-        if attention_mask_img is not None:
-            attention_mask_img = attention_mask_img.repeat(1, attention_mask_img.shape[-1], 1)
-            encoder_attention_mask_img = encoder_attention_mask_img.repeat(1, attention_mask_img.shape[-2], 1)
+        if attention_mask_vid is not None and encoder_attention_mask_vid is not None:
+            attention_mask_vid = attention_mask_vid.repeat(attention_mask_vid.shape[-1], axis=1)
+            encoder_attention_mask_vid = encoder_attention_mask_vid.repeat(attention_mask_vid.shape[-2], axis=1)
+        if attention_mask_img is not None and encoder_attention_mask_img is not None:
+            attention_mask_img = attention_mask_img.repeat(attention_mask_img.shape[-1], axis=1)
+            encoder_attention_mask_img = encoder_attention_mask_img.repeat(attention_mask_img.shape[-2], axis=1)
 
         # # Retrieve lora scale.
         # lora_scale = cross_attention_kwargs.get("scale", 1.0) if cross_attention_kwargs is not None else 1.0
@@ -519,7 +524,7 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
                 # (b i) c 1 h w -> b c i h w
                 _, c, _, h, w = output_img.shape
                 output_img = output_img.reshape(-1, use_image_num, c, 1, h, w).swapaxes(1, 2).squeeze(3)
-
+        output = None
         if output_vid is not None and output_img is not None:
             output = ops.cat([output_vid, output_img], axis=2)
         elif output_vid is not None:
@@ -560,7 +565,6 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
         use_safetensors = kwargs.pop("use_safetensors", None)
         skip_load_ckpt = kwargs.pop("skip_load_ckpt", False)
         model_file = kwargs.pop("model_file", None)
-        additional_config_kwargs = kwargs.pop("additional_config_kwargs", None)
 
         allow_pickle = False
         if use_safetensors is None and model_file is None:
@@ -592,8 +596,7 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
             user_agent=user_agent,
             **kwargs,
         )
-        if additional_config_kwargs:
-            config.update(additional_config_kwargs)
+
         # load model
         if from_flax:
             raise NotImplementedError("loading flax checkpoint in mindspore model is not yet supported.")
@@ -786,22 +789,22 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
         # import ipdb;ipdb.set_trace()
         if self.config.norm_type != "ada_norm_single":
             conditioning = self.transformer_blocks[0].norm1.emb(timestep, class_labels, hidden_dtype=self.dtype)
-            shift, scale = mint.chunk(self.proj_out_1(self.silu(conditioning)), 2, axis=1)
+            shift, scale = mint.chunk(self.proj_out_1(self.silu(conditioning)), 2, dim=1)
             hidden_states = self.norm_out(hidden_states) * (1 + scale[:, None]) + shift[:, None]
             hidden_states = self.proj_out_2(hidden_states)
         elif self.config.norm_type == "ada_norm_single":
-            shift, scale = mint.chunk(self.scale_shift_table[None] + embedded_timestep[:, None], 2, axis=1)
+            shift, scale = mint.chunk(self.scale_shift_table[None] + embedded_timestep[:, None], 2, dim=1)
             hidden_states = self.norm_out(hidden_states)
             # Modulation
             hidden_states = hidden_states * (1 + scale) + shift
             hidden_states = self.proj_out(hidden_states)
-            hidden_states = hidden_states.squeeze(1)
+            hidden_states = hidden_states.squeeze(1) if hidden_states.shape[1] == 1 else hidden_states
 
         # unpatchify
         if self.adaln_single is None:
             height = width = int(hidden_states.shape[1] ** 0.5)
         hidden_states = hidden_states.reshape(
-            shape=(
+            (
                 -1,
                 num_frames,
                 height,
@@ -815,7 +818,7 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
         # nthwopqc->nctohpwq
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.reshape(
-            shape=(
+            (
                 -1,
                 self.out_channels,
                 num_frames * self.patch_size_t,
@@ -959,9 +962,9 @@ if __name__ == "__main__":
             and ckpt["pos_embed.proj.weight"].ndim == 4
         ):
             repeat = model.pos_embed.proj.weight.shape[2]
-            ckpt["pos_embed.proj.weight"] = ckpt["pos_embed.proj.weight"].unsqueeze(2).repeat(
-                1, 1, repeat, 1, 1
-            ) / float(repeat)
+            ckpt["pos_embed.proj.weight"] = ckpt["pos_embed.proj.weight"].unsqueeze(2).repeat(repeat, axis=2) / float(
+                repeat
+            )
             del ckpt["proj_out.weight"], ckpt["proj_out.bias"]
         msg = model.load_state_dict(ckpt, strict=False)
         print(msg)
