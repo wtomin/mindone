@@ -1,27 +1,19 @@
 import argparse
+import logging
 import os
+import sys
+
+mindone_lib_path = os.path.abspath("../../")
+sys.path.insert(0, mindone_lib_path)
+sys.path.append(os.path.abspath("./"))
 
 from models import build_model
+from utils import init_env
 
-import mindspore as ms
-
-from mindone.utils.seed import set_random_seed
-
-
-def init_env(args):
-    # no parallel mode currently
-    ms.set_context(mode=args.ms_mode)  # needed for MS2.0
-    device_id = int(os.getenv("DEVICE_ID", 0))
-    ms.set_context(
-        mode=args.ms_mode,
-        device_target=args.device_target,
-        device_id=device_id,
-    )
-
-    return device_id
+logger = logging.getLogger(__name__)
 
 
-def example_for_understanding():
+def example_for_understanding(model_path, model_dtype):
     # Building model and load weight
     model = build_model(model_path=model_path, model_dtype=model_dtype, understanding=True)
 
@@ -38,7 +30,7 @@ def example_for_understanding():
     print("The answer is: ", answer)
 
 
-def example_for_generation():
+def example_for_generation(model_path, model_dtype):
     # Building model and load weight
     model = build_model(model_path=model_path, model_dtype=model_dtype, check_safety=False, understanding=False)
 
@@ -75,20 +67,29 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # MS new args
-    parser.add_argument("--device_target", type=str, default="Ascend", help="Ascend or GPU")
+    parser.add_argument("--device", type=str, default="Ascend", help="Ascend or GPU")
+    parser.add_argument("--mode", type=int, default=0, help="Running in GRAPH_MODE(0) or PYNATIVE_MODE(1) (default=0)")
     parser.add_argument(
-        "--ms_mode", type=int, default=0, help="Running in GRAPH_MODE(0) or PYNATIVE_MODE(1) (default=0)"
+        "--model_path",
+        type=str,
+        default="LaVIT_checkpoint",
+        help="The directory to the checkpoint, will download from huggingface if not existent.",
     )
-
+    parser.add_argument("--precision", type=str, choices=["bf16", "fp16", "fp32"], help="The precision dtype")
+    parser.add_argument(
+        "--amp_level", type=str, default="O2", help="Set the amp level for the transformer model. Defaults to O2."
+    )
+    parser.add_argument("--seed", type=int, default=1234, help="The random seed")
+    parser.add_argument("--jit_level", default="O0", help="Set jit level: # O0: KBK, O1:DVM, O2: GE")
     args = parser.parse_args()
 
-    model_path = "models/LaVIT_checkpoint"
-    model_dtype = "bf16"
-
-    seed = 1234
-    set_random_seed(seed)
-
-    model_dtype = ms.float16
+    rank_id, device_num = init_env(
+        args.mode,
+        seed=args.seed,
+        device_target=args.device,
+        jit_level=args.jit_level,
+    )
+    model_path = args.model_path
 
     # For Multi-Modal Understanding
     example_for_understanding()

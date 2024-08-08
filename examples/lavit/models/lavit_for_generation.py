@@ -4,6 +4,7 @@ from collections import OrderedDict
 
 import cv2
 import numpy as np
+from utils import get_amp_model
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -31,18 +32,18 @@ class LaVITforGeneration(nn.Cell):
         model_path="",
         model_dtype="bf16",
         amp_level="O2",
-        device_id=None,
         check_safety=False,
         load_tokenizer=False,
         pixel_decoding="highres",
         model_sub_dir="language_model",
+        use_flash_attention=True,
         **kwargs,
     ):
         """
         model_path: The pre-trained model checkpoint path, the local path for downloaded LaVIT weight
         model_dtype: The precision of model weight during inference, should be set bf16 or fp16, default is bf16.
         load_tokenizer: Whether to load the tokenizer encoder during the image generation. For text-to-image generation,
-        The visual tokenizer is not needed, so the default is False for saving the GPU memory. When using for the
+        The visual tokenizer is not needed, so the default is False for saving the memory. When using for the
         multi-modal synthesis (the input image needs to be tokenizd to dircrete ids), the load_tokenizer must be set to True.
         check_safety: load the stable diffusion safety checker to check the safety of generated image, if not safe, output a black image
         pixel_decoding: can be set to `highres` or `lowres`, default is `highres`: using the high resolution decoding
@@ -64,18 +65,13 @@ class LaVITforGeneration(nn.Cell):
             subfolder=model_sub_dir,
         )
         self.model_dtype = model_dtype
-        if self.model_dtype in ["fp16", "bf16"]:
-            self.llama_model = auto_mixed_precision(
-                self.llama_model, amp_level=amp_level, dtype=model_dtype, custom_fp32_cells=[]
-            )
-
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
-
+        self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)
         if load_tokenizer:
             self.visual_tokenizer = build_dynamic_tokenizer(model_path, for_understanding=False)
         else:
-            # For text-to-image generation, we does not load the tokenizer for saving GPU memory
+            # For text-to-image generation, we does not load the tokenizer for saving memory
             # For using multi-modal synthesis, please set load_tokenizer to True
             import torch
 

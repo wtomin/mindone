@@ -4,6 +4,7 @@ import cv2
 from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
 from models.modeling_visual_tokenzier import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
+from utils import get_amp_model
 
 import mindspore as ms
 from mindspore import nn, ops
@@ -22,7 +23,7 @@ class LaVITforUnderstanding(nn.Cell):
         model_dtype="bf16",
         amp_level="O2",
         apply_lemmatizer=True,
-        use_xformers=False,
+        use_flash_attention=True,
         model_sub_dir="language_model",
     ):
         """
@@ -36,8 +37,6 @@ class LaVITforUnderstanding(nn.Cell):
 
         visual_vocab_size = 16384  # The visual vocab size of LaVIT is 16384
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
-        if model_dtype in ["fp16", "bf16"]:
-            print(f"auto_mixed_precision level {amp_level}")
 
         self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, subfolder=model_sub_dir, use_fast=False)
         self.llama_model = LlamaForCausalLM.from_pretrained(
@@ -46,15 +45,13 @@ class LaVITforUnderstanding(nn.Cell):
         )
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
-
+        self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
         self.visual_vocab_size = visual_vocab_size
         print(f"The Visual Vocab Size is {self.visual_vocab_size}")
         print(f"The llama tokenizer vocab size is {len(self.llama_tokenizer)}")
 
-        self.visual_tokenizer = build_dynamic_tokenizer(
-            model_path, use_xformers=use_xformers, for_understanding=True, model_sub_dir=model_sub_dir
-        )
+        self.visual_tokenizer = build_dynamic_tokenizer(model_path, for_understanding=True, model_sub_dir=model_sub_dir)
         self.model_dtype = model_dtype
         self.apply_lemmatizer = apply_lemmatizer
         self._lemmatizer = None

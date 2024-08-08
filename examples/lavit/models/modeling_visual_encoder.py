@@ -625,7 +625,7 @@ def get_cast_dtype(precision: str):
 
 
 class QuickGELU(nn.Cell):
-    # NOTE This is slower than nn.GELU or nn.SiLU and uses more GPU memory
+    # NOTE This is slower than nn.GELU or nn.SiLU and uses more memory
     def construct(self, x: Tensor):
         return x * ops.sigmoid(1.702 * x)
 
