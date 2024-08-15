@@ -118,11 +118,15 @@ def main(args):
             patch_size_h == patch_size_w
         ), f"Support only patch_size_h == patch_size_w now, but found patch_size_h ({patch_size_h}), patch_size_w ({patch_size_w})"
         assert (
-            args.max_image_size % ae_stride_h == 0
-        ), f"Image size must be divisible by ae_stride_h, but found max_image_size ({args.max_image_size}), "
+            args.height % ae_stride_h == 0
+        ), f"Image height must be divisible by ae_stride_h, but found height ({args.height}), "
+        " ae_stride_h ({ae_stride_h})."
+        assert (
+            args.width % ae_stride_w == 0
+        ), f"Image width must be divisible by ae_stride_w, but found width ({args.width}), "
         " ae_stride_h ({ae_stride_h})."
 
-        latent_size = (args.max_image_size // ae_stride_h, args.max_image_size // ae_stride_w)
+        latent_size = (args.height // ae_stride_h, args.width // ae_stride_w)
         vae.latent_size = latent_size
         args.stride_t = ae_stride_t * patch_size_t
         args.stride = ae_stride_h * patch_size_h
@@ -242,7 +246,7 @@ def main(args):
     ds_config = dict(
         image_data=args.image_data,
         video_data=args.video_data,
-        sample_size=args.max_image_size,
+        sample_size=(args.height, args.width),
         num_frames=args.num_frames,
         tokenizer=tokenizer,
         return_text_emb=args.text_embed_cache,
@@ -318,7 +322,7 @@ def main(args):
                     f"Checkpoint will be saved every {ckpt_save_interval * steps_per_sink} steps."
                 )
     if step_mode != args.step_mode:
-        logger.logging("Using args.checkpointing_steps to determine whether to use step mode to save ckpt.")
+        logger.info("Using args.checkpointing_steps to determine whether to use step mode to save ckpt.")
         if args.checkpointing_steps is None:
             logger.warning(f"args.checkpointing_steps is not provided. Force step_mode to {step_mode}!")
         else:
@@ -492,7 +496,8 @@ def main(args):
                 ),
                 f"Learning rate: {learning_rate}",
                 f"Batch size: {args.batch_size}",
-                f"Image size: {args.max_image_size}",
+                f"Image height: {args.height}",
+                f"Image width: {args.width}",
                 f"Number of frames: {args.num_frames}",
                 f"Use image num: {args.use_image_num}",
                 f"Optimizer: {args.optim}",
@@ -553,7 +558,8 @@ def parse_t2v_train_args(parser):
     parser.add_argument("--ae_path", type=str, default="LanguageBind/Open-Sora-Plan-v1.1.0")
 
     parser.add_argument("--num_frames", type=int, default=17)
-    parser.add_argument("--max_image_size", type=int, default=512)
+    parser.add_argument("--height", type=int, default=512)
+    parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--compress_kv", action="store_true")
     parser.add_argument("--compress_kv_factor", type=int, default=1)
     parser.add_argument("--use_rope", action="store_true")
