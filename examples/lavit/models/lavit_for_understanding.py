@@ -1,4 +1,5 @@
 import logging
+import os
 
 import cv2
 from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
@@ -38,10 +39,9 @@ class LaVITforUnderstanding(nn.Cell):
         visual_vocab_size = 16384  # The visual vocab size of LaVIT is 16384
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
 
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, subfolder=model_sub_dir, use_fast=False)
+        self.llama_tokenizer = LlamaTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
         self.llama_model = LlamaForCausalLM.from_pretrained(
-            model_path,
-            subfolder=model_sub_dir,
+            os.path.join(model_path, model_sub_dir),
         )
         for param in self.llama_model.get_parameters():
             param.requires_grad = False

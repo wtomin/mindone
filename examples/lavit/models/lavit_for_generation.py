@@ -56,13 +56,12 @@ class LaVITforGeneration(nn.Cell):
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
         if model_dtype in ["fp16", "bf16"]:
             print(f"auto_mixed_precision level {amp_level}")
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, subfolder=model_sub_dir, use_fast=False)
+        self.llama_tokenizer = LlamaTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
         self.llama_tokenizer.padding_side = "left"
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
         self.llama_model = LlamaForCausalLM.from_pretrained(
-            model_path,
-            subfolder=model_sub_dir,
+            os.path.join(model_path, model_sub_dir),
         )
         self.model_dtype = model_dtype
         for param in self.llama_model.get_parameters():
