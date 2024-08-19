@@ -2,7 +2,7 @@ import logging
 
 import cv2
 from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
-from models.modeling_visual_tokenzier import build_dynamic_tokenizer
+from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
 from utils import get_amp_model
 

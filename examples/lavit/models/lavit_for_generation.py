@@ -15,7 +15,7 @@ sys.path.insert(0, mindone_lib_path)
 import PIL
 from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
 from models.modeling_decoder import build_tokenizer_decoder
-from models.modeling_visual_tokenzier import VectorQuantizer, build_dynamic_tokenizer
+from models.modeling_visual_tokenizer import VectorQuantizer, build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
 from PIL import Image
 from tqdm import tqdm

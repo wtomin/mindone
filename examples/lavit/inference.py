@@ -13,9 +13,11 @@ from utils import init_env
 logger = logging.getLogger(__name__)
 
 
-def example_for_understanding(model_path, model_dtype):
+def example_for_understanding(model_path, model_dtype, load_from_local=False):
     # Building model and load weight
-    model = build_model(model_path=model_path, model_dtype=model_dtype, understanding=True)
+    model = build_model(
+        model_path=model_path, model_dtype=model_dtype, understanding=True, local_files_only=load_from_local
+    )
 
     # Image Captioning
     image_path = "demo/caption_image.jpg"
@@ -30,9 +32,15 @@ def example_for_understanding(model_path, model_dtype):
     print("The answer is: ", answer)
 
 
-def example_for_generation(model_path, model_dtype):
+def example_for_generation(model_path, model_dtype, load_from_local=False):
     # Building model and load weight
-    model = build_model(model_path=model_path, model_dtype=model_dtype, check_safety=False, understanding=False)
+    model = build_model(
+        model_path=model_path,
+        model_dtype=model_dtype,
+        check_safety=False,
+        understanding=False,
+        local_files_only=load_from_local,
+    )
 
     # LaVIT support 6 different image aspect ratios
     ratio_dict = {
@@ -90,9 +98,10 @@ if __name__ == "__main__":
         jit_level=args.jit_level,
     )
     model_path = args.model_path
+    load_from_local = os.path.exists(args.model_path) and not len(os.listdir(args.model_path)) == 0
 
     # For Multi-Modal Understanding
-    example_for_understanding()
+    example_for_understanding(model_path, args.precision, load_from_local=load_from_local)
 
     # For Multi-Modal Generation
-    example_for_generation()
+    example_for_generation(model_path, args.precision, load_from_local=load_from_local)

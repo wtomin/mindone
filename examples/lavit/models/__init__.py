@@ -33,10 +33,9 @@ def build_model(
     local_files_only (bool): If you have already downloaded the LaVIT checkpoint to the model_path,
     set the local_files_only=True to avoid loading from remote
     """
-    # Downloading the model checkpoint from the huggingface remote
-    print("Downloading the LaVIT checkpoint from huggingface")
 
     if not local_files_only:
+        print("Downloading the LaVIT checkpoint from huggingface")
         snapshot_download(
             "rain1011/LaVIT-7B-v2",
             local_dir=model_path,
