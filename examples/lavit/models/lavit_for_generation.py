@@ -13,7 +13,7 @@ sys.path.append(".")
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
 import PIL
-from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
+from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_decoder import build_tokenizer_decoder
 from models.modeling_visual_tokenizer import VectorQuantizer, build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
@@ -52,18 +52,18 @@ class LaVITforGeneration(nn.Cell):
         super().__init__()
 
         # visual_vocab_size = 16384  # The visual vocab size of LaVIT is 16384
-
+        self.model_dtype = model_dtype
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
         if model_dtype in ["fp16", "bf16"]:
             print(f"auto_mixed_precision level {amp_level}")
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
+        self.llama_tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
         self.llama_tokenizer.padding_side = "left"
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
-        self.llama_model = LlamaForCausalLM.from_pretrained(
+        self.llama_model = AutoModelForCausalLM.from_pretrained(
             os.path.join(model_path, model_sub_dir),
         )
-        self.model_dtype = model_dtype
+
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
         self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)

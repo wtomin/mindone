@@ -83,7 +83,9 @@ if __name__ == "__main__":
         default="LaVIT_checkpoint",
         help="The directory to the checkpoint, will download from huggingface if not existent.",
     )
-    parser.add_argument("--precision", type=str, choices=["bf16", "fp16", "fp32"], help="The precision dtype")
+    parser.add_argument(
+        "--precision", type=str, default="fp16", choices=["bf16", "fp16", "fp32"], help="The precision dtype"
+    )
     parser.add_argument(
         "--amp_level", type=str, default="O2", help="Set the amp level for the transformer model. Defaults to O2."
     )

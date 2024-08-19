@@ -2,7 +2,7 @@ import logging
 import os
 
 import cv2
-from mindformers.models.llama import LlamaForCausalLM, LlamaTokenizer
+from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
 from utils import get_amp_model
@@ -35,12 +35,12 @@ class LaVITforUnderstanding(nn.Cell):
         """
         super().__init__()
         assert img_size == 224, "Input Image Size should be set to 224"
-
+        self.model_dtype = model_dtype
         visual_vocab_size = 16384  # The visual vocab size of LaVIT is 16384
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
 
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
-        self.llama_model = LlamaForCausalLM.from_pretrained(
+        self.llama_tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
+        self.llama_model = AutoModelForCausalLM.from_pretrained(
             os.path.join(model_path, model_sub_dir),
         )
         for param in self.llama_model.get_parameters():
@@ -52,7 +52,6 @@ class LaVITforUnderstanding(nn.Cell):
         print(f"The llama tokenizer vocab size is {len(self.llama_tokenizer)}")
 
         self.visual_tokenizer = build_dynamic_tokenizer(model_path, for_understanding=True, model_sub_dir=model_sub_dir)
-        self.model_dtype = model_dtype
         self.apply_lemmatizer = apply_lemmatizer
         self._lemmatizer = None
         self.processer = LaVITImageProcessor(image_size=img_size)
