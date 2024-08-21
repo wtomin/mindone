@@ -452,7 +452,7 @@ class Block(nn.Cell):
 class PatchEmbed(nn.Cell):
     """Image to Patch Embedding"""
 
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, bias=True):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
@@ -462,7 +462,7 @@ class PatchEmbed(nn.Cell):
         self.patch_size = patch_size
         self.num_patches = num_patches
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, has_bias=bias)
 
     def construct(self, x, **kwargs):
         B, C, H, W = x.shape
@@ -828,5 +828,5 @@ def build_eva_clip(
         state_dict = load_torch_state_dict_to_ms_ckpt(eva_weight_path)
         param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
         print(f"param_not_load:{param_not_load}")
-        print(f"uckpt_not_load: {ckpt_not_load}")
+        print(f"ckpt_not_load: {ckpt_not_load}")
     return model

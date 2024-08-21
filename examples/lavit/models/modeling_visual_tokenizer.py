@@ -453,7 +453,7 @@ class DynamicVisualTokenizer(nn.Cell):
         super().__init__()
 
         self.encoder = build_eva_clip(model_path=model_path)
-        self.encoder.eval()
+        self.encoder.set_train(False)
         # Freeze the vit encoder
         for param in self.encoder.get_parameters():
             param.requires_grad = False  # fix encoder model

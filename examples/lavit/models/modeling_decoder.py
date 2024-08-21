@@ -482,5 +482,5 @@ def build_tokenizer_decoder(model_path="", pixel_decoding="highres"):
     state_dict = load_torch_state_dict_to_ms_ckpt(weight_path)
     param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
     print(f"param_not_load:{param_not_load}")
-    print(f"uckpt_not_load: {ckpt_not_load}")
+    print(f"ckpt_not_load: {ckpt_not_load}")
     return model
