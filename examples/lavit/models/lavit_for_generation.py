@@ -20,6 +20,7 @@ from models.transform import LaVITImageProcessor
 from PIL import Image
 from tqdm import tqdm
 from transformers import CLIPImageProcessor
+from utils import load_torch_state_dict_to_ms_ckpt
 
 from mindone.diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
 from mindone.diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
@@ -73,15 +74,14 @@ class LaVITforGeneration(nn.Cell):
         else:
             # For text-to-image generation, we does not load the tokenizer for saving memory
             # For using multi-modal synthesis, please set load_tokenizer to True
-            import torch
-
             self.visual_tokenizer = None
             self.quantize = VectorQuantizer(n_embed=16384, embedding_dim=32)
             # Load the quantize embedding weight
             weight_path = os.path.join(model_path, "visual_tokenizer", "tokenizer_encoder.bin")
-            state_dict = torch.load(weight_path, map_location="cpu")
+            state_dict = load_torch_state_dict_to_ms_ckpt(weight_path, include_prefix=["quantize.embedding.weight"])
             quantize_dict = OrderedDict({"embedding.weight": state_dict["quantize.embedding.weight"]})
-            self.quantize.load_state_dict(quantize_dict)
+            _, ckpt_not_load = ms.load_param_into_net(self.quantize, quantize_dict)
+            assert len(ckpt_not_load) == 0
 
         self.tokenizer_decoder = build_tokenizer_decoder(model_path, pixel_decoding=pixel_decoding)
         img_size = 224
@@ -93,10 +93,8 @@ class LaVITforGeneration(nn.Cell):
 
         if pixel_decoding == "lowres":
             diff_model_dir = os.path.join(model_path, "pixel_decoding")
-            self.register_buffer(
-                "uncond_embeddings",
-                torch.load(os.path.join(diff_model_dir, "uncond_embeddings.bin"), map_location="cpu"),
-            )
+            state_dict = load_torch_state_dict_to_ms_ckpt(os.path.join(diff_model_dir, "uncond_embeddings.bin"))
+            self.uncond_embeddings = ms.Parameter(state_dict.values(), requires_grad=False)
         else:
             diff_model_dir = os.path.join(model_path, "highres_pixel_decoding")
 

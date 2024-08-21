@@ -4,6 +4,7 @@ from functools import partial
 from typing import Tuple
 
 import numpy as np
+from utils import load_torch_state_dict_to_ms_ckpt
 
 import mindspore as ms
 from mindspore import Parameter, nn, ops
@@ -470,8 +471,6 @@ class HighresVQDecoder(nn.Cell):
 
 
 def build_tokenizer_decoder(model_path="", pixel_decoding="highres"):
-    import torch
-
     if pixel_decoding == "lowres":
         model = VQDecoder(depth=12)
         weight_path = os.path.join(model_path, "visual_tokenizer", "tokenizer_decoder.bin")
@@ -480,6 +479,8 @@ def build_tokenizer_decoder(model_path="", pixel_decoding="highres"):
         weight_path = os.path.join(model_path, "visual_tokenizer", "highres_tokenizer_decoder.bin")
 
     print(f"Load visual tokenizer decoder weight from {weight_path}")
-    state_dict = torch.load(weight_path, map_location="cpu")
-    model.load_state_dict(state_dict)
+    state_dict = load_torch_state_dict_to_ms_ckpt(weight_path)
+    param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
+    print(f"param_not_load:{param_not_load}")
+    print(f"uckpt_not_load: {ckpt_not_load}")
     return model

@@ -2,11 +2,11 @@ import os
 
 import numpy as np
 import PIL
-import torch
 from models.modeling_decoder import build_tokenizer_decoder
 from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from PIL import Image
 from tqdm import tqdm
+from utils import load_torch_state_dict_to_ms_ckpt
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -55,7 +55,8 @@ class LaVITDetokenizer(nn.Cell):
 
         if pixel_decoding == "lowres":
             diff_model_dir = os.path.join(model_path, "pixel_decoding")
-            state_dict = torch.load(os.path.join(diff_model_dir, "uncond_embeddings.bin"), map_function="cpu")
+            weight_path = os.path.join(diff_model_dir, "uncond_embeddings.bin")
+            state_dict = load_torch_state_dict_to_ms_ckpt(weight_path)
             self.uncond_embeddings = ms.Parameter(state_dict, requires_grad=False)
         else:
             diff_model_dir = os.path.join(model_path, "highres_pixel_decoding")
@@ -154,7 +155,7 @@ class LaVITDetokenizer(nn.Cell):
         timesteps = self.scheduler.timesteps
 
         # Prepare latent variables
-        latents = torch.randn(
+        latents = ops.randn(
             (batch_size, self.unet.config.in_channels, height // 8, width // 8),
             dtype=prompt_embeds.dtype,
         )

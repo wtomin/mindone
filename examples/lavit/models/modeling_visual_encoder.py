@@ -8,6 +8,7 @@ from itertools import repeat
 from typing import Optional, Tuple, Union
 
 import numpy as np
+from utils import load_torch_state_dict_to_ms_ckpt
 
 import mindspore as ms
 from mindspore import Parameter, Tensor
@@ -786,7 +787,6 @@ def build_eva_clip(
 ):
     use_xattn = False
     fusedLN = False
-    import torch
 
     model_cfg = {
         "embed_dim": 1024,
@@ -825,7 +825,8 @@ def build_eva_clip(
         # Load the pre-trained eva-vitG weight
         eva_weight_path = os.path.join(model_path, "visual_tokenizer", "eva_vitg_psz14.bin")
         print(f"Load eva vitG weight from {eva_weight_path}")
-        checkpoint = torch.load(eva_weight_path, map_location="cpu")
-        model.load_state_dict(checkpoint)
-
+        state_dict = load_torch_state_dict_to_ms_ckpt(eva_weight_path)
+        param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
+        print(f"param_not_load:{param_not_load}")
+        print(f"uckpt_not_load: {ckpt_not_load}")
     return model

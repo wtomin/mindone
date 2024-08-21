@@ -5,6 +5,7 @@ from typing import Tuple
 
 import numpy as np
 from models.modeling_visual_encoder import build_eva_clip
+from utils import load_torch_state_dict_to_ms_ckpt
 
 import mindspore as ms
 from mindspore import Parameter, mint, nn, ops
@@ -584,20 +585,22 @@ class DynamicVisualTokenizer(nn.Cell):
 
 
 def build_dynamic_tokenizer(model_path="", for_understanding=False, model_sub_dir="language_model"):
-    import torch
-
     model = DynamicVisualTokenizer(model_path=model_path)
     weight_path = os.path.join(model_path, "visual_tokenizer", "tokenizer_encoder.bin")
     print(f"Load visual tokenizer encoder weight from {weight_path}")
-    state_dict = torch.load(weight_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=False)
+    state_dict = load_torch_state_dict_to_ms_ckpt(weight_path)
+    param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
+    print(f"param_not_load: {param_not_load}")
+    print(f"ckpt_not_load: {ckpt_not_load}")
 
     if for_understanding:
         # For Understanding, the LaVIT use the continuous visual features,
         # so needs to load the token merger weight trained with LLM
         visual_weight_path = os.path.join(model_path, model_sub_dir, "visual_weight.bin")
         print(f"For multi-modal understanding, Load visual tokenizer weight from {visual_weight_path}")
-        state_dict = torch.load(visual_weight_path, map_location="cpu")
-        model.load_state_dict(state_dict, strict=False)
+        state_dict = load_torch_state_dict_to_ms_ckpt(visual_weight_path)
+        param_not_load, ckpt_not_load = ms.load_param_into_net(model, state_dict)
+        print(f"param_not_load: {param_not_load}")
+        print(f"ckpt_not_load: {ckpt_not_load}")
 
     return model
