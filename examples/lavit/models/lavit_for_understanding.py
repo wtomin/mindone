@@ -40,9 +40,10 @@ class LaVITforUnderstanding(nn.Cell):
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
 
         self.llama_tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
-        self.llama_model = AutoModelForCausalLM.from_pretrained(
-            os.path.join(model_path, model_sub_dir),
+        self.llama_model, loading_info = AutoModelForCausalLM.from_pretrained(
+            os.path.join(model_path, model_sub_dir), output_loading_info=True
         )
+        print(loading_info)
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
         self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)

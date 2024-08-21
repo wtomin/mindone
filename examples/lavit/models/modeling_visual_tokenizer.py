@@ -1,34 +1,117 @@
 import numbers
 import os
 from functools import partial
+from typing import Tuple
 
+import numpy as np
 from models.modeling_visual_encoder import build_eva_clip
 
 import mindspore as ms
 from mindspore import Parameter, mint, nn, ops
-from mindspore.common.initializer import initializer
 
 from mindone.models.utils import constant_, trunc_normal_
 
 
 class LayerNorm(nn.Cell):
-    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine: bool = True, dtype=ms.float32):
+    r"""Applies Layer Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
+    the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
+
+    .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
+    is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
+    is ``(3, 5)`` (a 2-dimensional shape), the mean and standard-deviation are computed over
+    the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
+    :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
+    :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `ops.var(input, unbiased=False)`.
+
+    .. note::
+        Unlike Batch Normalization and Instance Normalization, which applies
+        scalar scale and bias for each entire channel/plane with the
+        :attr:`affine` option, Layer Normalization applies per-element scale and
+        bias with :attr:`elementwise_affine`.
+
+    This layer uses statistics computed from input data in both training and
+    evaluation modes.
+
+    Args:
+        normalized_shape (int or list): input shape from an expected input
+            of size
+
+            .. math::
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
+
+            If a single integer is used, it is treated as a singleton list, and this module will
+            normalize over the last dimension which is expected to be of that specific size.
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        elementwise_affine: a boolean value that when set to ``True``, this module
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 1.
+        bias:   the learnable bias of the module of shape
+                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+                The values are initialized to 0.
+
+    Shape:
+        - Input: :math:`(N, *)`
+        - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> # NLP Example
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = ops.randn(batch, sentence_length, embedding_dim)
+        >>> layer_norm = LayerNorm(embedding_dim)
+        >>> # Activate module
+        >>> layer_norm(embedding)
+        >>>
+        >>> # Image Example
+        >>> N, C, H, W = 20, 5, 10, 10
+        >>> input = ops.randn(N, C, H, W)
+        >>> # Normalize over the last three dimensions (i.e. the channel and spatial dimensions)
+        >>> # as shown in the image below
+        >>> layer_norm = LayerNorm([C, H, W])
+        >>> output = layer_norm(input)
+    """
+
+    normalized_shape: Tuple[int, ...]
+    eps: float
+    elementwise_affine: bool
+
+    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine: bool = True, bias=True, dtype=ms.float32):
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
         self.normalized_shape = tuple(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
+        _weight = np.ones(normalized_shape, dtype=ms.dtype_to_nptype(dtype))
+        _bias = np.zeros(normalized_shape, dtype=ms.dtype_to_nptype(dtype))
         if self.elementwise_affine:
-            self.gamma = Parameter(initializer("ones", normalized_shape, dtype=dtype))
-            self.beta = Parameter(initializer("zeros", normalized_shape, dtype=dtype))
+            self.weight = Parameter(ms.Tensor.from_numpy(_weight), name="weight")
+            if bias:
+                self.bias = Parameter(ms.Tensor.from_numpy(_bias), name="bias")
+            else:
+                self.bias = ms.Tensor.from_numpy(_bias)
         else:
-            self.gamma = ops.ones(normalized_shape, dtype=dtype)
-            self.beta = ops.zeros(normalized_shape, dtype=dtype)
+            self.weight = ms.Tensor.from_numpy(_weight)
+            self.bias = ms.Tensor.from_numpy(_bias)
+        # TODO: In fact, we need -len(normalized_shape) instead of -1, but LayerNorm doesn't allow it.
+        #  For positive axis, the ndim of input is needed. Put it in construct?
         self.layer_norm = ops.LayerNorm(-1, -1, epsilon=eps)
 
     def construct(self, x: ms.Tensor):
-        x, _, _ = self.layer_norm(x, self.gamma, self.beta)
+        x, _, _ = self.layer_norm(x, self.weight, self.bias)
         return x
 
 

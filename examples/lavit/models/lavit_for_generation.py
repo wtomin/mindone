@@ -60,9 +60,10 @@ class LaVITforGeneration(nn.Cell):
         self.llama_tokenizer.padding_side = "left"
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
-        self.llama_model = AutoModelForCausalLM.from_pretrained(
-            os.path.join(model_path, model_sub_dir),
+        self.llama_model, loading_info = AutoModelForCausalLM.from_pretrained(
+            os.path.join(model_path, model_sub_dir), output_loading_info=True
         )
+        print(loading_info)
 
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
