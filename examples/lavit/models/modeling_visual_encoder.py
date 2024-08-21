@@ -610,8 +610,10 @@ class EVAVisionTransformer(nn.Cell):
 
         if isinstance(self.head, nn.Dense):
             trunc_normal_(self.head.weight, std=0.02)
-            self.head.weight.value().mul_(init_scale)
-            self.head.bias.value().mul_(init_scale)
+            new_value = self.head.weight.value() * init_scale
+            self.head.weight.set_data(new_value)
+            new_value = self.head.bias.value() * init_scale
+            self.head.bias.set_data(new_value)
 
         # setting a patch_dropout of 0. would mean it is disabled and this function would be the identity fn
         self.patch_dropout = nn.Identity()
@@ -620,14 +622,17 @@ class EVAVisionTransformer(nn.Cell):
 
     def fix_init_weight(self):
         def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
+            return ops.div(param, math.sqrt(2.0 * layer_id))
 
         for layer_id, layer in enumerate(self.blocks):
-            rescale(layer.attn.proj.weight.value(), layer_id + 1)
+            new_value = rescale(layer.attn.proj.weight.value(), layer_id + 1)
+            layer.attn.proj.weight.set_data(new_value)
             if self.naiveswiglu:
-                rescale(layer.mlp.w3.weight.value(), layer_id + 1)
+                new_value = rescale(layer.mlp.w3.weight.value(), layer_id + 1)
+                layer.mlp.w3.weight.set_data(new_value)
             else:
-                rescale(layer.mlp.fc2.weight.value(), layer_id + 1)
+                new_value = rescale(layer.mlp.fc2.weight.value(), layer_id + 1)
+                layer.mlp.fc2.weight.set_data(new_value)
 
     def get_cast_dtype(self) -> mstype:
         return self.blocks[0].mlp.fc2.weight.dtype
