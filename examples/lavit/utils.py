@@ -185,7 +185,7 @@ def get_amp_model(model, dtype, amp_level, bf16_custom_fp32_cells=[], fp16_custo
 def process_key(key_val):
     """Processes a single key-value pair from the source data."""
     k, val = key_val
-    val = val.detach().numpy().astype(np.float32)
+    val = val.detach().float().numpy().astype(np.float32)
     return k, ms.Parameter(ms.Tensor(val, dtype=ms.float32))
 
 
