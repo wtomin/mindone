@@ -306,6 +306,7 @@ class Attention(nn.Cell):
         self.xattn_drop = attn_drop
 
         self.rope = rope
+        self.softmax = nn.Softmax(axis=-1)
 
     def construct(self, x, rel_pos_bias=None, attn_mask=None):
         B, N, C = x.shape
@@ -320,7 +321,7 @@ class Attention(nn.Cell):
         else:
             qkv_bias = None
             if self.q_bias is not None:
-                qkv_bias = ops.cat((self.q_bias, ops.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
+                qkv_bias = ops.cat((self.q_bias, ops.zeros_like(self.v_bias), self.v_bias))
 
             qkv = ops.dense(input=x, weight=self.qkv.weight, bias=qkv_bias)
             qkv = qkv.reshape((B, N, 3, self.num_heads, -1)).permute(2, 0, 3, 1, 4)  # 3, B, num_heads, N, C
@@ -340,7 +341,7 @@ class Attention(nn.Cell):
             raise NotImplementedError
         else:
             q = q * self.scale
-            attn = q @ k.transpose(-2, -1)
+            attn = q @ k.swapaxes(-2, -1)
 
             if self.relative_position_bias_table is not None:
                 relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
@@ -359,7 +360,7 @@ class Attention(nn.Cell):
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
 
-            x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
+            x = (attn @ v).swapaxes(1, 2).reshape(B, N, -1)
             x = self.inner_attn_ln(x)
             x = self.proj(x)
             x = self.proj_drop(x)
@@ -470,7 +471,7 @@ class PatchEmbed(nn.Cell):
         assert (
             H == self.img_size[0] and W == self.img_size[1]
         ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)
+        x = ops.flatten(self.proj(x), start_dim=2).swapaxes(1, 2)
         return x
 
 

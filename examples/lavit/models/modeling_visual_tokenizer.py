@@ -162,7 +162,7 @@ class CodebookEmbedding(nn.Cell):
         self.codebook_dim = codebook_dim
         weight = ops.randn(num_tokens, codebook_dim)
         weight = l2norm(weight)
-        self.weight = nn.Parameter(weight)
+        self.weight = Parameter(weight)
 
     def construct(self, embed_id):
         return mint.nn.functional.embedding(embed_id, self.weight)
@@ -180,8 +180,8 @@ class VectorQuantizer(nn.Cell):
         z_flattened = z.reshape(-1, self.codebook_dim)
 
         d = (
-            z_flattened.pow(2).sum(dim=1, keepdim=True)
-            + self.embedding.weight.pow(2).sum(dim=1)
+            z_flattened.pow(2).sum(axis=1, keepdims=True)
+            + self.embedding.weight.pow(2).sum(axis=1)
             - 2 * z_flattened @ self.embedding.weight.swapaxes(0, 1)
         )  # 'n d -> d n'
 
@@ -218,13 +218,13 @@ class TokenCrossAttention(nn.Cell):
         B, H, N, N = attn.shape
         fuse_policy = 1 - policy  # Each token only attend to the dropped tokens
         attn_policy = fuse_policy.reshape(B, 1, 1, N)  # * policy.reshape(B, 1, N, 1)
-        attn_policy = attn_policy.broadcast_((B, 1, N, N))
-        max_att = ops.max(attn, dim=-1, keepdim=True)[0]
+        attn_policy = mint.broadcast_to(attn_policy, (B, 1, N, N))
+        max_att = ops.max(attn, axis=-1, keepdims=True)[0]
         attn = attn - max_att
 
         # for stable training
         attn = attn.to(ms.float32).exp() * attn_policy.to(ms.float32)
-        attn = (attn + eps / N) / (attn.sum(dim=-1, keepdim=True) + eps)
+        attn = (attn + eps / N) / (attn.sum(axis=-1, keepdims=True) + eps)
 
         return attn.type_as(max_att)
 
@@ -270,16 +270,16 @@ class TokenCausalAttention(nn.Cell):
 
         # Use the causal attention
         seq_ids = ops.arange(N)
-        causal_mask = seq_ids[None, None, :].repeat(B, N, 1) <= seq_ids[None, :, None]
+        causal_mask = seq_ids[None, None, :].repeat(B, axis=0).repeat(N, axis=1) <= seq_ids[None, :, None]
         causal_mask = causal_mask[:, None, :, :].to(attn_policy.dtype)
         attn_policy = attn_policy * causal_mask
 
-        max_att = ops.max(attn, dim=-1, keepdim=True)[0]
+        max_att = ops.max(attn, axis=-1, keepdims=True)[0]
         attn = attn - max_att
 
         # for stable training
         attn = attn.to(ms.float32).exp() * attn_policy.to(ms.float32)
-        attn = (attn + eps / N) / (attn.sum(dim=-1, keepdim=True) + eps)
+        attn = (attn + eps / N) / (attn.sum(axis=-1, keepdims=True) + eps)
         return attn.type_as(max_att)
 
     def construct(self, x, decisions):
@@ -412,7 +412,7 @@ class TokenPredictor(nn.Cell):
             nn.Dense(embed_dim // 2, embed_dim // 4),
             nn.GELU(),
             nn.Dense(embed_dim // 4, 2),
-            nn.LogSoftmax(dim=-1),
+            nn.LogSoftmax(axis=-1),
         )
 
         self.apply(self._init_weights)
@@ -430,8 +430,8 @@ class TokenPredictor(nn.Cell):
         x = self.in_conv(x)
         B, N, C = x.shape
         local_x = x[:, :, : C // 2]
-        global_x = (x[:, :, C // 2 :] * policy).sum(dim=1, keepdim=True) / ops.sum(policy, dim=1, keepdim=True)
-        x = ops.cat([local_x, global_x.broadcast_to((B, N, C // 2))], axis=-1)
+        global_x = (x[:, :, C // 2 :] * policy).sum(axis=1, keepdims=True) / ops.sum(policy, dim=1, keepdim=True)
+        x = ops.cat([local_x, mint.broadcast_to(global_x, (B, N, C // 2))], axis=-1)
         return self.out_conv(x)
 
 
@@ -533,7 +533,7 @@ class DynamicVisualTokenizer(nn.Cell):
         B, N, C = updated_features.shape
         index_select = hard_keep_decision.long()
 
-        token_num = index_select.sum(dim=-1)
+        token_num = index_select.sum(axis=-1)
         index_select = index_select.bool()
 
         remained_token = ops.masked_select(updated_features, index_select[:, :, None])
@@ -560,7 +560,7 @@ class DynamicVisualTokenizer(nn.Cell):
 
         B, N, C = updated_features.shape
         index_select = hard_keep_decision.long()
-        token_nums = index_select.sum(dim=-1)
+        token_nums = index_select.sum(axis=-1)
         index_select = index_select.bool()
         remained_token = ops.masked_select(updated_features, index_select[:, :, None]).reshape(-1, C)  # [Num Patch]
 

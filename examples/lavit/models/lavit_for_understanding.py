@@ -2,13 +2,14 @@ import logging
 import os
 
 import cv2
+import numpy as np
 from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
 from utils import get_amp_model
 
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
 
 
 class LaVITforUnderstanding(nn.Cell):
@@ -86,8 +87,8 @@ class LaVITforUnderstanding(nn.Cell):
             image = self.processer(image)
             image_tensors.append(image)
 
-        image_tensors = ops.stack(image_tensors, axis=0)
-        image_tensors = image_tensors
+        image_tensors = np.stack(image_tensors, axis=0)
+        image_tensors = ms.Tensor(image_tensors).transpose(0, 3, 1, 2)  # (B H W C) -> (B C H W)
         return image_tensors
 
     def compute_dynamic_visual_embeds(self, image):
@@ -110,7 +111,9 @@ class LaVITforUnderstanding(nn.Cell):
         eos_embeds = self.llama_model.get_input_embeddings()(eos_id).unsqueeze(0)  # [1, 1, embed_dim]
 
         image_attns = ops.zeros((batch_size, max_token_num), dtype=ms.int32)
-        image_embeds = eos_embeds.repeat_interleave(batch_size, axis=0).repeat_interleave(max_token_num, axis=1)
+        image_embeds = mint.repeat_interleave(
+            mint.repeat_interleave(eos_embeds, batch_size, dim=0), max_token_num, dim=1
+        )
 
         # Use the left padding
         for i_b in range(batch_size):

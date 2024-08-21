@@ -18,7 +18,7 @@ class LaVITImageProcessor:
         self.transform = Compose(transform_list)
 
     def __call__(self, item):
-        return self.transform(item)
+        return self.transform(image=item)["image"]
 
 
 class LaVITQuestionProcessor:
