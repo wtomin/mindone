@@ -94,9 +94,10 @@ class LaVITforUnderstanding(nn.Cell):
     def compute_dynamic_visual_embeds(self, image):
         image_embeds_list = self.visual_tokenizer.encode_features(image)
         batch_size = len(image_embeds_list)
+        dtype = image_embeds_list[0].dtype
         # Pad the image start and end tokens
         image_pad_token = ms.Tensor([32000, 32001], dtype=ms.int32)
-        image_pad_embeds = self.llama_model.get_input_embeddings()(image_pad_token)  # [2, embed_dim]
+        image_pad_embeds = self.llama_model.get_input_embeddings()(image_pad_token).to(dtype)  # [2, embed_dim]
         max_token_num = -1
 
         for i_b in range(batch_size):
@@ -176,7 +177,7 @@ class LaVITforUnderstanding(nn.Cell):
             )
 
             input_ids = ms.Tensor(prompt_tokens.input_ids)
-            prompt_embeds = self.llama_model.get_input_embeddings()(input_ids)
+            prompt_embeds = self.llama_model.get_input_embeddings()(input_ids).to(image_embeds.dtype)
             inputs_embeds = ops.cat([image_embeds, prompt_embeds], axis=1)
             attention_mask = ms.Tensor(prompt_tokens.attention_mask)
             attention_mask = ops.cat(

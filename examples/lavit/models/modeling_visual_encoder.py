@@ -357,7 +357,7 @@ class Attention(nn.Cell):
                 attn_mask = attn_mask.bool()
                 attn = attn.masked_fill(~attn_mask[:, None, None, :], float("-inf"))
 
-            attn = attn.softmax(dim=-1)
+            attn = self.softmax(attn)
             attn = self.attn_drop(attn)
 
             x = (attn @ v).swapaxes(1, 2).reshape(B, N, -1)

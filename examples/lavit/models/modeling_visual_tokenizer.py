@@ -270,7 +270,10 @@ class TokenCausalAttention(nn.Cell):
 
         # Use the causal attention
         seq_ids = ops.arange(N)
-        causal_mask = seq_ids[None, None, :].repeat(B, axis=0).repeat(N, axis=1) <= seq_ids[None, :, None]
+        causal_mask = (
+            mint.repeat_interleave(mint.repeat_interleave(seq_ids[None, None, :], B, dim=0), N, dim=1)
+            <= seq_ids[None, :, None]
+        )
         causal_mask = causal_mask[:, None, :, :].to(attn_policy.dtype)
         attn_policy = attn_policy * causal_mask
 
