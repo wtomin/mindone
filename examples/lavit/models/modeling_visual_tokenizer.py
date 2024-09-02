@@ -522,7 +522,7 @@ class DynamicVisualTokenizer(nn.Cell):
         encoder_features = encoder_features[:, 1:, :]
 
         B, num_patches, _ = encoder_features.shape
-        mask = ops.ones(B, num_patches, 1, dtype=encoder_features.dtype)
+        mask = ops.ones((B, num_patches, 1), dtype=encoder_features.dtype)
 
         # To evalaute the score
         pred_score = self.token_predictor(encoder_features.to(ms.float32), mask).reshape(B, -1, 2)
@@ -552,7 +552,7 @@ class DynamicVisualTokenizer(nn.Cell):
         encoder_features = feature_targets[:, 1:, :]
 
         B, num_patches, _ = encoder_features.shape
-        mask = ops.ones(B, num_patches, 1, dtype=encoder_features.dtype)
+        mask = ops.ones((B, num_patches, 1), dtype=encoder_features.dtype)
 
         pred_score = self.token_predictor(encoder_features.to(ms.float32), mask).reshape(B, -1, 2)
         # Sample from the score distribution
