@@ -259,8 +259,8 @@ class Attention(nn.Cell):
             self.qkv = nn.Dense(dim, all_head_dim * 3, has_bias=False)
 
         if qkv_bias:
-            self.q_bias = ms.Parameter(ops.zeros(all_head_dim))
-            self.v_bias = ms.Parameter(ops.zeros(all_head_dim))
+            self.q_bias = ms.Parameter(ops.zeros((all_head_dim)))
+            self.v_bias = ms.Parameter(ops.zeros((all_head_dim)))
         else:
             self.q_bias = None
             self.v_bias = None
@@ -269,7 +269,7 @@ class Attention(nn.Cell):
             self.window_size = window_size
             self.num_relative_distance = (2 * window_size[0] - 1) * (2 * window_size[1] - 1) + 3
             self.relative_position_bias_table = ms.Parameter(
-                ops.zeros(self.num_relative_distance, num_heads)
+                ops.zeros((self.num_relative_distance, num_heads))
             )  # 2*Wh-1 * 2*Ww-1, nH
             # cls to token & token 2 cls & cls to cls
 
@@ -283,9 +283,7 @@ class Attention(nn.Cell):
             relative_coords[:, :, 0] += window_size[0] - 1  # shift to start from 0
             relative_coords[:, :, 1] += window_size[1] - 1
             relative_coords[:, :, 0] *= 2 * window_size[1] - 1
-            relative_position_index = ops.zeros(
-                size=(window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype
-            )
+            relative_position_index = ops.zeros((window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype)
             relative_position_index[1:, 1:] = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
             relative_position_index[0, 0:] = self.num_relative_distance - 3
             relative_position_index[0:, 0] = self.num_relative_distance - 2
@@ -481,7 +479,7 @@ class RelativePositionBias(nn.Cell):
         self.window_size = window_size
         self.num_relative_distance = (2 * window_size[0] - 1) * (2 * window_size[1] - 1) + 3
         self.relative_position_bias_table = ms.Parameter(
-            ops.zeros(self.num_relative_distance, num_heads)
+            ops.zeros((self.num_relative_distance, num_heads))
         )  # 2*Wh-1 * 2*Ww-1, nH
         # cls to token & token 2 cls & cls to cls
 
@@ -495,9 +493,7 @@ class RelativePositionBias(nn.Cell):
         relative_coords[:, :, 0] += window_size[0] - 1  # shift to start from 0
         relative_coords[:, :, 1] += window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * window_size[1] - 1
-        relative_position_index = ops.zeros(
-            size=(window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype
-        )
+        relative_position_index = ops.zeros((window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype)
         relative_position_index[1:, 1:] = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
         relative_position_index[0, 0:] = self.num_relative_distance - 3
         relative_position_index[0:, 0] = self.num_relative_distance - 2
@@ -555,10 +551,10 @@ class EVAVisionTransformer(nn.Cell):
         self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.cls_token = ms.Parameter(ops.zeros(1, 1, embed_dim))
+        self.cls_token = ms.Parameter(ops.zeros((1, 1, embed_dim)))
         # self.mask_token = ms.Parameter(ops.zeros(1, 1, embed_dim))
         if use_abs_pos_emb:
-            self.pos_embed = ms.Parameter(ops.zeros(1, num_patches + 1, embed_dim))
+            self.pos_embed = ms.Parameter(ops.zeros((1, num_patches + 1, embed_dim)))
         else:
             self.pos_embed = None
         self.pos_drop = nn.Dropout(p=drop_rate)

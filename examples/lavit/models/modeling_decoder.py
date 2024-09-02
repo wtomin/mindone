@@ -300,9 +300,13 @@ class VQDecoder(nn.Cell):
         num_patches = (img_size // patch_size) * (img_size // patch_size)
         self.num_patches = num_patches
 
-        self.pos_embed = ms.Parameter(ops.zeros(1, num_patches, embed_dim))  # The postion embedding for the latent code
+        self.pos_embed = ms.Parameter(
+            ops.zeros((1, num_patches, embed_dim))
+        )  # The postion embedding for the latent code
 
-        self.query_embed = ms.Parameter(ops.zeros(1, num_patches, embed_dim))  # The query embedding for reconstruction
+        self.query_embed = ms.Parameter(
+            ops.zeros((1, num_patches, embed_dim))
+        )  # The query embedding for reconstruction
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
@@ -346,8 +350,8 @@ class VQDecoder(nn.Cell):
 
         x_list = ops.split(x, token_num.tolist(), dim=0)
         max_token_num = int(token_num.max())
-        x_pad = ops.zeros(B, max_token_num, C, dtype=x.dtype)
-        mask = ops.zeros(B, max_token_num, dtype=x.dtype)
+        x_pad = ops.zeros((B, max_token_num, C), dtype=x.dtype)
+        mask = ops.zeros((B, max_token_num), dtype=x.dtype)
 
         for i, x_tensor in enumerate(x_list):
             x_pad[i][: len(x_tensor)] = x_tensor
@@ -394,9 +398,13 @@ class HighresVQDecoder(nn.Cell):
         num_patches = (img_size // patch_size) * (img_size // patch_size)
         self.num_patches = num_patches
 
-        self.pos_embed = ms.Parameter(ops.zeros(1, num_patches, embed_dim))  # The postion embedding for the latent code
+        self.pos_embed = ms.Parameter(
+            ops.zeros((1, num_patches, embed_dim))
+        )  # The postion embedding for the latent code
 
-        self.query_embed = ms.Parameter(ops.zeros(1, num_patches, embed_dim))  # The query embedding for reconstruction
+        self.query_embed = ms.Parameter(
+            ops.zeros((1, num_patches, embed_dim))
+        )  # The query embedding for reconstruction
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
@@ -443,8 +451,8 @@ class HighresVQDecoder(nn.Cell):
 
         x_list = ops.split(x, token_num.tolist(), axis=0)
         max_token_num = token_num.max().item()
-        x_pad = ops.zeros(B, max_token_num, C, dtype=x.dtype)
-        mask = ops.zeros(B, max_token_num, dtype=x.dtype)
+        x_pad = ops.zeros((B, max_token_num, C), dtype=x.dtype)
+        mask = ops.zeros((B, max_token_num), dtype=x.dtype)
 
         for i, x_tensor in enumerate(x_list):
             x_pad[i][: len(x_tensor)] = x_tensor

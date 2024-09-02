@@ -304,13 +304,13 @@ class LaVITforGeneration(nn.Cell):
 
         # To prepare the neative condition
         _, num_tokens, C = xrec.shape
-        encoder_hidden_uncond = ops.zeros(batch_size, num_tokens, C, dtype=xrec.dtype)
+        encoder_hidden_uncond = ops.zeros((batch_size, num_tokens, C), dtype=xrec.dtype)
         uncond_embeddings = self.uncond_embeddings[0].to(xrec.dtype)
         encoder_hidden_uncond[:, : len(uncond_embeddings)] = uncond_embeddings
 
         # To set the mask
-        encoder_mask = ops.ones(batch_size, num_tokens, dtype=ms.int32)
-        uncond_encoder_mask = ops.zeros(batch_size, num_tokens, dtype=ms.int32)
+        encoder_mask = ops.ones((batch_size, num_tokens), dtype=ms.int32)
+        uncond_encoder_mask = ops.zeros((batch_size, num_tokens), dtype=ms.int32)
         uncond_encoder_mask[:, : len(uncond_embeddings)] = 1
         encoder_mask = encoder_mask.bool()
         uncond_encoder_mask = uncond_encoder_mask.bool()
