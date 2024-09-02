@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 import cv2
 import numpy as np
-from utils import get_amp_model
+from utils import MINDNLP_PATH, get_amp_model
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -12,6 +12,7 @@ from mindspore import mint, nn, ops
 sys.path.append(".")
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
+sys.path.insert(0, MINDNLP_PATH)
 import PIL
 from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_decoder import build_tokenizer_decoder

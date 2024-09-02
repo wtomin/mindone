@@ -12,6 +12,7 @@ from mindspore.communication.management import get_group_size, get_rank, init
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.seed import set_random_seed
 
+MINDNLP_PATH = "/home_host/ddd/workspace/mindnlp"
 logger = logging.getLogger(__name__)
 
 

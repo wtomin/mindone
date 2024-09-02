@@ -1,8 +1,12 @@
 import logging
 import os
+import sys
 
 import cv2
 import numpy as np
+from utils import MINDNLP_PATH
+
+sys.path.insert(0, MINDNLP_PATH)
 from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
