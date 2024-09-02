@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 import cv2
 import numpy as np
-from utils import MINDNLP_PATH, get_amp_model
+from utils import MINDNLP_PATH
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -69,7 +69,7 @@ class LaVITforGeneration(nn.Cell):
 
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
-        self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)
+
         if load_tokenizer:
             self.visual_tokenizer = build_dynamic_tokenizer(model_path, for_understanding=False)
         else:

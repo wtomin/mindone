@@ -10,7 +10,6 @@ sys.path.insert(0, MINDNLP_PATH)
 from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
 from models.modeling_visual_tokenizer import build_dynamic_tokenizer
 from models.transform import LaVITImageProcessor
-from utils import get_amp_model
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -51,7 +50,7 @@ class LaVITforUnderstanding(nn.Cell):
         print(loading_info)
         for param in self.llama_model.get_parameters():
             param.requires_grad = False
-        self.llama_model = get_amp_model(self.llama_model, self.dtype, amp_level)
+
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
         self.visual_vocab_size = visual_vocab_size
         print(f"The Visual Vocab Size is {self.visual_vocab_size}")
