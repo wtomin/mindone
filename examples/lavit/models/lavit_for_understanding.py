@@ -299,7 +299,7 @@ class LaVITforUnderstanding(nn.Cell):
 
         # Concat the image and text embeddings to form left padding
         inputs_embeds, attention_mask = self.pad_input_embeds(
-            image_embeds, image_attns, prompt_embeds, ms.Tensor(prompt_tokens.attention_mask)
+            image_embeds, image_attns, prompt_embeds, ms.Tensor(prompt_tokens.attention_mask, dtype=image_attns.dtype)
         )
 
         supress_range = 32000 + self.visual_vocab_size + 2
