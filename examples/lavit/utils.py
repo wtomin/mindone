@@ -9,7 +9,6 @@ from tqdm import tqdm
 import mindspore as ms
 from mindspore.communication.management import get_group_size, get_rank, init
 
-from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.seed import set_random_seed
 
 MINDNLP_PATH = "/home_host/ddd/workspace/mindnlp"
@@ -163,24 +162,6 @@ def get_precision(mixed_precision):
     else:
         dtype = ms.float32
     return dtype
-
-
-def get_amp_model(model, dtype, amp_level, bf16_custom_fp32_cells=[], fp16_custom_fp32_cells=[]):
-    if dtype in [ms.float16, ms.bfloat16]:
-        model = auto_mixed_precision(
-            model,
-            amp_level=amp_level,
-            dtype=dtype,
-            custom_fp32_cells=fp16_custom_fp32_cells if dtype == ms.float16 else bf16_custom_fp32_cells,
-        )
-        logger.info(f"Set mixed precision to O2 with dtype={dtype}")
-
-    elif dtype == ms.float32:
-        amp_level = "O0"
-    else:
-        raise ValueError(f"Unsupported precision {dtype}")
-    print(f"auto_mixed_precision level {amp_level}, dtype {dtype}")
-    return model
 
 
 def process_key(key_val):

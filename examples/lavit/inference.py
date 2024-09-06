@@ -86,9 +86,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--precision", type=str, default="fp16", choices=["bf16", "fp16", "fp32"], help="The precision dtype"
     )
-    parser.add_argument(
-        "--amp_level", type=str, default="O2", help="Set the amp level for the transformer model. Defaults to O2."
-    )
     parser.add_argument("--seed", type=int, default=1234, help="The random seed")
     parser.add_argument("--jit_level", default="O0", help="Set jit level: # O0: KBK, O1:DVM, O2: GE")
     args = parser.parse_args()

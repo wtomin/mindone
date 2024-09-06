@@ -428,7 +428,7 @@ class HighresVQDecoder(nn.Cell):
 
         # The decoder task layer
         self.decoder_out_dim = 1408
-        self.decode_task_layer = nn.Sequential(
+        self.decode_task_layer = nn.SequentialCell(
             nn.Dense(embed_dim, embed_dim),
             nn.Tanh(),
             nn.Dense(embed_dim, self.decoder_out_dim),

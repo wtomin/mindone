@@ -25,7 +25,6 @@ from utils import load_torch_state_dict_to_ms_ckpt
 
 from mindone.diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
 from mindone.diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
-from mindone.utils.amp import auto_mixed_precision
 
 
 class LaVITforGeneration(nn.Cell):
@@ -56,8 +55,7 @@ class LaVITforGeneration(nn.Cell):
         # visual_vocab_size = 16384  # The visual vocab size of LaVIT is 16384
         self.model_dtype = model_dtype
         print(f"Loading LaVIT Model Weight from {model_path}, model precision: {model_dtype}")
-        if model_dtype in ["fp16", "bf16"]:
-            print(f"auto_mixed_precision level {amp_level}")
+
         self.llama_tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, model_sub_dir))
         self.llama_tokenizer.padding_side = "left"
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
@@ -99,17 +97,11 @@ class LaVITforGeneration(nn.Cell):
         else:
             diff_model_dir = os.path.join(model_path, "highres_pixel_decoding")
 
-        self.vae = AutoencoderKL.from_pretrained(diff_model_dir, subfolder="vae")
-        if self.model_dtype in ["fp16", "bf16"]:
-            self.vae = auto_mixed_precision(self.vae, amp_level=amp_level, dtype=model_dtype, custom_fp32_cells=[])
+        self.vae = AutoencoderKL.from_pretrained(diff_model_dir, subfolder="vae", mindspore_dtype=self.dtype)
         self.scheduler = DDIMScheduler.from_pretrained(diff_model_dir, subfolder="scheduler")
         self.unet = UNet2DConditionModel.from_pretrained(
-            diff_model_dir,
-            subfolder="unet",
-            use_safetensors=False,
+            diff_model_dir, subfolder="unet", use_safetensors=True, mindspore_dtype=self.dtype
         )
-        if self.model_dtype in ["fp16", "bf16"]:
-            self.unet = auto_mixed_precision(self.unet, amp_level=amp_level, dtype=model_dtype, custom_fp32_cells=[])
 
         if check_safety:
             self.feature_extractor = CLIPImageProcessor.from_pretrained(
