@@ -175,6 +175,14 @@ class DDPM(nn.Cell):
 
         return noisy_samples, snr
 
+    def get_velocity(self, sample, noise, t):
+        # TODO: how t affects noise mean and variance here. all variance fixed?
+        v = (
+            extract_into_tensor(self.sqrt_alphas_cumprod, t, sample.shape) * noise
+            - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, sample.shape) * sample
+        )
+        return v
+
 
 class LatentDiffusion(DDPM):
     def __init__(
@@ -386,8 +394,12 @@ class LatentDiffusion(DDPM):
         )
 
         # 5. compute loss
-        if self.parameterization == "eps":
+        if self.parameterization == "x0":
+            target = z
+        elif self.parameterization == "eps":
             target = noise
+        elif self.parameterization == "velocity":
+            target = self.get_velocity(z, noise, t)  # TODO: parse train step from randint
         else:
             raise NotImplementedError()
 
