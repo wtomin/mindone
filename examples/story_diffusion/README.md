@@ -61,3 +61,30 @@ models_dict = {
 }
 ```
 The default cache directory is `./cache_dir`. If you have the model files downloaded and stored under `./cache_dir`, you can run the inference script appened with `--local_files_only` to skip the downloading process.
+
+
+### Motion Predictor
+
+#### Prepare Checkpoints
+
+To train the motion predictor, you should download the stable diffusion v1.5 MindSpore checkpoint from [Huawei Cloud](https://download.mindspore.cn/toolkits/mindone/stable_diffusion/sd_v1.5-d0ab7146.ckpt) and the motion module `mm_sd_v15_v2.ckpt` from [AnimateDiff](https://github.com/guoyww/AnimateDiff) ([Google Drive](https://drive.google.com/drive/folders/1EqLC65eR1-W-sGD0Im7fkED6c8GkiNFI?usp=sharing) / [HuggingFace](https://huggingface.co/guoyww/animatediff) / [CivitAI](https://civitai.com/models/108836/animatediff-motion-modules)).
+
+The motion module checkpoint file needs to be converted to MindSpore checkpoint. You can run:
+```
+cd ../examples/animatediff/tools
+python motion_module_convert.py --src path/to/torch_ckpts/mm_sd_v15_v2.ckpt --tar ../models/motion_module
+```
+
+The expected checkpoint files should be stored like this:
+```bash
+models
+├── motion_module
+│   ├── mm_sd_v15_v2.ckpt
+└── stable_diffusion
+    └── sd_v1.5-d0ab7146.ckpt
+```
+
+#### Training
+
+
+#### Inference
