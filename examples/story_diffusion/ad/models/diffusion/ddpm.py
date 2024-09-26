@@ -467,6 +467,110 @@ class LatentDiffusionWithEmbedding(LatentDiffusion):
         return cond
 
 
+class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
+    def __init__(self, *args, **kwargs):
+        embedder_config = kwargs.pop("embedder_config", None)
+        assert embedder_config is not None, "Must define image embedder!"
+        motion_predictor_config = kwargs.pop("semantc_motion_predictor", None)
+        assert motion_predictor_config is not None, "Must define semantic motion predictor!"
+        super().__init__(*args, **kwargs)
+        if embedder_config is not None:
+            self._init_embedder(embedder_config)
+        if motion_predictor_config is not None:
+            self._init_motion_predictor(motion_predictor_config)
+
+    def _init_motion_predictor(self, config):
+        self.semantic_motion_predictor = instantiate_from_config(config)  # trainable
+
+    def _init_embedder(self, config, freeze=True):
+        self.embedder = instantiate_from_config(config)
+        if freeze:
+            self.embedder.set_train(False)
+            for param in self.embedder.get_parameters():
+                param.requires_grad = False
+
+    def construct(self, x: ms.Tensor, text_tokens: ms.Tensor, conditioned_frames: ms.Tensor, control=None, **kwargs):
+        """
+        Video diffusion model forward and loss computation for training
+
+        Args:
+            x: pixel values of video frames, resized and normalized to shape [bs, F, 3, 256, 256]
+            text: text tokens padded to fixed shape [bs, 77]
+            conditioned_frames: the start and end frames as conditioned images
+            control: other conditions for future extension [bs, 2, 3, 224, 224]
+
+        Returns:
+            loss
+
+        Notes:
+            - inputs should matches dataloder output order
+            - assume unet3d input/output shape: (b c f h w)
+                unet2d input/output shape: (b c h w)
+        """
+
+        # 1. get image/video latents z using vae
+        z = self.get_latents(x)
+        num_frames = z.shape[2]
+
+        # 2. sample timestep and add noise to latents
+        t = self.uniform_int(
+            (x.shape[0],), Tensor(0, dtype=mstype.int32), Tensor(self.num_timesteps, dtype=mstype.int32)
+        )
+        noise = ops.randn_like(z)
+        noisy_latents, snr = self.add_noise(z, noise, t)
+
+        # 3. get condition embeddings
+        cond = self.get_condition_embeddings(text_tokens, control)
+
+        # 4. get interpolated conditioned image embedding
+        image_cond = self.embedder(conditioned_frames)
+        interpolated_image_cond = self.semantic_motion_predictor(
+            image_cond, target_len=num_frames
+        )  # (Bs, 77, num_frames, hidden_size)
+
+        # 5.  unet forward, predict conditioned on conditions
+        model_output = self.apply_model(
+            noisy_latents,
+            t,
+            cond=cond,
+            append_to_context=interpolated_image_cond,  # append image embedding to text embedding for cross-attention
+            **kwargs,
+        )
+
+        # 6. compute loss
+        if self.parameterization == "x0":
+            target = z
+        elif self.parameterization == "eps":
+            target = noise
+        elif self.parameterization == "velocity":
+            target = self.get_velocity(z, noise, t)  # TODO: parse train step from randint
+        else:
+            raise NotImplementedError()
+
+        loss_element = self.compute_loss(model_output, target)
+        loss_sample = self.reduce_loss(loss_element)
+
+        if self.snr_gamma is not None:
+            snr_gamma = ops.ones_like(snr) * self.snr_gamma
+            # TODO: for v-pred, .../ (snr+1)
+            # TODO: for beta zero rescale, consider snr=0
+            # min{snr, gamma} / snr
+            loss_weight = ops.stack((snr, snr_gamma), axis=0).min(axis=0) / snr
+            loss = (loss_weight * loss_sample).mean()
+        else:
+            loss = loss_sample.mean()
+            # loss = self.mse_mean(target, model_output)
+
+        """
+        # can be used to place more weights to high-score samples
+        logvar_t = self.logvar[t]
+        loss = loss_simple / ops.exp(logvar_t) + logvar_t
+        loss = self.l_simple_weight * loss.mean()
+        """
+
+        return loss
+
+
 # latent diffusion (unet) forward based on input noised latent and encoded conditions
 class DiffusionWrapper(nn.Cell):
     def __init__(self, diff_model_config, conditioning_key):
