@@ -344,7 +344,8 @@ class VisionTransformer(nn.Cell):
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
-        x = self.ln_post(x[:, 0, :])
+        # x = self.ln_post(x[:, 0, :])
+        x = self.ln_post(x)  # return the full sequence of image embeddings
 
         if self.proj is not None:
             x = x @ self.proj
