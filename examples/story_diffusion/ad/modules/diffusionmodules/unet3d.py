@@ -568,9 +568,6 @@ class UNet3DModel(nn.Cell):
             assert y.shape[0] == x.shape[0]
             emb = emb + self.label_emb(y)
 
-        if append_to_context is not None:
-            context = ops.cat([context, append_to_context], axis=1)
-
         # 0. rearrange inputs to (b*f, ...) for pseudo 3d until we meet temporal transformer (i.e. motion module)
         B, C, F, H, W = x.shape
         # x: (b c f h w) -> (b*f c h w)
@@ -579,6 +576,10 @@ class UNet3DModel(nn.Cell):
         emb = emb.repeat_interleave(repeats=F, dim=0)
         # context: (b max_length dim_clip) -> (b*f dim_emb)
         context = context.repeat_interleave(repeats=F, dim=0)
+
+        # append openclip image embedding to the text embedding
+        if append_to_context is not None:
+            context = ops.cat([context, append_to_context], axis=1)
 
         h = x
 
