@@ -30,6 +30,11 @@ model:
         freeze: True
     semantc_motion_predictor:
       target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
+      params:
+        width: 1024
+        layers: 8
+        heads: 12
+        output_dim: 1024
 
     unet_config:
       target: ad.modules.diffusionmodules.unet3d.UNet3DModel

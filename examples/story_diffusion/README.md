@@ -72,7 +72,7 @@ To train the motion predictor, you should download the stable diffusion v1.5 Min
 The motion module checkpoint file needs to be converted to MindSpore checkpoint. You can run:
 ```
 cd ../examples/animatediff/tools
-python motion_module_convert.py --src path/to/torch_ckpts/mm_sd_v15_v2.ckpt --tar ../models/motion_module
+python motion_module_convert.py --src path/to/torch_ckpts/mm_sd_v15_v2.ckpt --tar ../examples/story_diffusion/models/motion_module
 ```
 
 The expected checkpoint files should be stored like this:
