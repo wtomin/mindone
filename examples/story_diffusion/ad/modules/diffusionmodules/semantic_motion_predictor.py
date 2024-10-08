@@ -22,6 +22,7 @@ class SemanticMotionPredictor(nn.Cell):
         use_quick_gelu: bool = False,
         dtype: mstype = ms.float32,
     ):
+        super().__init__()
         self.dtype = dtype
         self.ln_pre = LayerNorm((width,), epsilon=epsilon)
 

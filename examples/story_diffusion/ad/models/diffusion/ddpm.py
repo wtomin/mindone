@@ -475,18 +475,18 @@ class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
         assert motion_predictor_config is not None, "Must define semantic motion predictor!"
         super().__init__(*args, **kwargs)
         if embedder_config is not None:
-            self._init_embedder(embedder_config)
+            self._init_visual_embedder(embedder_config)
         if motion_predictor_config is not None:
             self._init_motion_predictor(motion_predictor_config)
 
     def _init_motion_predictor(self, config):
         self.semantic_motion_predictor = instantiate_from_config(config)  # trainable
 
-    def _init_embedder(self, config, freeze=True):
-        self.embedder = instantiate_from_config(config)
+    def _init_visual_embedder(self, config, freeze=True):
+        self.visual_embedder = instantiate_from_config(config)
         if freeze:
-            self.embedder.set_train(False)
-            for param in self.embedder.get_parameters():
+            self.visual_embedder.set_train(False)
+            for param in self.visual_embedder.get_parameters():
                 param.requires_grad = False
 
     def construct(self, x: ms.Tensor, text_tokens: ms.Tensor, conditioned_frames: ms.Tensor, control=None, **kwargs):
@@ -523,7 +523,7 @@ class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
         cond = self.get_condition_embeddings(text_tokens, control)
 
         # 4. get interpolated conditioned image embedding
-        image_cond = self.embedder(conditioned_frames)
+        image_cond = self.visual_embedder(conditioned_frames)
         interpolated_image_cond = self.semantic_motion_predictor(
             image_cond, target_len=num_frames
         )  # (Bs, 77, num_frames, hidden_size)

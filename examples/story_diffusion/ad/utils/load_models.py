@@ -199,16 +199,17 @@ def load_safetensor_weight_file(checkpoint_file):
         raise ValueError(f"Incorrect weight extension! {checkpoint_file.split('.')[-1]}")
 
 
-def load_open_clip_modules(unet, open_clip_path, add_ldm_prefix=True, ldm_prefix="model.diffusion_model."):
+def load_open_clip_modules(
+    unet, open_clip_path, add_ldm_prefix=True, ldm_prefix="visual_embedder.model.", load_visual_only=True
+):
     # load motion module weights if use mm
     logger.info("Loading open_clip image embedder from {}".format(open_clip_path))
     if not open_clip_path.endswith(".safetensors"):
         ms_state_dict = ms.load_checkpoint(open_clip_path)
     else:
         ms_state_dict = load_safetensor_weight_file(open_clip_path)
-
-    def _clear_insertion_from_training(param_name):
-        return param_name.replace("diffusion_model.diffusion_model.", "diffusion_model.").replace("._backbone.", ".")
+    if load_visual_only:
+        ms_state_dict = dict([(key, ms_state_dict[key]) for key in ms_state_dict if key.startswith("visual.")])
 
     # add prefix (used in the whole sd model) to param if needed
     mm_pnames = list(ms_state_dict.keys())
@@ -216,8 +217,6 @@ def load_open_clip_modules(unet, open_clip_path, add_ldm_prefix=True, ldm_prefix
         if add_ldm_prefix:
             if not pname.startswith(ldm_prefix):
                 new_pname = ldm_prefix + pname
-                # remove duplicated "diffusion_model" caused by saving mm only during training
-                new_pname = _clear_insertion_from_training(new_pname)
                 ms_state_dict[new_pname] = ms_state_dict.pop(pname)
 
     params_not_load, ckpt_not_load = load_param_into_net_with_filter(

@@ -1,5 +1,4 @@
 # task
-image_finetune: False
 output_path: outputs/mmv2_finetune
 
 # model
