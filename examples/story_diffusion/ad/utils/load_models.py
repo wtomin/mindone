@@ -1,9 +1,11 @@
 import logging
 import os
 
+from ad.modules.encoders._common import LayerNorm
 from safetensors import safe_open
 
 import mindspore as ms
+from mindspore import nn, ops
 
 from mindone.safetensors.mindspore import load_file as safe_load_file
 from mindone.utils.config import instantiate_from_config
@@ -199,6 +201,37 @@ def load_safetensor_weight_file(checkpoint_file):
         raise ValueError(f"Incorrect weight extension! {checkpoint_file.split('.')[-1]}")
 
 
+def _get_pt2ms_mappings(m):
+    mappings = {}  # pt_param_name: (ms_param_name, pt_param_to_ms_param_func)
+    for name, cell in m.cells_and_names():
+        if isinstance(cell, nn.Conv1d):
+            mappings[f"{name}.weight"] = f"{name}.weight", lambda x: ops.expand_dims(x, axis=-2)
+        elif isinstance(cell, nn.Embedding):
+            mappings[f"{name}.weight"] = f"{name}.embedding_table", lambda x: x
+        elif isinstance(cell, (nn.BatchNorm2d, nn.LayerNorm, nn.GroupNorm, LayerNorm)):
+            mappings[f"{name}.weight"] = f"{name}.gamma", lambda x: x
+            mappings[f"{name}.bias"] = f"{name}.beta", lambda x: x
+            if isinstance(cell, (nn.BatchNorm2d,)):
+                mappings[f"{name}.running_mean"] = f"{name}.moving_mean", lambda x: x
+                mappings[f"{name}.running_var"] = f"{name}.moving_variance", lambda x: x
+                mappings[f"{name}.num_batches_tracked"] = None, lambda x: x
+    return mappings
+
+
+def convert_state_dict(m, state_dict_pt):
+    if not state_dict_pt:
+        return state_dict_pt
+    pt2ms_mappings = _get_pt2ms_mappings(m)
+    state_dict_ms = {}
+    while state_dict_pt:
+        name_pt, data_pt = state_dict_pt.popitem()
+        name_ms, data_mapping = pt2ms_mappings.get(name_pt, (name_pt, lambda x: x))
+        data_ms = data_mapping(data_pt)
+        if name_ms is not None:
+            state_dict_ms[name_ms] = data_ms
+    return state_dict_ms
+
+
 def load_open_clip_modules(
     unet, open_clip_path, add_ldm_prefix=True, ldm_prefix="visual_embedder.model.", load_visual_only=True
 ):
@@ -208,6 +241,15 @@ def load_open_clip_modules(
         ms_state_dict = ms.load_checkpoint(open_clip_path)
     else:
         ms_state_dict = load_safetensor_weight_file(open_clip_path)
+        # manually correct pname error
+        mm_pnames = list(ms_state_dict.keys())
+        for pname in mm_pnames:
+            if pname.endswith("attn.in_proj_weight"):
+                new_pname = pname.replace("attn.in_proj_weight", "attn.in_proj.weight")
+                ms_state_dict[new_pname] = ms_state_dict.pop(pname)
+            elif pname.endswith("attn.in_proj_bias"):
+                new_pname = pname.replace("attn.in_proj_bias", "attn.in_proj.bias")
+                ms_state_dict[new_pname] = ms_state_dict.pop(pname)
     if load_visual_only:
         ms_state_dict = dict([(key, ms_state_dict[key]) for key in ms_state_dict if key.startswith("visual.")])
 
@@ -218,7 +260,9 @@ def load_open_clip_modules(
             if not pname.startswith(ldm_prefix):
                 new_pname = ldm_prefix + pname
                 ms_state_dict[new_pname] = ms_state_dict.pop(pname)
-
+    ms_state_dict = convert_state_dict(
+        unet, ms_state_dict
+    )  # convert ms param names to be compatible with torch param names
     params_not_load, ckpt_not_load = load_param_into_net_with_filter(
         unet,
         ms_state_dict,
