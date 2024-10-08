@@ -3,9 +3,10 @@ image_finetune: False
 output_path: outputs/mmv2_finetune
 
 # model
-model_config: configs/stable_diffusion/v1-train-mmv2.yaml
+model_config: configs/stable_diffusion/v1-train-mmv2-interpolation.yaml
 pretrained_model_path: models/stable_diffusion/sd_v1.5-d0ab7146.ckpt
 motion_module_path: models/motion_module/mm_sd_v15_v2.ckpt
+open_clip_path: models/open_clip/open_clip_pytorch_model.safetensors
 unet_initialize_random: False
 force_motion_module_amp_O2: True
 

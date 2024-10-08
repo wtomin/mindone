@@ -1,8 +1,11 @@
 import logging
 import os
 
+from safetensors import safe_open
+
 import mindspore as ms
 
+from mindone.safetensors.mindspore import load_file as safe_load_file
 from mindone.utils.config import instantiate_from_config
 from mindone.utils.params import load_param_into_net_with_filter
 
@@ -178,6 +181,57 @@ def load_motion_modules(
             logger.info("Loading motion lora from {}".format(_mlora_path))
             unet = merge_lora_to_unet(unet, _mlora_path, alpha)
 
+    return unet
+
+
+def load_safetensor_weight_file(checkpoint_file):
+    if checkpoint_file.endswith(".safetensors"):
+        # Check format of the archive
+        with safe_open(checkpoint_file, framework="np") as f:
+            metadata = f.metadata()
+        if metadata.get("format") not in ["pt", "tf", "flax", "np"]:
+            raise OSError(
+                f"The safetensors archive passed at {checkpoint_file} does not contain the valid metadata. Make sure "
+                "you save your model with the `save_pretrained` method."
+            )
+        return safe_load_file(checkpoint_file)
+    else:
+        raise ValueError(f"Incorrect weight extension! {checkpoint_file.split('.')[-1]}")
+
+
+def load_open_clip_modules(unet, open_clip_path, add_ldm_prefix=True, ldm_prefix="model.diffusion_model."):
+    # load motion module weights if use mm
+    logger.info("Loading open_clip image embedder from {}".format(open_clip_path))
+    if not open_clip_path.endswith(".safetensors"):
+        ms_state_dict = ms.load_checkpoint(open_clip_path)
+    else:
+        ms_state_dict = load_safetensor_weight_file(open_clip_path)
+
+    def _clear_insertion_from_training(param_name):
+        return param_name.replace("diffusion_model.diffusion_model.", "diffusion_model.").replace("._backbone.", ".")
+
+    # add prefix (used in the whole sd model) to param if needed
+    mm_pnames = list(ms_state_dict.keys())
+    for pname in mm_pnames:
+        if add_ldm_prefix:
+            if not pname.startswith(ldm_prefix):
+                new_pname = ldm_prefix + pname
+                # remove duplicated "diffusion_model" caused by saving mm only during training
+                new_pname = _clear_insertion_from_training(new_pname)
+                ms_state_dict[new_pname] = ms_state_dict.pop(pname)
+
+    params_not_load, ckpt_not_load = load_param_into_net_with_filter(
+        unet,
+        ms_state_dict,
+        filter=ms_state_dict.keys(),
+    )
+    if len(ckpt_not_load) > 0:
+        logger.warning(
+            "The following params in mm ckpt are not loaded into net: {}\nTotal: {}".format(
+                ckpt_not_load, len(ckpt_not_load)
+            )
+        )
+    assert len(ckpt_not_load) == 0, "All params in open_clip image embedder must be loaded"
     return unet
 
 

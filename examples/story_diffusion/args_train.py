@@ -167,12 +167,12 @@ def parse_args():
         help="If True, save motion module params only to reduce checkpoint size. Otherwise, save the whole ldm model (vae, clip, unet, mm) in one checkpoint",
     )
     # video
-    parser.add_argument(
-        "--image_finetune",
-        default=True,
-        type=str2bool,
-        help="True for image finetune. False for motion module training.",
-    )
+    # parser.add_argument(
+    #     "--image_finetune",
+    #     default=True,
+    #     type=str2bool,
+    #     help="True for image finetune. False for motion module training.",
+    # )
     parser.add_argument(
         "--force_motion_module_amp_O2",
         default=False,
@@ -208,7 +208,10 @@ def parse_args():
     )
     parser.add_argument("--num_parallel_workers", default=12, type=int, help="num workers for data loading")
     parser.add_argument(
-        "--motion_module_path", default="", type=str, help="path to pretrained motion mdule. Load it if not empty"
+        "--motion_module_path", default="", type=str, help="path to pretrained motion module. Load it if not empty"
+    )
+    parser.add_argument(
+        "--open_clip_path", default="", type=str, help="path to pretrained open_clip model. Load it if not empty"
     )
     parser.add_argument(
         "--train_data_type",

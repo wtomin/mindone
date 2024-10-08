@@ -27,7 +27,7 @@ sys.path.insert(0, mindone_lib_path)
 from ad.data.dataset import create_dataloader
 
 # from ad.data.dataset import check_sanity
-from ad.utils.load_models import load_motion_modules, update_unet2d_params_for_unet3d
+from ad.utils.load_models import load_motion_modules, load_open_clip_modules, update_unet2d_params_for_unet3d
 from args_train import parse_args
 
 from mindone.models.lora import inject_trainable_lora, make_only_lora_params_trainable
@@ -206,52 +206,55 @@ def main(args):
         _to_abspath(args.pretrained_model_path),
         latent_diffusion_with_loss,
         unet_initialize_random=args.unet_initialize_random,
-        load_unet3d_from_2d=(not args.image_finetune),
+        load_unet3d_from_2d=True,
         unet3d_type="adv1" if "mmv1" in args.model_config else "adv2",  # TODO: better not use filename to judge version
     )
 
     # TODO: debugging
     # latent_diffusion_with_loss = auto_mixed_precision(latent_diffusion_with_loss, "O2")
 
-    if not args.image_finetune:
-        # load mm pretrained weight
-        if args.motion_module_path != "":
-            load_motion_modules(latent_diffusion_with_loss, _to_abspath(args.motion_module_path))
+    # load mm pretrained weight
+    if args.motion_module_path != "":
+        load_motion_modules(latent_diffusion_with_loss, _to_abspath(args.motion_module_path))
 
-        # set motion module amp O2 if required for memory reduction
-        if args.force_motion_module_amp_O2:
-            logger.warning("Force to set motion module in amp level O2")
-            latent_diffusion_with_loss.model.diffusion_model.set_mm_amp_level("O2")
+    # set motion module amp O2 if required for memory reduction
+    if args.force_motion_module_amp_O2:
+        logger.warning("Force to set motion module in amp level O2")
+        latent_diffusion_with_loss.model.diffusion_model.set_mm_amp_level("O2")
 
-        # inject lora dense layers to motion modules if set
-        if args.motion_lora_finetune:
-            # for param in latent_diffusion_with_loss.get_parameters():
-            #     param.requires_grad = False
-            motion_lora_layers, _ = inject_trainable_lora(
-                latent_diffusion_with_loss,
-                rank=args.motion_lora_rank,
-                use_fp16=True,
-                scale=args.motion_lora_alpha,
-                target_modules=["ad.modules.diffusionmodules.motion_module.VersatileAttention"],
+    # inject lora dense layers to motion modules if set
+    if args.motion_lora_finetune:
+        # for param in latent_diffusion_with_loss.get_parameters():
+        #     param.requires_grad = False
+        motion_lora_layers, _ = inject_trainable_lora(
+            latent_diffusion_with_loss,
+            rank=args.motion_lora_rank,
+            use_fp16=True,
+            scale=args.motion_lora_alpha,
+            target_modules=["ad.modules.diffusionmodules.motion_module.VersatileAttention"],
+        )
+        trainable_params = make_only_lora_params_trainable(latent_diffusion_with_loss)
+        logging.info(
+            "Motion lora layers injected. Num lora layers: {}, Num lora params: {}".format(
+                len(motion_lora_layers), len(trainable_params)
             )
-            trainable_params = make_only_lora_params_trainable(latent_diffusion_with_loss)
-            logging.info(
-                "Motion lora layers injected. Num lora layers: {}, Num lora params: {}".format(
-                    len(motion_lora_layers), len(trainable_params)
-                )
-            )
-        else:
-            # set only motion module trainable for mm finetuning
-            num_mm_trainable = 0
-            for param in latent_diffusion_with_loss.model.get_parameters():
-                # exclude positional embedding params from training
-                if (".temporal_transformer." in param.name) and (".pe" not in param.name):
-                    param.requires_grad = True
-                    num_mm_trainable += 1
-                else:
-                    param.requires_grad = False
-            logger.info("Num MM trainable params {}".format(num_mm_trainable))
-            # assert num_mm_trainable in [546, 520], "Expect 546 trainable params for MM-v2 or 520 for MM-v1."
+        )
+    else:
+        # set only motion module trainable for mm finetuning
+        num_mm_trainable = 0
+        for param in latent_diffusion_with_loss.model.get_parameters():
+            # exclude positional embedding params from training
+            if (".temporal_transformer." in param.name) and (".pe" not in param.name):
+                param.requires_grad = True
+                num_mm_trainable += 1
+            else:
+                param.requires_grad = False
+        logger.info("Num MM trainable params {}".format(num_mm_trainable))
+        # assert num_mm_trainable in [546, 520], "Expect 546 trainable params for MM-v2 or 520 for MM-v1."
+
+    # load open_clip
+    if args.open_clip_path != "":
+        load_open_clip_modules(latent_diffusion_with_loss, _to_abspath(args.open_clip_path))
 
     # count total params and trainable params
     tot_params, trainable_params = count_params(latent_diffusion_with_loss.model)
@@ -260,47 +263,28 @@ def main(args):
 
     # 3. build dataset
     csv_path = args.csv_path if args.csv_path is not None else os.path.join(args.data_path, "video_caption.csv")
-    if args.image_finetune:
-        logger.info("Task is image finetune, num_frames and frame_stride is forced to 1")
-        args.num_frames = 1
-        args.frame_stride = 1
-        data_config = dict(
-            video_folder=_to_abspath(args.data_path),
-            csv_path=_to_abspath(csv_path),
-            sample_size=args.image_size,
-            sample_stride=args.frame_stride,
-            sample_n_frames=args.num_frames,
-            batch_size=args.train_batch_size,
-            shuffle=True,
-            num_parallel_workers=args.num_parallel_workers,
-            max_rowsize=32,
-            random_drop_text=args.random_drop_text,
-            random_drop_text_ratio=args.random_drop_text_ratio,
-            train_data_type=args.train_data_type,
-            disable_flip=args.disable_flip,
-        )
-    else:
-        data_config = dict(
-            video_folder=_to_abspath(args.data_path),
-            csv_path=_to_abspath(csv_path),
-            sample_size=args.image_size,
-            sample_stride=args.frame_stride,
-            sample_n_frames=args.num_frames,
-            batch_size=args.train_batch_size,
-            shuffle=True,
-            num_parallel_workers=args.num_parallel_workers,
-            max_rowsize=64,
-            random_drop_text=args.random_drop_text,
-            random_drop_text_ratio=args.random_drop_text_ratio,
-            video_column=args.video_column,
-            caption_column=args.caption_column,
-            train_data_type=args.train_data_type,
-            disable_flip=args.disable_flip,
-        )
+
+    data_config = dict(
+        video_folder=_to_abspath(args.data_path),
+        csv_path=_to_abspath(csv_path),
+        sample_size=args.image_size,
+        sample_stride=args.frame_stride,
+        sample_n_frames=args.num_frames,
+        batch_size=args.train_batch_size,
+        shuffle=True,
+        num_parallel_workers=args.num_parallel_workers,
+        max_rowsize=64,
+        random_drop_text=args.random_drop_text,
+        random_drop_text_ratio=args.random_drop_text_ratio,
+        video_column=args.video_column,
+        caption_column=args.caption_column,
+        train_data_type=args.train_data_type,
+        disable_flip=args.disable_flip,
+    )
 
     tokenizer = latent_diffusion_with_loss.cond_stage_model.tokenize
     dataset = create_dataloader(
-        data_config, tokenizer=tokenizer, is_image=args.image_finetune, device_num=device_num, rank_id=rank_id
+        data_config, tokenizer=tokenizer, is_image=False, device_num=device_num, rank_id=rank_id
     )
     dataset_size = dataset.get_dataset_size()
 
@@ -445,7 +429,7 @@ def main(args):
             ckpt_save_interval=ckpt_save_interval,
             log_interval=args.log_interval,
             start_epoch=start_epoch,
-            model_name="sd" if args.image_finetune else "ad",
+            model_name="ad",
             use_lora=args.motion_lora_finetune,
             lora_rank=args.motion_lora_rank,
             param_save_filter=[".temporal_transformer."] if args.save_mm_only else None,
