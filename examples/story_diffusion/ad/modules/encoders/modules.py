@@ -209,6 +209,7 @@ class FrozenOpenCLIPImageEmbedder(CLIPImageEmbedder):
         vision_patch_size=14,
         vision_head_width=64,
         ucg_rate=0.0,
+        freeze=True,
     ):
         super(CLIPImageEmbedder, self).__init__()
         self.use_fp16 = use_fp16
@@ -225,6 +226,14 @@ class FrozenOpenCLIPImageEmbedder(CLIPImageEmbedder):
             dtype=self.dtype,
         )
         self.ucg_rate = ucg_rate
+        if freeze:
+            self.freeze()
+
+    def freeze(self):
+        self.set_train(False)
+        self.set_grad(False)
+        for _, p in self.parameters_and_names():
+            p.requires_grad = False
 
 
 class CLIPEmbeddingNoiseAugmentation(ImageConcatWithNoiseAugmentation):

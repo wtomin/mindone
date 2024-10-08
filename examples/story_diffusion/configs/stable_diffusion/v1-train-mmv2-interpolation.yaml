@@ -20,6 +20,14 @@ model:
 
     embedder_config:
       target: ad.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
+      params:  # vit-h-14
+        embed_dim: 1024
+        image_resolution: 224
+        vision_layers: 32
+        vision_width: 1280
+        vision_patch_size: 14
+        vision_head_width: 80
+        freeze: True
     semantc_motion_predictor:
       target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
 
