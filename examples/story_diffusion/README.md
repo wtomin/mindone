@@ -86,5 +86,10 @@ models
 
 #### Training
 
+A toy example:
+```
+# reduce num frames and batch size to avoid OOM in 3090
+python train.py --config configs/training/mmv2_finetune_512.yaml --data_path ../videocomposer/datasets/webvid5 --image_size 512 --num_frames 16 --train_batch_size=1
+```
 
 #### Inference
