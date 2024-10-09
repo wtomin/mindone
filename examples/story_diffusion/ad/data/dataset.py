@@ -90,6 +90,18 @@ def create_video_transforms(h, w, num_frames, interpolation="bicubic", backend="
     return pixel_transforms
 
 
+def _build_transform():
+    mean = np.array([0.48145466, 0.4578275, 0.40821073]) * 255
+    std = np.array([0.26862954, 0.26130258, 0.27577711]) * 255
+    transforms = albumentations.Compose(
+        [
+            albumentations.Resize((224, 224), interpolation=cv2.INTER_CUBIC),
+            albumentations.Normalize(mean.tolist(), std.tolist()),
+        ]
+    )
+    return transforms
+
+
 # TODO: rm csv_path, find csv under video_folder
 class TextVideoDataset:
     def __init__(
@@ -117,6 +129,7 @@ class TextVideoDataset:
         self.return_start_end_frames = return_start_end_frames
         if self.return_start_end_frames:
             logger.info("Returning the start and end frames of each video.")
+            assert not self.is_image
 
         self.video_folder = video_folder
         self.sample_stride = sample_stride
@@ -134,6 +147,7 @@ class TextVideoDataset:
             backend=transform_backend,
             disable_flip=disable_flip,
         )
+        self.clip_transforms = _build_transform()  # clip vision transform
         self.transform_backend = transform_backend
         self.tokenizer = tokenizer
         self.video_column = video_column
@@ -250,7 +264,10 @@ class TextVideoDataset:
 
         if self.is_image:
             pixel_values = pixel_values[0]
-
+        if self.return_start_end_frames:
+            conditions = np.transpose(pixel_values[[0, -1]], (0, 2, 3, 1))  # (2 c h w) -> (2 h w c)
+            conditions = self.clip_transforms(conditions)  # (2 h w c) -> (2, 224, 224, 3)
+            conditions = np.transpose(conditions, (0, 3, 1, 2))  # (2, 224, 224, 3) -> (2, 3, 224, 224)
         pixel_values = (pixel_values / 127.5 - 1.0).astype(np.float32)
 
         # randomly set caption to be empty
@@ -271,13 +288,16 @@ class TextVideoDataset:
         if not self.return_start_end_frames:
             return pixel_values, text_data
         else:
-            return pixel_values, text_data, pixel_values[[0, -1]]
+            return pixel_values, text_data, conditions
 
 
 class TextVideoDatasetWithEmbeddingNpz(TextVideoDataset):
     def __init__(self, csv_path, video_folder, embedding_path_column="embedding_path", *args, **kwargs):
         super().__init__(csv_path, video_folder, *args, **kwargs)
         self.embedding_path_column = embedding_path_column
+        assert (
+            not self.return_start_end_frames
+        ), "TextVideoDatasetWithEmbeddingNpz does not support returning start and end frames as conditions"
 
     def get_batch_cache_npz(self, idx):
         video_dict = self.dataset[idx]
@@ -309,8 +329,6 @@ class TextVideoDatasetWithEmbeddingNpz(TextVideoDataset):
         video_emb_train, text_emb = self.get_batch_cache_npz(idx)
         if not self.return_start_end_frames:
             return video_emb_train, text_emb
-        else:
-            return video_emb_train, text_emb, video_emb_train[[0, -1]]
 
 
 # TODO: parse in config dict

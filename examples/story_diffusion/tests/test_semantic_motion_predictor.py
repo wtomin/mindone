@@ -9,9 +9,10 @@ from mindspore import dtype as mstype
 from mindspore import ops
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
-mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../"))
+mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../../"))
 sys.path.insert(0, mindone_lib_path)
-
+ad_lib_path = os.path.abspath(os.path.join(__dir__, "../"))
+sys.path.apend(ad_lib_path)
 from mindone.utils.config import get_obj_from_str
 
 num_timesteps = 1000
@@ -48,9 +49,11 @@ def build_model_from_config(config, unet_config_update=None, vae_use_fp16=None, 
 
 def run_inference(z, cond, conditioned_frames, visual_embedder, semantic_motion_predictor, model):
     num_frames = 16
-    t = ops.UniformInt((z.shape[0]), Tensor(0, dtype=mstype.int32), Tensor(num_timesteps, dtype=mstype.int32))
+    t = Tensor([12] * z.shape[0], dtype=mstype.int32)
     noisy_latents = ops.randn_like(z)
     # 4. get interpolated conditioned image embedding
+    B, F, C, H, W = conditioned_frames
+    conditioned_frames = conditioned_frames.reshape((B * F, C, H, W))
     image_cond = visual_embedder(conditioned_frames)
     interpolated_image_cond = semantic_motion_predictor(
         image_cond, target_len=num_frames
