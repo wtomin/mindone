@@ -34,10 +34,9 @@ class SemanticMotionPredictor(nn.Cell):
         self.proj = Parameter(scale * ms.numpy.randn(width, output_dim, dtype=self.dtype))
 
     def construct(self, x: Tensor, target_len: int):
-        # x input shape (Bs, 77, 2, hidden_size)
+        # x input shape (Bs, 2, hidden_size)
         # interpolate the image embedding to the target length
-        Bs, F, L, D = x.shape
-        x = x.reshape(Bs * F, L, D)
+        Bs, F, D = x.shape
         x = ops.interpolate(x, size=(target_len, D), mode="linear")
 
         x = self.ln_pre(x)

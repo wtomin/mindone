@@ -12,7 +12,7 @@ __dir__ = os.path.dirname(os.path.abspath(__file__))
 mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../../"))
 sys.path.insert(0, mindone_lib_path)
 ad_lib_path = os.path.abspath(os.path.join(__dir__, "../"))
-sys.path.apend(ad_lib_path)
+sys.path.append(ad_lib_path)
 from mindone.utils.config import get_obj_from_str
 
 num_timesteps = 1000
@@ -51,10 +51,11 @@ def run_inference(z, cond, conditioned_frames, visual_embedder, semantic_motion_
     num_frames = 16
     t = Tensor([12] * z.shape[0], dtype=mstype.int32)
     noisy_latents = ops.randn_like(z)
-    # 4. get interpolated conditioned image embedding
-    B, F, C, H, W = conditioned_frames
+    # 4. get interpolated conditioned imagse embedding
+    B, F, C, H, W = conditioned_frames.shape
     conditioned_frames = conditioned_frames.reshape((B * F, C, H, W))
     image_cond = visual_embedder(conditioned_frames)
+    image_cond = image_cond.reshape((B, F, image_cond.shape[-2], image_cond.shape[-1]))
     interpolated_image_cond = semantic_motion_predictor(
         image_cond, target_len=num_frames
     )  # (Bs, 77, num_frames, hidden_size)
@@ -74,7 +75,7 @@ h = w = 512
 num_frames = 16
 cond = {"c_crossattn": ops.randn(bs, 77, 768)}
 z = ops.randn((bs, 4, num_frames, h // 8, w // 8))
-conditioned_frames = ops.randn((bs, 2, 3, h, w))
+conditioned_frames = ops.randn((bs, 2, 3, 224, 224))
 
 # 2. build model
 unet_config_update = dict(
