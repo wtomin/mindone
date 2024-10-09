@@ -55,7 +55,7 @@ def run_inference(z, cond, conditioned_frames, visual_embedder, semantic_motion_
     B, F, C, H, W = conditioned_frames.shape
     conditioned_frames = conditioned_frames.reshape((B * F, C, H, W))
     image_cond = visual_embedder(conditioned_frames)
-    image_cond = image_cond.reshape((B, F, image_cond.shape[-2], image_cond.shape[-1]))
+    image_cond = image_cond.reshape((B, F, image_cond.shape[-1]))
     interpolated_image_cond = semantic_motion_predictor(
         image_cond, target_len=num_frames
     )  # (Bs, 77, num_frames, hidden_size)

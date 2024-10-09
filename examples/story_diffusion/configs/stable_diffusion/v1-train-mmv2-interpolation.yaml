@@ -31,10 +31,12 @@ model:
     semantc_motion_predictor:
       target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
       params:
-        width: 1024
+        embed_dim: 1024
+        width: 960
         layers: 8
         heads: 12
-        output_dim: 1024
+        output_dim: 768 # to align with clip text embedding dim
+        num_frames: 16
 
     unet_config:
       target: ad.modules.diffusionmodules.unet3d.UNet3DModel
