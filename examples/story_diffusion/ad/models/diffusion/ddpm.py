@@ -471,7 +471,7 @@ class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
     def __init__(self, *args, **kwargs):
         embedder_config = kwargs.pop("embedder_config", None)
         assert embedder_config is not None, "Must define image embedder!"
-        motion_predictor_config = kwargs.pop("semantc_motion_predictor", None)
+        motion_predictor_config = kwargs.pop("semantic_motion_predictor_config", None)
         assert motion_predictor_config is not None, "Must define semantic motion predictor!"
         super().__init__(*args, **kwargs)
         if embedder_config is not None:

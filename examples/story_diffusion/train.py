@@ -52,15 +52,24 @@ def _to_abspath(rp):
     return os.path.join(__dir__, rp)
 
 
-def build_model_from_config(config, unet_config_update=None, vae_use_fp16=None, snr_gamma=None):
+def build_model_from_config(
+    config, unet_config_update=None, semantic_motion_predictor_config_update=None, vae_use_fp16=None, snr_gamma=None
+):
     config = OmegaConf.load(config).model
     if unet_config_update is not None:
         # config["params"]["unet_config"]["params"]["enable_flash_attention"] = enable_flash_attention
         unet_args = config["params"]["unet_config"]["params"]
         for name, value in unet_config_update.items():
             if value is not None:
-                logger.info("Arg `{}` updated: {} -> {}".format(name, unet_args[name], value))
+                logger.info("Unet arg `{}` updated: {} -> {}".format(name, unet_args[name], value))
                 unet_args[name] = value
+    if semantic_motion_predictor_config_update is not None:
+        # config["params"]["unet_config"]["params"]["enable_flash_attention"] = enable_flash_attention
+        smp_args = config["params"]["semantic_motion_predictor_config"]["params"]
+        for name, value in semantic_motion_predictor_config_update.items():
+            if value is not None:
+                logger.info("semantic_motion_predictor arg `{}` updated: {} -> {}".format(name, smp_args[name], value))
+                smp_args[name] = value
 
     if vae_use_fp16 is not None:
         config.params.first_stage_config.params.use_fp16 = vae_use_fp16
@@ -195,9 +204,16 @@ def main(args):
         use_recompute=args.use_recompute,
         recompute_strategy=args.recompute_strategy,
     )
+    semantic_motion_predictor_config_update = dict(
+        # enable_flash_attention=args.enable_flash_attention,
+        # use_recompute=args.use_recompute,
+        # recompute_strategy=args.recompute_strategy,
+        num_frames=args.num_frames,
+    )
     latent_diffusion_with_loss = build_model_from_config(
         _to_abspath(args.model_config),
         unet_config_update,
+        semantic_motion_predictor_config_update,
         vae_use_fp16=args.vae_fp16,
         snr_gamma=args.snr_gamma,
     )

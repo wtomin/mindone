@@ -28,7 +28,7 @@ model:
         vision_patch_size: 14
         vision_head_width: 80
         freeze: True
-    semantc_motion_predictor:
+    semantic_motion_predictor_config:
       target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
       params:
         embed_dim: 1024

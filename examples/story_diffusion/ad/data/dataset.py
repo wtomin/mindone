@@ -127,6 +127,7 @@ class TextVideoDataset:
         self.length = len(self.dataset)
         logger.info(f"Num data samples: {self.length}")
         self.return_start_end_frames = return_start_end_frames
+        self.is_image = is_image
         if self.return_start_end_frames:
             logger.info("Returning the start and end frames of each video.")
             assert not self.is_image
@@ -134,7 +135,6 @@ class TextVideoDataset:
         self.video_folder = video_folder
         self.sample_stride = sample_stride
         self.sample_n_frames = sample_n_frames
-        self.is_image = is_image
 
         sample_size = tuple(sample_size) if not isinstance(sample_size, int) else (sample_size, sample_size)
 
