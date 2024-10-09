@@ -280,6 +280,7 @@ def main(args):
         caption_column=args.caption_column,
         train_data_type=args.train_data_type,
         disable_flip=args.disable_flip,
+        return_start_end_frames=True,  # semantic motion predictor is conditioned on the start and end frames
     )
 
     tokenizer = latent_diffusion_with_loss.cond_stage_model.tokenize

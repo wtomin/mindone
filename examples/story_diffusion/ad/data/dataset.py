@@ -107,12 +107,16 @@ class TextVideoDataset:
         random_drop_text=True,
         random_drop_text_ratio=0.1,
         disable_flip=True,
+        return_start_end_frames=False,
     ):
         logger.info(f"loading annotations from {csv_path} ...")
         with open(csv_path, "r") as csvfile:
             self.dataset = list(csv.DictReader(csvfile))
         self.length = len(self.dataset)
         logger.info(f"Num data samples: {self.length}")
+        self.return_start_end_frames = return_start_end_frames
+        if self.return_start_end_frames:
+            logger.info("Returning the start and end frames of each video.")
 
         self.video_folder = video_folder
         self.sample_stride = sample_stride
@@ -264,8 +268,10 @@ class TextVideoDataset:
             text_data = tokens
         else:
             text_data = caption
-
-        return pixel_values, text_data
+        if not self.return_start_end_frames:
+            return pixel_values, text_data
+        else:
+            return pixel_values, text_data, pixel_values[[0, -1]]
 
 
 class TextVideoDatasetWithEmbeddingNpz(TextVideoDataset):
@@ -301,7 +307,10 @@ class TextVideoDatasetWithEmbeddingNpz(TextVideoDataset):
                 - text embedding: preprocessed by CLIP in shape (context_max_len, embedding_len)
         """
         video_emb_train, text_emb = self.get_batch_cache_npz(idx)
-        return video_emb_train, text_emb
+        if not self.return_start_end_frames:
+            return video_emb_train, text_emb
+        else:
+            return video_emb_train, text_emb, video_emb_train[[0, -1]]
 
 
 # TODO: parse in config dict
@@ -321,6 +330,7 @@ def create_dataloader(config, tokenizer=None, is_image=False, device_num=1, rank
                 caption_column=config["caption_column"],
                 random_drop_text=config["random_drop_text"],
                 random_drop_text_ratio=config["random_drop_text_ratio"],
+                return_start_end_frames=config["return_start_end_frames"],
             )
         else:
             dataset = TextVideoDatasetWithEmbeddingNpz(
@@ -336,19 +346,19 @@ def create_dataloader(config, tokenizer=None, is_image=False, device_num=1, rank
                 caption_column=config["caption_column"],
                 random_drop_text=config["random_drop_text"],
                 random_drop_text_ratio=config["random_drop_text_ratio"],
+                return_start_end_frames=config["return_start_end_frames"],
             )
         print("Total number of samples: ", len(dataset))
 
         # Larger value leads to more memory consumption. Default: 16
         # prefetch_size = config.get("prefetch_size", 16)
         # ms.dataset.config.set_prefetch_size(prefetch_size)
-
+        column_names = ["video", "caption"]
+        if config["return_start_end_frames"]:
+            column_names += ["conditions"]
         dataloader = ms.dataset.GeneratorDataset(
             source=dataset,
-            column_names=[
-                "video",
-                "caption",
-            ],
+            column_names=column_names,
             num_shards=device_num,
             shard_id=rank_id,
             python_multiprocessing=True,
@@ -364,10 +374,12 @@ def create_dataloader(config, tokenizer=None, is_image=False, device_num=1, rank
             if os.path.isfile(file_path):
                 if file.split(".")[-1] == "mindrecord":
                     data_files.append(file_path)
-
+        column_names = ["video_latent", "text_emb"]
+        if config["return_start_end_frames"]:
+            column_names += ["conditions"]
         dataloader = ms.dataset.MindDataset(
             dataset_files=data_files,
-            columns_list=["video_latent", "text_emb"],
+            columns_list=column_names,
             num_shards=device_num,
             shard_id=rank_id,
             shuffle=config["shuffle"],
