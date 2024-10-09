@@ -496,7 +496,7 @@ class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
         Args:
             x: pixel values of video frames, resized and normalized to shape [bs, F, 3, 256, 256]
             text: text tokens padded to fixed shape [bs, 77]
-            conditioned_frames: the start and end frames as conditioned images
+            conditioned_frames: the start and end frames as conditioned images [bs, 2, C, H, W]
             control: other conditions for future extension [bs, 2, 3, 224, 224]
 
         Returns:
