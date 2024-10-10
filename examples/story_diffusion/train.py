@@ -57,14 +57,12 @@ def build_model_from_config(
 ):
     config = OmegaConf.load(config).model
     if unet_config_update is not None:
-        # config["params"]["unet_config"]["params"]["enable_flash_attention"] = enable_flash_attention
         unet_args = config["params"]["unet_config"]["params"]
         for name, value in unet_config_update.items():
             if value is not None:
                 logger.info("Unet arg `{}` updated: {} -> {}".format(name, unet_args[name], value))
                 unet_args[name] = value
     if semantic_motion_predictor_config_update is not None:
-        # config["params"]["unet_config"]["params"]["enable_flash_attention"] = enable_flash_attention
         smp_args = config["params"]["semantic_motion_predictor_config"]["params"]
         for name, value in semantic_motion_predictor_config_update.items():
             if value is not None:
@@ -267,6 +265,11 @@ def main(args):
                 param.requires_grad = False
         logger.info("Num MM trainable params {}".format(num_mm_trainable))
         # assert num_mm_trainable in [546, 520], "Expect 546 trainable params for MM-v2 or 520 for MM-v1."
+
+    # set semantic motion predictor trainable:
+    latent_diffusion_with_loss.semantic_motion_predictor.set_train(True)
+    for param in latent_diffusion_with_loss.semantic_motion_predictor.get_parameters():
+        param.requires_grad = True
 
     # load open_clip
     if args.open_clip_path != "":
