@@ -95,7 +95,7 @@ def _build_transform():
     std = np.array([0.26862954, 0.26130258, 0.27577711]) * 255
     transforms = albumentations.Compose(
         [
-            albumentations.Resize((224, 224), interpolation=cv2.INTER_CUBIC),
+            albumentations.Resize(224, 224, interpolation=cv2.INTER_CUBIC),
             albumentations.Normalize(mean.tolist(), std.tolist()),
         ]
     )
@@ -266,7 +266,9 @@ class TextVideoDataset:
             pixel_values = pixel_values[0]
         if self.return_start_end_frames:
             conditions = np.transpose(pixel_values[[0, -1]], (0, 2, 3, 1))  # (2 c h w) -> (2 h w c)
-            conditions = self.clip_transforms(conditions)  # (2 h w c) -> (2, 224, 224, 3)
+            conditions = np.stack(
+                [self.clip_transforms(image=img)["image"] for img in conditions]
+            )  # (2 h w c) -> (2, 224, 224, 3)
             conditions = np.transpose(conditions, (0, 3, 1, 2))  # (2, 224, 224, 3) -> (2, 3, 224, 224)
         pixel_values = (pixel_values / 127.5 - 1.0).astype(np.float32)
 

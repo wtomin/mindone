@@ -580,7 +580,7 @@ class UNet3DModel(nn.Cell):
         # append openclip image embedding to the text embedding
         if append_to_context is not None:
             append_to_context = append_to_context.reshape(B * F, -1, append_to_context.shape[-1])  # (b*f, l, dim_emb)
-            context = ops.cat([context, append_to_context], axis=1)  # (b*f, 77+l, dim_emb)
+            context = ops.cat([context, append_to_context.to(context.dtype)], axis=1)  # (b*f, 77+l, dim_emb)
 
         h = x
 

@@ -45,7 +45,10 @@ class SemanticMotionPredictor(nn.Cell):
         # interpolate the image embedding to the target length
         # Bs, F, D = x.shape
         x = x @ self.proj_in
-        x = ops.interpolate(x.transpose(0, 2, 1), size=target_len, mode="linear").transpose(0, 2, 1)
+        # x = ops.interpolate(x.transpose(0, 2, 1), size=target_len, mode="linear").transpose(0, 2, 1)
+        assert x.shape[1] == 2, f"Expect to receive two frames as conditions, but got shape {x.shape}"
+        start, end = x[:, 0, :], x[:, 1, :]
+        x = ops.stack([start + (end - start) * t for t in ms.numpy.linspace(0, 1, target_len)], axis=1)
         x = x + self.positional_embedding
 
         x = self.ln_pre(x)
@@ -55,7 +58,5 @@ class SemanticMotionPredictor(nn.Cell):
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         x = self.ln_post(x)
-
-        if self.proj_out is not None:
-            x = x @ self.proj_out
+        x = x @ self.proj_out
         return x
