@@ -21,6 +21,7 @@ model:
     embedder_config:
       target: ad.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
       params:  # vit-h-14
+        use_fp16: True
         embed_dim: 1024
         image_resolution: 224
         vision_layers: 32
@@ -31,6 +32,7 @@ model:
     semantic_motion_predictor_config:
       target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
       params:
+        use_fp16: True
         embed_dim: 1024
         width: 960
         layers: 8
