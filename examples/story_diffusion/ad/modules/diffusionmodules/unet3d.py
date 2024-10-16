@@ -521,7 +521,7 @@ class UNet3DModel(nn.Cell):
 
     def recompute(self, b):
         if not b._has_config_recompute:
-            b.recompute()
+            b.recompute(parallel_optimizer_comm_recompute=True)
         if isinstance(b, nn.CellList):
             self.recompute(b[-1])
         else:

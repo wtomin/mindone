@@ -22,6 +22,7 @@ class SemanticMotionPredictor(nn.Cell):
         epsilon: float = 1e-5,
         use_quick_gelu: bool = False,
         use_fp16: bool = False,
+        use_recompute: bool = False,
     ):
         super().__init__()
         self.dtype = ms.float16 if use_fp16 else ms.float32
@@ -37,6 +38,19 @@ class SemanticMotionPredictor(nn.Cell):
         output_dim = output_dim if output_dim is not None else embed_dim
         self.proj_out = Parameter(scale * ms.numpy.randn(width, output_dim, dtype=self.dtype))
         self.proj_in = Parameter(scale * ms.numpy.randn(embed_dim, width, dtype=self.dtype))
+        self.use_recompute = use_recompute
+
+        if use_recompute:
+            for iblock in self.transformer.resblocks:
+                self.recompute(iblock)
+
+    def recompute(self, b):
+        if not b._has_config_recompute:
+            b.recompute(parallel_optimizer_comm_recompute=True)
+        if isinstance(b, nn.CellList):
+            self.recompute(b[-1])
+        else:
+            b.add_flags(output_no_recompute=True)
 
     def construct(self, x: Tensor, target_len: int):
         # x input shape (Bs, 2, hidden_size)

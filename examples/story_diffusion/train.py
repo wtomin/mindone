@@ -204,7 +204,7 @@ def main(args):
     )
     semantic_motion_predictor_config_update = dict(
         # enable_flash_attention=args.enable_flash_attention,
-        # use_recompute=args.use_recompute,
+        use_recompute=args.use_recompute,
         # recompute_strategy=args.recompute_strategy,
         num_frames=args.num_frames,
     )

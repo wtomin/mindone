@@ -527,8 +527,9 @@ class LatentDiffusionWithSemanticMotionPredictor(LatentDiffusion):
         conditioned_frames = conditioned_frames.reshape((B * F, C, H, W))
         image_cond = self.visual_embedder(conditioned_frames)
         image_cond = image_cond.reshape((B, F, image_cond.shape[-1]))
+        dtype = self.semantic_motion_predictor.dtype
         interpolated_image_cond = self.semantic_motion_predictor(
-            image_cond, target_len=num_frames
+            image_cond.to(dtype), target_len=num_frames
         )  # (Bs, 77, num_frames, hidden_size)
 
         # 5.  unet forward, predict conditioned on conditions

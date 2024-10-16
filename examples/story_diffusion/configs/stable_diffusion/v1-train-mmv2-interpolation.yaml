@@ -39,6 +39,7 @@ model:
         heads: 12
         output_dim: 768 # to align with clip text embedding dim
         num_frames: 16
+        use_recompute: False
 
     unet_config:
       target: ad.modules.diffusionmodules.unet3d.UNet3DModel
