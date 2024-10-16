@@ -314,6 +314,7 @@ def main(args):
         total_train_steps = args.epochs * dataset_size
     else:
         total_train_steps = args.train_steps
+        args.epochs = math.ceil(total_train_steps / dataset_size)
 
     if args.dataset_sink_mode and args.sink_size != -1:
         steps_per_sink = args.sink_size
@@ -338,8 +339,8 @@ def main(args):
                 )
     step_mode = step_mode if args.step_mode is None else args.step_mode
 
-    logger.info(f"train_steps: {total_train_steps}, train_epochs: {args.epochs}, sink_size: {args.sink_size}")
-    logger.info(f"total train steps: {total_train_steps}, sink epochs: {sink_epochs}")
+    logger.info(f"train_steps: {total_train_steps}, train_epochs: {args.epochs}, dataset size: {dataset_size}")
+    logger.info(f"total train steps: {total_train_steps}, sink epochs: {sink_epochs}, sink_size: {args.sink_size}")
     logger.info(
         "ckpt_save_interval: {} {}".format(
             ckpt_save_interval, "steps" if (not args.dataset_sink_mode and step_mode) else "sink epochs"
