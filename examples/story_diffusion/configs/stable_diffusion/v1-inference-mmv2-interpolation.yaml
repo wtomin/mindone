@@ -1,6 +1,6 @@
 model:
   base_learning_rate: 1.0e-05
-  target: ad.models.diffusion.ddpm.LatentDiffusionWithEmbedding
+  target: ad.models.diffusion.ddpm.LatentDiffusionWithSemanticMotionPredictor
   params:
     linear_start: 0.00085
     linear_end: 0.0120
@@ -16,6 +16,30 @@ model:
     scale_factor: 0.18215
     use_ema: False
     use_fp16: True
+    snr_gamma: null
+
+    embedder_config:
+      target: ad.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
+      params:  # vit-h-14
+        use_fp16: True
+        embed_dim: 1024
+        image_resolution: 224
+        vision_layers: 32
+        vision_width: 1280
+        vision_patch_size: 14
+        vision_head_width: 80
+        freeze: True
+    semantic_motion_predictor_config:
+      target: ad.modules.diffusionmodules.semantic_motion_predictor.SemanticMotionPredictor
+      params:
+        use_fp16: True
+        embed_dim: 1024
+        width: 960
+        layers: 8
+        heads: 12
+        output_dim: 768 # to align with clip text embedding dim
+        num_frames: 16
+        use_recompute: False
 
     unet_config:
       target: ad.modules.diffusionmodules.unet3d.UNet3DModel
@@ -35,7 +59,9 @@ model:
         legacy: False
         use_fp16: True
         dropout: 0.1
-        use_recompute: False # debug
+        use_recompute: False
+        recompute_strategy: "down_blocks"
+        enable_flash_attention: True
         # Additional args for mm v2
         use_inflated_groupnorm: true
         unet_use_cross_frame_attention: false
@@ -61,7 +87,7 @@ model:
       params:
         embed_dim: 4
         monitor: val/rec_loss
-        use_fp16: False
+        use_fp16: true
         ddconfig:
           double_z: true
           z_channels: 4

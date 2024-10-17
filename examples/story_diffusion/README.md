@@ -92,3 +92,14 @@ python train.py --config configs/training/mmv2_finetune_512.yaml --data_path ../
 ```
 
 #### Inference
+
+```bash
+for f in ../videocomposer/datasets/webvid5/*.mp4; do
+    mkdir -p "./webvid5/${f##*/}"
+    ffmpeg -i "$f" "./webvid5/${f##*/}/frame_%04d.png"
+done
+```
+
+```
+python text_to_video.py --config configs/prompts/v2/overfit-webvid.yaml
+```
