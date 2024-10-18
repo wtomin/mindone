@@ -15,3 +15,4 @@ from .updownsample import (  # TimeDownsampleResAdv2x,; TimeUpsampleResAdv2x
     TimeUpsampleRes2x,
     Upsample,
 )
+from .wavelet import *

@@ -277,7 +277,7 @@ class CausalVAEModel(VideoBaseAE):
 
         if mindspore_dtype is not None and not isinstance(mindspore_dtype, ms.Type):
             raise ValueError(
-                f"{mindspore_dtype} needs to be of type `ms.Type`, e.g. `ms.float16`, but is {type(mindspore_dtype)}."
+                f"{mindspore_dtype} needs to be of type ms.Type, e.g. ms.float16, but is {type(mindspore_dtype)}."
             )
         elif mindspore_dtype is not None:
             model = model.to(mindspore_dtype)
@@ -314,7 +314,7 @@ class CausalVAEModel(VideoBaseAE):
             for kw in map_dict:
                 key_2d = key_2d.replace(kw, map_dict[kw])
 
-            assert key_2d in vae_2d_keys, f"Key {key_2d} ({key_3d}) not found in 2D VAE"
+                assert key_2d in vae_2d_keys, f"Key {key_2d} ({key_3d}) should be in 2D VAE"
 
             # set vae 3d state dict
             shape_3d = self.parameters_dict()[key_3d].shape

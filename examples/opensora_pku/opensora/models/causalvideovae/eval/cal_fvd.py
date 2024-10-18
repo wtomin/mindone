@@ -6,10 +6,10 @@ from mindspore import ops
 def trans(x):
     # if greyscale images add channel
     if x.shape[-3] == 1:
-        x = x.repeat(1, 1, 3, 1, 1)
+        x = x.repeat(3, axis=2)
 
     # permute BTCHW -> BCTHW
-    x = x.permute(0, 2, 1, 3, 4)
+    x = x.transpose(0, 2, 1, 3, 4)
 
     return x
 

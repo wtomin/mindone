@@ -1,0 +1,227 @@
+from mindspore import Tensor, mint, nn, ops
+
+from ..modules import CausalConv3d
+from ..modules.ops import video_to_image
+
+
+class HaarWaveletTransform3D(nn.Cell):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]]) * 0.3536
+        g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]]) * 0.3536
+        hh = Tensor([[[1, 1], [-1, -1]], [[1, 1], [-1, -1]]]) * 0.3536
+        gh = Tensor([[[1, -1], [-1, 1]], [[1, -1], [-1, 1]]]) * 0.3536
+        h_v = Tensor([[[1, 1], [1, 1]], [[-1, -1], [-1, -1]]]) * 0.3536
+        g_v = Tensor([[[1, -1], [1, -1]], [[-1, 1], [-1, 1]]]) * 0.3536
+        hh_v = Tensor([[[1, 1], [-1, -1]], [[-1, -1], [1, 1]]]) * 0.3536
+        gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]]) * 0.3536
+        h = h.view(1, 1, 2, 2, 2)
+        g = g.view(1, 1, 2, 2, 2)
+        hh = hh.view(1, 1, 2, 2, 2)
+        gh = gh.view(1, 1, 2, 2, 2)
+        h_v = h_v.view(1, 1, 2, 2, 2)
+        g_v = g_v.view(1, 1, 2, 2, 2)
+        hh_v = hh_v.view(1, 1, 2, 2, 2)
+        gh_v = gh_v.view(1, 1, 2, 2, 2)
+
+        self.h_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.g_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.hh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.gh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.h_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.g_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.hh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.gh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+
+        self.h_conv.conv.weight.set_data(h)
+        self.g_conv.conv.weight.set_data(g)
+        self.hh_conv.conv.weight.set_data(hh)
+        self.gh_conv.conv.weight.set_data(gh)
+        self.h_v_conv.conv.weight.set_data(h_v)
+        self.g_v_conv.conv.weight.set_data(g_v)
+        self.hh_v_conv.conv.weight.set_data(hh_v)
+        self.gh_v_conv.weight.set_data(gh_v)
+        self.h_conv.requires_grad = False
+        self.g_conv.requires_grad = False
+        self.hh_conv.requires_grad = False
+        self.gh_conv.requires_grad = False
+        self.h_v_conv.requires_grad = False
+        self.g_v_conv.requires_grad = False
+        self.hh_v_conv.requires_grad = False
+        self.gh_v_conv.requires_grad = False
+
+    def construct(self, x):
+        assert x.ndim() == 5
+
+        b = x.shape[0]
+        # b c t h w -> (b c) 1 t h w
+        x = x.reshape(-1, 1, *x.shape[-3])
+        low_low_low = self.h_conv(x)
+        low_low_low = low_low_low.reshape(
+            b, low_low_low.shape[0] // b, *low_low_low.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        low_low_high = self.g_conv(x)
+        low_low_high = low_low_high.reshape(
+            b, low_low_high.shape[0] // b, *low_low_high.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        low_high_low = self.hh_conv(x)
+        low_high_low = low_high_low.reshape(
+            b, low_high_low.shape[0] // b, *low_high_low.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        low_high_high = self.gh_conv(x)
+        low_high_high = low_high_high.reshape(
+            b, low_high_high.shape[0] // b, *low_high_high.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        high_low_low = self.h_v_conv(x)
+        high_low_low = high_low_low.reshape(
+            b, high_low_low.shape[0] // b, *high_low_low.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        high_low_high = self.g_v_conv(x)
+        high_low_high = high_low_high.reshape(
+            b, high_low_high.shape[0] // b, *high_low_high.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        high_high_low = self.hh_v_conv(x)
+        high_high_low = high_high_low.reshape(
+            b, high_high_low.shape[0] // b, *high_high_low.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+        high_high_high = self.gh_v_conv(x)
+        high_high_high = high_high_high.reshape(
+            b, high_high_high.shape[0] // b, *high_high_high.shape[-3]
+        )  # (b c) 1 t h w -> b c t h w
+
+        output = mint.cat(
+            [
+                low_low_low,
+                low_low_high,
+                low_high_low,
+                low_high_high,
+                high_low_low,
+                high_low_high,
+                high_high_low,
+                high_high_high,
+            ],
+            dim=1,
+        )
+
+        return output
+
+
+class InverseHaarWaveletTransform3D(nn.Cell):
+    def __init__(self, enable_cached=False, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.hh = Tensor([[[1, 1], [-1, -1]], [[1, 1], [-1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.gh = Tensor([[[1, -1], [-1, 1]], [[1, -1], [-1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.h_v = Tensor([[[1, 1], [1, 1]], [[-1, -1], [-1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.g_v = Tensor([[[1, -1], [1, -1]], [[-1, 1], [-1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.hh_v = Tensor([[[1, 1], [-1, -1]], [[-1, -1], [1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.enable_cached = enable_cached
+        self.causal_cached = None
+        self.conv_transpose3d = ops.Conv3DTranspose(1, 1, kernel_size=2, stride=2)
+
+    def construct(self, coeffs):
+        assert coeffs.ndim() == 5
+
+        b = coeffs.shape[0]
+
+        (
+            low_low_low,
+            low_low_high,
+            low_high_low,
+            low_high_high,
+            high_low_low,
+            high_low_high,
+            high_high_low,
+            high_high_high,
+        ) = mint.chunk(coeffs, 8, dim=1)
+
+        low_low_low = low_low_low.reshape(-1, 1, *low_low_low.shape[-3])
+        low_low_high = low_low_high.reshape(-1, 1, *low_low_high.shape[-3])
+        low_high_low = low_high_low.reshape(-1, 1, *low_high_low.shape[-3])
+        low_high_high = low_high_high.reshape(-1, 1, *low_high_high.shape[-3])
+        high_low_low = high_low_low.reshape(-1, 1, *high_low_low.shape[-3])
+        high_low_high = high_low_high.reshape(-1, 1, *high_low_high.shape[-3])
+        high_high_low = high_high_low.reshape(-1, 1, *high_high_low.shape[-3])
+        high_high_high = high_high_high.reshape(-1, 1, *high_high_high.shape[-3])
+
+        low_low_low = self.conv_transpose3d(low_low_low, self.h)
+        low_low_high = self.conv_transpose3d(low_low_high, self.g)
+        low_high_low = self.conv_transpose3d(low_high_low, self.hh)
+        low_high_high = self.conv_transpose3d(low_high_high, self.gh)
+        high_low_low = self.conv_transpose3d(high_low_low, self.h_v)
+        high_low_high = self.conv_transpose3d(high_low_high, self.g_v)
+        high_high_low = self.conv_transpose3d(high_high_low, self.hh_v)
+        high_high_high = self.conv_transpose3d(high_high_high, self.gh_v)
+        if self.enable_cached and self.causal_cached:
+            reconstructed = (
+                low_low_low
+                + low_low_high
+                + low_high_low
+                + low_high_high
+                + high_low_low
+                + high_low_high
+                + high_high_low
+                + high_high_high
+            )
+        else:
+            reconstructed = (
+                low_low_low[:, :, 1:]
+                + low_low_high[:, :, 1:]
+                + low_high_low[:, :, 1:]
+                + low_high_high[:, :, 1:]
+                + high_low_low[:, :, 1:]
+                + high_low_high[:, :, 1:]
+                + high_high_low[:, :, 1:]
+                + high_high_high[:, :, 1:]
+            )
+            self.causal_cached = True
+        reconstructed = reconstructed.reshape(b, -1, *reconstructed.shape[-3:])
+
+        return reconstructed
+
+
+class HaarWaveletTransform2D(nn.Cell):
+    def __init__(self):
+        super().__init__()
+        self.aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
+        self.ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
+        self.da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
+        self.dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
+
+    @video_to_image
+    def construct(self, x):
+        b, c, h, w = x.shape
+        x = x.reshape(b * c, 1, h, w)
+        low_low = ops.conv2d(x, self.aa, stride=2).reshape(b, c, h // 2, w // 2)
+        low_high = ops.conv2d(x, self.ad, stride=2).reshape(b, c, h // 2, w // 2)
+        high_low = ops.conv2d(x, self.da, stride=2).reshape(b, c, h // 2, w // 2)
+        high_high = ops.conv2d(x, self.dd, stride=2).reshape(b, c, h // 2, w // 2)
+        coeffs = mint.cat([low_low, low_high, high_low, high_high], dim=1)
+        return coeffs
+
+
+class InverseHaarWaveletTransform2D(nn.Cell):
+    def __init__(self):
+        super().__init__()
+        self.aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
+        self.ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
+        self.da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
+        self.dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
+        self.conv_transpose2d = ops.Conv2DTranspose(1, 1, kernel_size=2, stride=2)
+
+    @video_to_image
+    def construct(self, coeffs):
+        low_low, low_high, high_low, high_high = mint.chunk(coeffs, 4, dim=1)
+        b, c, height_half, width_half = low_low.shape
+        height = height_half * 2
+        width = width_half * 2
+
+        low_low = self.conv_transpose2d(low_low.reshape(b * c, 1, height_half, width_half), self.aa)
+        low_high = self.conv_transpose2d(low_high.reshape(b * c, 1, height_half, width_half), self.ad)
+        high_low = self.conv_transpose2d(high_low.reshape(b * c, 1, height_half, width_half), self.da)
+        high_high = self.conv_transpose2d(high_high.reshape(b * c, 1, height_half, width_half), self.dd)
+
+        return (low_low + low_high + high_low + high_high).reshape(b, c, height, width)
