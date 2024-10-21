@@ -1,5 +1,7 @@
 from typing import Tuple, Union
 
+from opensora.npu_config import npu_config
+
 import mindspore as ms
 from mindspore import mint, nn, ops
 
@@ -28,16 +30,22 @@ class Upsample(nn.Cell):
 
 
 class Downsample(nn.Cell):
-    def __init__(self, in_channels, with_conv=True, dtype=ms.float32):
+    def __init__(self, in_channels, out_channels, undown=False):
         super().__init__()
-        self.dtype = dtype
-        self.with_conv = with_conv
-        assert with_conv, "Downsample is forced to use conv in opensora v1.1"
+        self.with_conv = True
+        self.undown = undown
         if self.with_conv:
             # no asymmetric padding in torch conv, must do it ourselves
-            self.conv = nn.Conv2d(
-                in_channels, in_channels, kernel_size=3, stride=2, pad_mode="valid", padding=0, has_bias=True
-            ).to_float(self.dtype)
+            if self.undown:
+                self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad")
+            else:
+                self.conv = nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=2,
+                    padding=0,
+                )
 
     def rearrange_in(self, x):
         # b c f h w -> b f c h w
@@ -62,11 +70,24 @@ class Downsample(nn.Cell):
         x = self.rearrange_in(x)
 
         if self.with_conv:
-            pad = ((0, 0), (0, 0), (0, 1), (0, 1))
-            x = nn.Pad(paddings=pad)(x)
-            # pad = (0, 1, 0, 1)  # (pad_left, pad_right, pad_top, pad_bottom)
-            # x = ops.pad(x, pad, mode="constant", value=0)
-            x = self.conv(x)
+            if self.undown:
+                if npu_config is not None and npu_config.on_npu:
+                    x_dtype = x.dtype
+                    x = x.to(npu_config.replaced_type)
+                    x = npu_config.run_conv3d(self.conv, x, x_dtype)
+                else:
+                    x = self.conv(x)
+            else:
+                pad = ((0, 0), (0, 0), (0, 1), (0, 1))
+                # pad = (0, 1, 0, 1)  # (pad_left, pad_right, pad_top, pad_bottom)
+                if npu_config is not None and npu_config.on_npu:
+                    x_dtype = x.dtype
+                    x = x.to(npu_config.replaced_type)
+                    x = nn.Pad(paddings=pad)(x)
+                    x = npu_config.run_conv3d(self.conv, x, x_dtype)
+                else:
+                    x = nn.Pad(paddings=pad)(x)
+                    x = self.conv(x)
         else:
             x = ops.AvgPool(kernel_size=2, stride=2)(x)
 
