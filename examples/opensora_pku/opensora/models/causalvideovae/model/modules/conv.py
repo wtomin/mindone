@@ -92,7 +92,7 @@ class CausalConv3d(nn.Cell):
 
         if self.padding == 0:
             self.conv = nn.Conv3d(
-                chan_in, chan_out, self.kernel_size, stride=self.stride, pad_mode="valid", has_bias=bias
+                chan_in, chan_out, self.kernel_size, stride=self.stride, pad_mode="valid", has_bias=bias, **kwargs
             )
         else:
             self.padding = list(cast_tuple(self.padding, 6))
@@ -107,6 +107,7 @@ class CausalConv3d(nn.Cell):
                 padding=self.padding,
                 pad_mode="pad",
                 has_bias=bias,
+                **kwargs,
             )
         self.enable_cached = enable_cached
         self.causal_cached = None

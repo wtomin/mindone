@@ -10,22 +10,43 @@ from .ops import cast_tuple
 
 
 class Upsample(nn.Cell):
-    def __init__(self, in_channels, with_conv, dtype=ms.float32):
+    def __init__(self, in_channels, out_channels, with_conv=True, dtype=ms.float32):
         super().__init__()
         self.dtype = dtype
         self.with_conv = with_conv
         if self.with_conv:
             self.conv = nn.Conv2d(
-                in_channels, in_channels, kernel_size=3, stride=1, pad_mode="pad", padding=1, has_bias=True
+                in_channels, out_channels, kernel_size=3, stride=1, pad_mode="pad", padding=1, has_bias=True
             ).to_float(self.dtype)
 
+    def rearrange_in(self, x):
+        # b c f h w -> b f c h w
+        B, C, F, H, W = x.shape
+        x = ops.transpose(x, (0, 2, 1, 3, 4))
+        # -> (b*f c h w)
+        x = ops.reshape(x, (-1, C, H, W))
+
+        return x
+
+    def rearrange_out(self, x, F):
+        BF, D, H_, W_ = x.shape
+        # (b*f D h w) -> (b f D h w)
+        x = ops.reshape(x, (BF // F, F, D, H_, W_))
+        # -> (b D f h w)
+        x = ops.transpose(x, (0, 2, 1, 3, 4))
+
+        return x
+
     def construct(self, x):
+        F = x.shape[-3]
+        x = self.rearrange_in(x)
         in_shape = x.shape[-2:]
         out_shape = tuple(2 * x for x in in_shape)
         x = ops.ResizeNearestNeighbor(out_shape)(x)
 
         if self.with_conv:
             x = self.conv(x)
+        x = self.rearrange_out(x, F)
         return x
 
 

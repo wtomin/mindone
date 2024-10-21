@@ -40,7 +40,7 @@ class HaarWaveletTransform3D(nn.Cell):
         self.h_v_conv.conv.weight.set_data(h_v)
         self.g_v_conv.conv.weight.set_data(g_v)
         self.hh_v_conv.conv.weight.set_data(hh_v)
-        self.gh_v_conv.weight.set_data(gh_v)
+        self.gh_v_conv.conv.weight.set_data(gh_v)
         self.h_conv.requires_grad = False
         self.g_conv.requires_grad = False
         self.hh_conv.requires_grad = False
