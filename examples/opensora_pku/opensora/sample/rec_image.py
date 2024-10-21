@@ -3,7 +3,9 @@ import logging
 import os
 import sys
 
+import cv2
 import numpy as np
+from albumentations import Compose, Lambda, Resize, ToFloat
 from PIL import Image
 
 import mindspore as ms
@@ -11,17 +13,16 @@ from mindspore import nn
 
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
+
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.config import str2bool
 from mindone.utils.logger import set_logger
 
 sys.path.append(".")
 
-import cv2
-from albumentations import Compose, Lambda, Resize, ToFloat
 from opensora.models.causalvideovae import ae_wrapper
 from opensora.models.causalvideovae.model.modules.updownsample import TrilinearInterpolate
-from opensora.utils.ms_utils import init_env
+from opensora.npu_config import npu_config
 from opensora.utils.utils import get_precision
 
 logger = logging.getLogger(__name__)
@@ -64,13 +65,7 @@ def transform_to_rgb(x, rescale_to_uint8=True):
 def main(args):
     image_path = args.image_path
     short_size = args.short_size
-    init_env(
-        mode=args.mode,
-        device_target=args.device,
-        precision_mode=args.precision_mode,
-        jit_level=args.jit_level,
-        jit_syntax_level=args.jit_syntax_level,
-    )
+    npu_config.set_npu_env(args)
 
     set_logger(name="", output_dir=args.output_path, rank=0)
 
@@ -138,7 +133,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_path", type=str, default="")
     parser.add_argument("--rec_path", type=str, default="")
-    parser.add_argument("--ae", type=str, default="")
+    parser.add_argument("--ae", type=str, default="WFVAEModel_D8_4x8x8", choices=ae_wrapper.keys())
     parser.add_argument("--ae_path", type=str, default="results/pretrained")
     parser.add_argument("--ms_checkpoint", type=str, default=None)
     parser.add_argument("--short_size", type=int, default=336)

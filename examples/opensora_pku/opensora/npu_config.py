@@ -5,6 +5,8 @@ import os
 import subprocess
 from contextlib import contextmanager
 
+from opensora.utils.ms_utils import init_env
+
 import mindspore as ms
 from mindspore import mint, ops
 
@@ -55,13 +57,21 @@ class NPUConfig:
         self.work_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.pickle_save_path = f"{self.work_path}/pickles"
 
-        self.bind_thread_to_cpu()
         gc.set_threshold(700, 10, 10000)
         self.fa_mask_dtype = choose_flash_attention_dtype()
         self.flash_attn_valid_head_dims = [64, 80, 96, 120, 128, 256]
 
-    def set_rank_id(self, rank):
-        self.rank = rank
+    def set_npu_env(self, args):
+        rank_id, device_num = init_env(
+            mode=args.mode,
+            device_target=args.device,
+            precision_mode=args.precision_mode,
+            jit_level=args.jit_level,
+            jit_syntax_level=args.jit_syntax_level,
+        )
+        self.rank = rank_id
+        self.bind_thread_to_cpu()
+        return rank_id, device_num
 
     def get_total_cores(self):
         try:

@@ -52,7 +52,7 @@ class Encoder(VideoBaseAE):
     ) -> None:
         super().__init__()
         self.down1 = nn.SequentialCell(
-            Conv2d(24, base_channels, kernel_size=3, stride=1, padding=1),
+            Conv2d(24, base_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad"),
             *[
                 ResnetBlock2D(
                     in_channels=base_channels,
@@ -71,6 +71,7 @@ class Encoder(VideoBaseAE):
                 kernel_size=3,
                 stride=1,
                 padding=1,
+                pad_mode="pad",
             ),
             *[
                 ResnetBlock3D(
@@ -89,8 +90,22 @@ class Encoder(VideoBaseAE):
         else:
             l1_channels = 24
 
-        self.connect_l1 = Conv2d(l1_channels, energy_flow_hidden_size, kernel_size=3, stride=1, padding=1)
-        self.connect_l2 = Conv2d(24, energy_flow_hidden_size, kernel_size=3, stride=1, padding=1)
+        self.connect_l1 = Conv2d(
+            l1_channels,
+            energy_flow_hidden_size,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            pad_mode="pad",
+        )
+        self.connect_l2 = Conv2d(
+            24,
+            energy_flow_hidden_size,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            pad_mode="pad",
+        )
         # Mid
         mid_layers = [
             ResnetBlock3D(
@@ -247,7 +262,14 @@ class Decoder(VideoBaseAE):
                 )
                 for _ in range(connect_res_layer_num)
             ],
-            Conv2d(base_channels, l1_channels, kernel_size=3, stride=1, padding=1),
+            Conv2d(
+                base_channels,
+                l1_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                pad_mode="pad",
+            ),
         )
         self.connect_l2 = nn.SequentialCell(
             *[
@@ -259,11 +281,25 @@ class Decoder(VideoBaseAE):
                 )
                 for _ in range(connect_res_layer_num)
             ],
-            Conv2d(base_channels, 24, kernel_size=3, stride=1, padding=1),
+            Conv2d(
+                base_channels,
+                24,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                pad_mode="pad",
+            ),
         )
         # Out
         self.norm_out = Normalize(base_channels, norm_type=norm_type)
-        self.conv_out = Conv2d(base_channels, 24, kernel_size=3, stride=1, padding=1)
+        self.conv_out = Conv2d(
+            base_channels,
+            24,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            pad_mode="pad",
+        )
 
         self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)()
         self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)()
