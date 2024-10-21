@@ -20,7 +20,7 @@ class LayerNorm(nn.Cell):
         self.norm = LayerNorm_diffusers(num_channels, eps=eps, elementwise_affine=True)
 
     def construct(self, x):
-        if x.ndim() == 5:
+        if x.ndim == 5:
             # b c t h w -> b t h w c
             x = x.transpose(0, 2, 3, 4, 1)
             x = self.norm(x)

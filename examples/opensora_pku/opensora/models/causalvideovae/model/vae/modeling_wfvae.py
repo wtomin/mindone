@@ -397,6 +397,8 @@ class WFVAEModel(VideoBaseAE):
             [self.decoder.up2[-2:], self.decoder.up1, self.decoder.connect_l1, self.decoder.layer],
             self.t_upsample_times,
         )
+        self.wavelet_tranform = HaarWaveletTransform3D()
+        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D()
 
     def get_encoder(self):
         if self.use_quant_layer:
@@ -409,18 +411,18 @@ class WFVAEModel(VideoBaseAE):
         return [self.decoder]
 
     def _empty_causal_cached(self, parent):
-        for name, module in parent.named_modules():
+        for name, module in parent.cells_and_names():
             if hasattr(module, "causal_cached"):
                 module.causal_cached = None
 
     def _set_causal_cached(self, enable_cached=True):
-        for name, module in self.named_modules():
+        for name, module in self.cells_and_names():
             if hasattr(module, "enable_cached"):
                 module.enable_cached = enable_cached
 
     def _set_cache_offset(self, modules, cache_offset=0):
         for module in modules:
-            for submodule in module.modules():
+            for submodule in module.cells():
                 if hasattr(submodule, "cache_offset"):
                     submodule.cache_offset = cache_offset
 
@@ -441,8 +443,7 @@ class WFVAEModel(VideoBaseAE):
 
         dtype = x.dtype
         x = x.to(ms.float16)
-        wt = HaarWaveletTransform3D().to(dtype=x.dtype)
-        coeffs = wt(x)
+        coeffs = self.wavelet_tranform(x)
         coeffs = coeffs.to(dtype)
 
         if self.use_tiling:
@@ -482,8 +483,7 @@ class WFVAEModel(VideoBaseAE):
 
         dtype = dec.dtype
         dec = dec.to(ms.float16)
-        wt = InverseHaarWaveletTransform3D().to(dtype=dec.dtype)
-        dec = wt(dec)
+        dec = self.inverse_wavelet_tranform(dec)
         dec = dec.to(dtype)
 
         return dec

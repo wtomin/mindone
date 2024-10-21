@@ -42,7 +42,7 @@ class WFVAEModelWrapper(nn.Cell):
         super(WFVAEModelWrapper, self).__init__()
         self.vae = WFVAEModel.from_pretrained(model_path, subfolder=subfolder, cache_dir=cache_dir, **kwargs)
         self.shift = ms.Tensor(self.vae.config.shift)[None, :, None, None, None]
-        self.scale = ms.Tensor((self.vae.config.scale)[None, :, None, None, None])
+        self.scale = ms.Tensor(self.vae.config.scale)[None, :, None, None, None]
 
     def encode(self, x):
         x = (self.vae.encode(x).sample() - self.shift.to(dtype=x.dtype)) * self.scale.to(dtype=x.dtype)

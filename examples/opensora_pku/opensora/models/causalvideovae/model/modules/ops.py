@@ -4,7 +4,7 @@ from mindspore import mint, nn
 
 def video_to_image(func):
     def wrapper(self, x, *args, **kwargs):
-        if x.ndim() == 5:
+        if x.ndim == 5:
             b, c, t, h, w = x.shape
             if True:
                 # b c t h w -> (b t) c h w

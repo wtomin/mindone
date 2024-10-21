@@ -89,7 +89,7 @@ class CausalConv3d(nn.Cell):
         self.chan_out = chan_out
         self.stride = kwargs.pop("stride", 1)
         self.padding = kwargs.pop("padding", 0)
-
+        self.stride = cast_tuple(self.stride, 3)
         if self.padding == 0:
             self.conv = nn.Conv3d(
                 chan_in, chan_out, self.kernel_size, stride=self.stride, pad_mode="valid", has_bias=bias, **kwargs
@@ -98,13 +98,13 @@ class CausalConv3d(nn.Cell):
             self.padding = list(cast_tuple(self.padding, 6))
             self.padding[0] = 0
             self.padding[1] = 0
-            # self.stride = cast_tuple(self.stride, 3)
+
             self.conv = nn.Conv3d(
                 chan_in,
                 chan_out,
                 self.kernel_size,
                 stride=self.stride,
-                padding=self.padding,
+                padding=tuple(self.padding),
                 pad_mode="pad",
                 has_bias=bias,
                 **kwargs,
@@ -125,7 +125,7 @@ class CausalConv3d(nn.Cell):
             else:
                 first_frame_pad = self.causal_cached
 
-        x = ops.concat((first_frame_pad, x), axis=2)
+            x = ops.concat((first_frame_pad, x), axis=2)
 
         if self.enable_cached and self.time_kernel_size != 1:
             if (self.time_kernel_size - 1) // self.stride[0] != 0:

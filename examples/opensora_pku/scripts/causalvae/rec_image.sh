@@ -5,4 +5,5 @@ python opensora/sample/rec_image.py \
     --rec_path rec.jpg \
     --device Ascend \
     --short_size 512 \
-    --enable_tiling
+    --enable_tiling \
+    --mode 1 \

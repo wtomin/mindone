@@ -24,14 +24,14 @@ class HaarWaveletTransform3D(nn.Cell):
         hh_v = hh_v.view(1, 1, 2, 2, 2)
         gh_v = gh_v.view(1, 1, 2, 2, 2)
 
-        self.h_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.g_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.hh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.gh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.h_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.g_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.hh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
-        self.gh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, has_bias=False)
+        self.h_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.g_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.hh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.gh_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.h_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.g_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.hh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
+        self.gh_v_conv = CausalConv3d(1, 1, 2, padding=0, stride=2, bias=False)
 
         self.h_conv.conv.weight.set_data(h)
         self.g_conv.conv.weight.set_data(g)
@@ -51,42 +51,42 @@ class HaarWaveletTransform3D(nn.Cell):
         self.gh_v_conv.requires_grad = False
 
     def construct(self, x):
-        assert x.ndim() == 5
+        assert x.ndim == 5
 
         b = x.shape[0]
         # b c t h w -> (b c) 1 t h w
-        x = x.reshape(-1, 1, *x.shape[-3])
+        x = x.reshape(-1, 1, *x.shape[-3:])
         low_low_low = self.h_conv(x)
         low_low_low = low_low_low.reshape(
-            b, low_low_low.shape[0] // b, *low_low_low.shape[-3]
+            b, low_low_low.shape[0] // b, *low_low_low.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         low_low_high = self.g_conv(x)
         low_low_high = low_low_high.reshape(
-            b, low_low_high.shape[0] // b, *low_low_high.shape[-3]
+            b, low_low_high.shape[0] // b, *low_low_high.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         low_high_low = self.hh_conv(x)
         low_high_low = low_high_low.reshape(
-            b, low_high_low.shape[0] // b, *low_high_low.shape[-3]
+            b, low_high_low.shape[0] // b, *low_high_low.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         low_high_high = self.gh_conv(x)
         low_high_high = low_high_high.reshape(
-            b, low_high_high.shape[0] // b, *low_high_high.shape[-3]
+            b, low_high_high.shape[0] // b, *low_high_high.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         high_low_low = self.h_v_conv(x)
         high_low_low = high_low_low.reshape(
-            b, high_low_low.shape[0] // b, *high_low_low.shape[-3]
+            b, high_low_low.shape[0] // b, *high_low_low.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         high_low_high = self.g_v_conv(x)
         high_low_high = high_low_high.reshape(
-            b, high_low_high.shape[0] // b, *high_low_high.shape[-3]
+            b, high_low_high.shape[0] // b, *high_low_high.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         high_high_low = self.hh_v_conv(x)
         high_high_low = high_high_low.reshape(
-            b, high_high_low.shape[0] // b, *high_high_low.shape[-3]
+            b, high_high_low.shape[0] // b, *high_high_low.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
         high_high_high = self.gh_v_conv(x)
         high_high_high = high_high_high.reshape(
-            b, high_high_high.shape[0] // b, *high_high_high.shape[-3]
+            b, high_high_high.shape[0] // b, *high_high_high.shape[-3:]
         )  # (b c) 1 t h w -> b c t h w
 
         output = mint.cat(
@@ -123,7 +123,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
         self.conv_transpose3d = ops.Conv3DTranspose(1, 1, kernel_size=2, stride=2)
 
     def construct(self, coeffs):
-        assert coeffs.ndim() == 5
+        assert coeffs.ndim == 5
 
         b = coeffs.shape[0]
 
@@ -138,14 +138,14 @@ class InverseHaarWaveletTransform3D(nn.Cell):
             high_high_high,
         ) = mint.chunk(coeffs, 8, dim=1)
 
-        low_low_low = low_low_low.reshape(-1, 1, *low_low_low.shape[-3])
-        low_low_high = low_low_high.reshape(-1, 1, *low_low_high.shape[-3])
-        low_high_low = low_high_low.reshape(-1, 1, *low_high_low.shape[-3])
-        low_high_high = low_high_high.reshape(-1, 1, *low_high_high.shape[-3])
-        high_low_low = high_low_low.reshape(-1, 1, *high_low_low.shape[-3])
-        high_low_high = high_low_high.reshape(-1, 1, *high_low_high.shape[-3])
-        high_high_low = high_high_low.reshape(-1, 1, *high_high_low.shape[-3])
-        high_high_high = high_high_high.reshape(-1, 1, *high_high_high.shape[-3])
+        low_low_low = low_low_low.reshape(-1, 1, *low_low_low.shape[-3:])
+        low_low_high = low_low_high.reshape(-1, 1, *low_low_high.shape[-3:])
+        low_high_low = low_high_low.reshape(-1, 1, *low_high_low.shape[-3:])
+        low_high_high = low_high_high.reshape(-1, 1, *low_high_high.shape[-3:])
+        high_low_low = high_low_low.reshape(-1, 1, *high_low_low.shape[-3:])
+        high_low_high = high_low_high.reshape(-1, 1, *high_low_high.shape[-3:])
+        high_high_low = high_high_low.reshape(-1, 1, *high_high_low.shape[-3:])
+        high_high_high = high_high_high.reshape(-1, 1, *high_high_high.shape[-3:])
 
         low_low_low = self.conv_transpose3d(low_low_low, self.h)
         low_low_high = self.conv_transpose3d(low_low_high, self.g)
@@ -210,7 +210,7 @@ class InverseHaarWaveletTransform2D(nn.Cell):
         self.ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
         self.da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
         self.dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
-        self.conv_transpose2d = ops.Conv2DTranspose(1, 1, kernel_size=2, stride=2)
+        self.conv_transpose2d = ops.Conv2DTranspose(1, kernel_size=2, stride=2)
 
     @video_to_image
     def construct(self, coeffs):

@@ -128,7 +128,7 @@ class NPUConfig:
         if self.on_npu:
             if out_dtype is None:
                 out_dtype = x.dtype
-            x = operator.to(dtype=tmp_dtype)(x.to(tmp_dtype))
+            x = operator.to_float(tmp_dtype)(x.to(tmp_dtype))
             x = x.to(out_dtype)
             return x
         else:
@@ -141,7 +141,7 @@ class NPUConfig:
         return self._run(operator, x, ms.float32)
 
     def run_conv3d(self, operator, x, out_dtype):
-        return self._run(operator, x, self.conv_dtype, out_dtype, out_nd_format=True)
+        return self._run(operator, x, self.conv_dtype, out_dtype)
 
     def run_pool_2d(self, operator, x):
         return self._run(operator, x, self.replaced_type)

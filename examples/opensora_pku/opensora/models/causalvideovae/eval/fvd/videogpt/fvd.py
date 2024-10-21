@@ -125,9 +125,9 @@ def cov(m, rowvar=False):
     Returns:
         The covariance matrix of the variables.
     """
-    if m.ndim() > 2:
+    if m.ndim > 2:
         raise ValueError("m has more than 2 dimensions")
-    if m.ndim() < 2:
+    if m.ndim < 2:
         m = m.view(1, -1)
     if not rowvar and m.shape[0] != 1:
         m = m.t()

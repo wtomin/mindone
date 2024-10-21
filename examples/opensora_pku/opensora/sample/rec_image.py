@@ -9,19 +9,16 @@ from albumentations import Compose, Lambda, Resize, ToFloat
 from PIL import Image
 
 import mindspore as ms
-from mindspore import nn
 
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
 
-from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.config import str2bool
 from mindone.utils.logger import set_logger
 
 sys.path.append(".")
 
 from opensora.models.causalvideovae import ae_wrapper
-from opensora.models.causalvideovae.model.modules.updownsample import TrilinearInterpolate
 from opensora.npu_config import npu_config
 from opensora.utils.utils import get_precision
 
@@ -88,22 +85,6 @@ def main(args):
     vae.set_train(False)
     for param in vae.get_parameters():
         param.requires_grad = False
-    if args.precision in ["fp16", "bf16"]:
-        amp_level = "O2"
-        dtype = get_precision(args.precision)
-        if dtype == ms.float16:
-            custom_fp32_cells = [nn.GroupNorm] if args.vae_keep_gn_fp32 else []
-        else:
-            custom_fp32_cells = [nn.AvgPool2d, TrilinearInterpolate]
-
-        vae = auto_mixed_precision(vae, amp_level, dtype, custom_fp32_cells=custom_fp32_cells)
-        logger.info(
-            f"Set mixed precision to {amp_level} with dtype={args.precision}, custom fp32_cells {custom_fp32_cells}"
-        )
-    elif args.precision == "fp32":
-        amp_level = "O0"
-    else:
-        raise ValueError(f"Unsupported precision {args.precision}")
 
     input_x = np.array(Image.open(image_path))  # (h w c)
     assert input_x.shape[2], f"Expect the input image has three channels, but got shape {input_x.shape}"
