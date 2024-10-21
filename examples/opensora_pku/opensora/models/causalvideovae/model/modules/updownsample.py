@@ -1,7 +1,7 @@
 from typing import Tuple, Union
 
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
 
 from .conv import CausalConv3d
 from .ops import cast_tuple
@@ -286,20 +286,42 @@ class TrilinearInterpolate(nn.Cell):
 
 
 class Spatial2xTime2x3DUpsample(nn.Cell):
-    def __init__(self, in_channels, out_channels, dtype=ms.float32):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        dtype=ms.float32,
+        t_interpolation="trilinear",
+        enable_cached=False,
+    ):
         super().__init__()
         self.dtype = dtype
+        self.t_interpolation = t_interpolation
         self.conv = CausalConv3d(in_channels, out_channels, kernel_size=3, padding=1)
         self.intepolate = TrilinearInterpolate()
+        self.enable_cached = enable_cached
+        self.causal_cached = None
 
     def construct(self, x):
-        if x.shape[2] > 1:
-            x, x_ = x[:, :, :1], x[:, :, 1:]
-            x_ = self.intepolate(x_, scale_factor=(2.0, 2.0, 2.0))
-            x = self.intepolate(x, scale_factor=(1.0, 2.0, 2.0))
-            x = ops.cat([x, x_], axis=2)
+        if x.shape[2] > 1 or self.causal_cached is not None:
+            if self.enable_cached and self.causal_cached is not None:
+                x = mint.cat([self.causal_cached, x], dim=2)
+                self.causal_cached = x[:, :, -2:-1]
+                x = ops.interpolate(x, scale_factor=(2, 1, 1), mode=self.t_interpolation)
+                x = x[:, :, 2:]
+                x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
+            else:
+                if self.enable_cached:
+                    self.causal_cached = x[:, :, -1:]
+                x, x_ = x[:, :, :1], x[:, :, 1:]
+                x_ = self.intepolate(x_, scale_factor=(2, 1, 1), mode=self.t_interpolation)
+                x_ = self.intepolate(x_, scale_factor=(1, 2, 2), mode="trilinear")
+                x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
+                x = mint.cat([x, x_], dim=2)
         else:
-            x = self.intepolate(x, scale_factor=(1.0, 2.0, 2.0))
+            if self.enable_cached:
+                self.causal_cached = x[:, :, -1:]
+            x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
         return self.conv(x)
 
 

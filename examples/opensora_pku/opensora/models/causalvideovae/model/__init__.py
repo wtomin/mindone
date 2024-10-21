@@ -9,5 +9,5 @@
 #     CausalVQVAETrainer,
 #     CausalVQVAEModel, CausalVQVAEModelWrapper
 # )
-from .registry import Registry
+from .registry import ModelRegistry
 from .vae import CausalVAEModel, WFVAEModel
