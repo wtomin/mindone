@@ -65,7 +65,7 @@ def main(args):
     npu_config.set_npu_env(args)
 
     set_logger(name="", output_dir=args.output_path, rank=0)
-
+    dtype = get_precision(args.precision)
     if args.ms_checkpoint is not None and os.path.exists(args.ms_checkpoint):
         logger.info(f"Run inference with MindSpore checkpoint {args.ms_checkpoint}")
         state_dict = ms.load_checkpoint(args.ms_checkpoint)
@@ -75,7 +75,7 @@ def main(args):
         )
     else:
         state_dict = None
-    kwarg = {"state_dict": state_dict, "use_safetensors": True}
+    kwarg = {"state_dict": state_dict, "use_safetensors": True, "dtype": dtype}
     vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
 
     if args.enable_tiling:
@@ -89,7 +89,7 @@ def main(args):
     input_x = np.array(Image.open(image_path))  # (h w c)
     assert input_x.shape[2], f"Expect the input image has three channels, but got shape {input_x.shape}"
     x_vae = preprocess(input_x, short_size, short_size)  # use image as a single-frame video
-    dtype = get_precision(args.precision)
+
     x_vae = ms.Tensor(x_vae, dtype).unsqueeze(0)  # b c t h w
     latents = vae.encode(x_vae)
     latents = latents.to(dtype)

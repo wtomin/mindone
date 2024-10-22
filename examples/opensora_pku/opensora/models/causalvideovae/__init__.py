@@ -38,9 +38,11 @@ class CausalVAEModelWrapper(nn.Cell):
 
 
 class WFVAEModelWrapper(nn.Cell):
-    def __init__(self, model_path, subfolder=None, cache_dir=None, **kwargs):
+    def __init__(self, model_path, dtype=ms.float32, subfolder=None, cache_dir=None, **kwargs):
         super(WFVAEModelWrapper, self).__init__()
-        self.vae = WFVAEModel.from_pretrained(model_path, subfolder=subfolder, cache_dir=cache_dir, **kwargs)
+        self.vae = WFVAEModel.from_pretrained(
+            model_path, subfolder=subfolder, cache_dir=cache_dir, dtype=dtype, **kwargs
+        )
         self.shift = ms.Tensor(self.vae.config.shift)[None, :, None, None, None]
         self.scale = ms.Tensor(self.vae.config.scale)[None, :, None, None, None]
 

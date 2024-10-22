@@ -49,8 +49,10 @@ class Encoder(VideoBaseAE):
         l1_downsample_wavelet: str = "HaarWaveletTransform2D",
         l2_dowmsample_block: str = "Spatial2xTime2x3DDownsample",
         l2_downsample_wavelet: str = "HaarWaveletTransform3D",
+        dtype=ms.float32,
     ) -> None:
         super().__init__()
+
         self.down1 = nn.SequentialCell(
             Conv2d(24, base_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad"),
             *[
@@ -63,7 +65,7 @@ class Encoder(VideoBaseAE):
                 for _ in range(num_resblocks)
             ],
             resolve_str_to_obj(l1_dowmsample_block)(in_channels=base_channels, out_channels=base_channels),
-        )
+        ).to_float(dtype)
         self.down2 = nn.SequentialCell(
             Conv2d(
                 base_channels + energy_flow_hidden_size,
@@ -83,7 +85,7 @@ class Encoder(VideoBaseAE):
                 for _ in range(num_resblocks)
             ],
             resolve_str_to_obj(l2_dowmsample_block)(base_channels * 2, base_channels * 2),
-        )
+        ).to_float(dtype)
         # Connection
         if l1_dowmsample_block == "Downsample":  # Bad code. For temporal usage.
             l1_channels = 12
@@ -97,7 +99,7 @@ class Encoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
-        )
+        ).to_float(dtype)
         self.connect_l2 = Conv2d(
             24,
             energy_flow_hidden_size,
@@ -105,7 +107,7 @@ class Encoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
-        )
+        ).to_float(dtype)
         # Mid
         mid_layers = [
             ResnetBlock3D(
@@ -123,12 +125,14 @@ class Encoder(VideoBaseAE):
         ]
         if use_attention:
             mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type))
-        self.mid = nn.SequentialCell(*mid_layers)
+        self.mid = nn.SequentialCell(*mid_layers).to_float(dtype)
         self.norm_out = Normalize(base_channels * 4, norm_type=norm_type)
-        self.conv_out = CausalConv3d(base_channels * 4, latent_dim * 2, kernel_size=3, stride=1, padding=1)
+        self.conv_out = CausalConv3d(base_channels * 4, latent_dim * 2, kernel_size=3, stride=1, padding=1).to_float(
+            dtype
+        )
 
-        self.wavelet_tranform_l1 = resolve_str_to_obj(l1_downsample_wavelet)()
-        self.wavelet_tranform_l2 = resolve_str_to_obj(l2_downsample_wavelet)()
+        self.wavelet_tranform_l1 = resolve_str_to_obj(l1_downsample_wavelet)().to_float(dtype)
+        self.wavelet_tranform_l2 = resolve_str_to_obj(l2_downsample_wavelet)().to_float(dtype)
 
         self.split = ops.Split(axis=1, output_num=2)
         self.concat = ops.Concat(axis=1)
@@ -176,11 +180,13 @@ class Decoder(VideoBaseAE):
         l1_upsample_wavelet: str = "InverseHaarWaveletTransform2D",
         l2_upsample_block: str = "Spatial2xTime2x3DUpsample",
         l2_upsample_wavelet: str = "InverseHaarWaveletTransform3D",
+        dtype=ms.float32,
     ) -> None:
         super().__init__()
+
         self.energy_flow_hidden_size = energy_flow_hidden_size
 
-        self.conv_in = CausalConv3d(latent_dim, base_channels * 4, kernel_size=3, stride=1, padding=1)
+        self.conv_in = CausalConv3d(latent_dim, base_channels * 4, kernel_size=3, stride=1, padding=1).to_float(dtype)
         mid_layers = [
             ResnetBlock3D(
                 in_channels=base_channels * 4,
@@ -197,7 +203,7 @@ class Decoder(VideoBaseAE):
         ]
         if use_attention:
             mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type))
-        self.mid = nn.SequentialCell(*mid_layers)
+        self.mid = nn.SequentialCell(*mid_layers).to_float(dtype)
         self.up2 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -217,7 +223,7 @@ class Decoder(VideoBaseAE):
                 dropout=dropout,
                 norm_type=norm_type,
             ),
-        )
+        ).to_float(dtype)
         self.up1 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -235,7 +241,7 @@ class Decoder(VideoBaseAE):
                 dropout=dropout,
                 norm_type=norm_type,
             ),
-        )
+        ).to_float(dtype)
         self.layer = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -246,7 +252,7 @@ class Decoder(VideoBaseAE):
                 )
                 for i in range(2)
             ],
-        )
+        ).to_float(dtype)
         # Connection
         if l1_upsample_block == "Upsample":  # Bad code. For temporal usage.
             l1_channels = 12
@@ -270,7 +276,7 @@ class Decoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
             ),
-        )
+        ).to_float(dtype)
         self.connect_l2 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -289,7 +295,7 @@ class Decoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
             ),
-        )
+        ).to_float(dtype)
         # Out
         self.norm_out = Normalize(base_channels, norm_type=norm_type)
         self.conv_out = Conv2d(
@@ -299,10 +305,10 @@ class Decoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
-        )
+        ).to_float(dtype)
 
-        self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)()
-        self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)()
+        self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)().to_float(dtype)
+        self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)().to_float(dtype)
 
     def construct(self, z):
         h = self.conv_in(z)
@@ -354,9 +360,11 @@ class WFVAEModel(VideoBaseAE):
         l1_upsample_wavelet: str = "InverseHaarWaveletTransform2D",
         l2_upsample_block: str = "Spatial2xTime2x3DUpsample",
         l2_upsample_wavelet: str = "InverseHaarWaveletTransform3D",
+        dtype=ms.float32,
     ) -> None:
         super().__init__()
         self.use_tiling = False
+
         # Hardcode for now
         self.t_chunk_enc = 16
         self.t_upsample_times = 4 // 2
@@ -374,6 +382,7 @@ class WFVAEModel(VideoBaseAE):
             l1_downsample_wavelet=l1_downsample_wavelet,
             l2_dowmsample_block=l2_dowmsample_block,
             l2_downsample_wavelet=l2_downsample_wavelet,
+            dtype=dtype,
         )
         self.decoder = Decoder(
             latent_dim=latent_dim,
@@ -389,6 +398,7 @@ class WFVAEModel(VideoBaseAE):
             l1_upsample_wavelet=l1_upsample_wavelet,
             l2_upsample_block=l2_upsample_block,
             l2_upsample_wavelet=l2_upsample_wavelet,
+            dtype=dtype,
         )
 
         # Set cache offset for trilinear lossless upsample.
@@ -397,8 +407,8 @@ class WFVAEModel(VideoBaseAE):
             [self.decoder.up2[-2:], self.decoder.up1, self.decoder.connect_l1, self.decoder.layer],
             self.t_upsample_times,
         )
-        self.wavelet_tranform = HaarWaveletTransform3D()
-        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D()
+        self.wavelet_tranform = HaarWaveletTransform3D().to_float(dtype)
+        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D().to_float(dtype)
 
     def get_encoder(self):
         if self.use_quant_layer:
