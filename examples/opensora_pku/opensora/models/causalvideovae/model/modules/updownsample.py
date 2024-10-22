@@ -6,7 +6,7 @@ import mindspore as ms
 from mindspore import mint, nn, ops
 
 from .conv import CausalConv3d
-from .ops import cast_tuple
+from .ops import cast_tuple, video_to_image
 
 
 class Upsample(nn.Cell):
@@ -19,34 +19,13 @@ class Upsample(nn.Cell):
                 in_channels, out_channels, kernel_size=3, stride=1, pad_mode="pad", padding=1, has_bias=True
             ).to_float(self.dtype)
 
-    def rearrange_in(self, x):
-        # b c f h w -> b f c h w
-        B, C, F, H, W = x.shape
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
-        # -> (b*f c h w)
-        x = ops.reshape(x, (-1, C, H, W))
-
-        return x
-
-    def rearrange_out(self, x, F):
-        BF, D, H_, W_ = x.shape
-        # (b*f D h w) -> (b f D h w)
-        x = ops.reshape(x, (BF // F, F, D, H_, W_))
-        # -> (b D f h w)
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
-
-        return x
-
+    @video_to_image
     def construct(self, x):
-        F = x.shape[-3]
-        x = self.rearrange_in(x)
         in_shape = x.shape[-2:]
         out_shape = tuple(2 * x for x in in_shape)
         x = ops.ResizeNearestNeighbor(out_shape)(x)
-
         if self.with_conv:
             x = self.conv(x)
-        x = self.rearrange_out(x, F)
         return x
 
 
@@ -60,59 +39,23 @@ class Downsample(nn.Cell):
             if self.undown:
                 self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad")
             else:
-                self.conv = nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=3,
-                    stride=2,
-                    padding=0,
-                )
+                self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=0, pad_mode="pad")
 
-    def rearrange_in(self, x):
-        # b c f h w -> b f c h w
-        B, C, F, H, W = x.shape
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
-        # -> (b*f c h w)
-        x = ops.reshape(x, (-1, C, H, W))
-
-        return x
-
-    def rearrange_out(self, x, F):
-        BF, D, H_, W_ = x.shape
-        # (b*f D h w) -> (b f D h w)
-        x = ops.reshape(x, (BF // F, F, D, H_, W_))
-        # -> (b D f h w)
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
-
-        return x
-
+    @video_to_image
     def construct(self, x):
-        F = x.shape[-3]
-        x = self.rearrange_in(x)
-
         if self.with_conv:
             if self.undown:
-                if npu_config is not None and npu_config.on_npu:
-                    x_dtype = x.dtype
-                    x = x.to(npu_config.replaced_type)
-                    x = npu_config.run_conv3d(self.conv, x, x_dtype)
-                else:
-                    x = self.conv(x)
+                x = self.conv(x)
             else:
                 pad = ((0, 0), (0, 0), (0, 1), (0, 1))
                 # pad = (0, 1, 0, 1)  # (pad_left, pad_right, pad_top, pad_bottom)
-                if npu_config is not None and npu_config.on_npu:
-                    x_dtype = x.dtype
-                    x = x.to(npu_config.replaced_type)
-                    x = nn.Pad(paddings=pad)(x)
-                    x = npu_config.run_conv3d(self.conv, x, x_dtype)
-                else:
-                    x = nn.Pad(paddings=pad)(x)
-                    x = self.conv(x)
+                x = nn.Pad(paddings=pad)(x)
+                x = self.conv(x)
         else:
-            x = ops.AvgPool(kernel_size=2, stride=2)(x)
-
-        x = self.rearrange_out(x, F)
+            x_dtype = x.dtype
+            x = x.to(npu_config.replaced_type)
+            x = ops.AvgPool(kernel_size=2, stride=2)(x)  # avgpool does not support bf16, but only fp32 and fp16
+            x = x.to(x_dtype)
         return x
 
 
@@ -308,7 +251,7 @@ class TimeUpsampleRes2x(nn.Cell):
         super().__init__()
         self.conv = CausalConv3d(in_channels, out_channels, kernel_size, padding=1)
         self.mix_factor = ms.Parameter(ms.Tensor([mix_factor]), requires_grad=True)
-        self.intepolate = TrilinearInterpolate()
+        self.interpolate = TrilinearInterpolate()
 
     def construct(self, x):
         alpha = ops.sigmoid(self.mix_factor)
@@ -316,7 +259,7 @@ class TimeUpsampleRes2x(nn.Cell):
             x, x_ = x[:, :, :1], x[:, :, 1:]
             ori_dtype = x.dtype
             # FIXME: ms2.2.10 cannot support trilinear on 910b
-            x_ = self.intepolate(x_, scale_factor=(2.0, 1.0, 1.0)).to(ori_dtype)
+            x_ = self.interpolate(x_, scale_factor=(2.0, 1.0, 1.0)).to(ori_dtype)
             x = ops.concat([x, x_], axis=2)
 
         return alpha * x + (1 - alpha) * self.conv(x)
@@ -340,7 +283,7 @@ class Spatial2xTime2x3DUpsample(nn.Cell):
         self.dtype = dtype
         self.t_interpolation = t_interpolation
         self.conv = CausalConv3d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.intepolate = TrilinearInterpolate()
+        self.interpolate = TrilinearInterpolate()
         self.enable_cached = enable_cached
         self.causal_cached = None
 
@@ -349,21 +292,21 @@ class Spatial2xTime2x3DUpsample(nn.Cell):
             if self.enable_cached and self.causal_cached is not None:
                 x = mint.cat([self.causal_cached, x], dim=2)
                 self.causal_cached = x[:, :, -2:-1]
-                x = ops.interpolate(x, scale_factor=(2, 1, 1), mode=self.t_interpolation)
+                x = ops.interpolate(x, scale_factor=(2.0, 1.0, 1.0), mode=self.t_interpolation)
                 x = x[:, :, 2:]
-                x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
+                x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
             else:
                 if self.enable_cached:
                     self.causal_cached = x[:, :, -1:]
                 x, x_ = x[:, :, :1], x[:, :, 1:]
-                x_ = self.intepolate(x_, scale_factor=(2, 1, 1), mode=self.t_interpolation)
-                x_ = self.intepolate(x_, scale_factor=(1, 2, 2), mode="trilinear")
-                x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
+                x_ = self.interpolate(x_, scale_factor=(2.0, 1.0, 1.0), mode=self.t_interpolation)
+                x_ = self.interpolate(x_, scale_factor=(1.0, 2.0, 2.0))
+                x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
                 x = mint.cat([x, x_], dim=2)
         else:
             if self.enable_cached:
                 self.causal_cached = x[:, :, -1:]
-            x = self.intepolate(x, scale_factor=(1, 2, 2), mode="trilinear")
+            x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
         return self.conv(x)
 
 

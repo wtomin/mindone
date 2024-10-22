@@ -2,11 +2,7 @@ import logging
 import os
 from typing import List
 
-try:
-    from opensora.npu_config import npu_config
-except ImportError:
-    npu_config = None
-from opensora.acceleration.parallel_states import get_sequence_parallel_state
+from opensora.npu_config import npu_config
 
 import mindspore as ms
 from mindspore import mint, nn, ops
@@ -133,12 +129,6 @@ class Encoder(VideoBaseAE):
 
         self.wavelet_tranform_l1 = resolve_str_to_obj(l1_downsample_wavelet)().to_float(dtype)
         self.wavelet_tranform_l2 = resolve_str_to_obj(l2_downsample_wavelet)().to_float(dtype)
-
-        self.split = ops.Split(axis=1, output_num=2)
-        self.concat = ops.Concat(axis=1)
-        self.exp = ops.Exp()
-        self.stdnormal = ops.StandardNormal()
-        self.depend = ops.Depend() if get_sequence_parallel_state() else None
 
     def construct(self, coeffs):
         l1_coeffs = coeffs[:, :3]
@@ -308,7 +298,10 @@ class Decoder(VideoBaseAE):
         ).to_float(dtype)
 
         self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)().to_float(dtype)
-        self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)().to_float(dtype)
+        if l2_upsample_wavelet == "InverseHaarWaveletTransform3D":
+            self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)()
+        else:
+            self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)().to_float(dtype)
 
     def construct(self, z):
         h = self.conv_in(z)
@@ -408,7 +401,11 @@ class WFVAEModel(VideoBaseAE):
             self.t_upsample_times,
         )
         self.wavelet_tranform = HaarWaveletTransform3D().to_float(dtype)
-        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D().to_float(dtype)
+        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D()
+
+        self.split = ops.Split(axis=1, output_num=2)
+        self.exp = ops.Exp()
+        self.stdnormal = ops.StandardNormal()
 
     def get_encoder(self):
         if self.use_quant_layer:

@@ -1,3 +1,4 @@
+import mindspore as ms
 from mindspore import Tensor, mint, nn, ops
 
 from ..modules import CausalConv3d
@@ -107,24 +108,28 @@ class HaarWaveletTransform3D(nn.Cell):
 
 
 class InverseHaarWaveletTransform3D(nn.Cell):
-    def __init__(self, enable_cached=False, *args, **kwargs) -> None:
+    def __init__(self, enable_cached=False, dtype=ms.float16, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-        self.h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.hh = Tensor([[[1, 1], [-1, -1]], [[1, 1], [-1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.gh = Tensor([[[1, -1], [-1, 1]], [[1, -1], [-1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.h_v = Tensor([[[1, 1], [1, 1]], [[-1, -1], [-1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.g_v = Tensor([[[1, -1], [1, -1]], [[-1, 1], [-1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.hh_v = Tensor([[[1, 1], [-1, -1]], [[-1, -1], [1, 1]]]).view(1, 1, 2, 2, 2) * 0.3536
-        self.gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]]).view(1, 1, 2, 2, 2) * 0.3536
+        self.dtype = dtype
+        assert self.dtype in [ms.float32, ms.float16], "Currently data type only support float16 and float32."
+
+        self.h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.hh = Tensor([[[1, 1], [-1, -1]], [[1, 1], [-1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.gh = Tensor([[[1, -1], [-1, 1]], [[1, -1], [-1, 1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.h_v = Tensor([[[1, 1], [1, 1]], [[-1, -1], [-1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.g_v = Tensor([[[1, -1], [1, -1]], [[-1, 1], [-1, 1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.hh_v = Tensor([[[1, 1], [-1, -1]], [[-1, -1], [1, 1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
+        self.gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
         self.enable_cached = enable_cached
         self.causal_cached = None
         self.conv_transpose3d = ops.Conv3DTranspose(1, 1, kernel_size=2, stride=2)
 
     def construct(self, coeffs):
         assert coeffs.ndim == 5
-
+        input_dtype = coeffs.dtype
+        coeffs = coeffs.to(self.dtype)
         b = coeffs.shape[0]
 
         (
@@ -180,7 +185,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
             self.causal_cached = True
         reconstructed = reconstructed.reshape(b, -1, *reconstructed.shape[-3:])
 
-        return reconstructed
+        return reconstructed.to(input_dtype)
 
 
 class HaarWaveletTransform2D(nn.Cell):

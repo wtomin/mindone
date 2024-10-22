@@ -90,7 +90,13 @@ class AttnBlock3DFix(nn.Cell):
         with set_run_dtype(q, dtype):
             query, key, value = npu_config.set_current_run_dtype([q, k, v])
             hidden_states = npu_config.run_attention(
-                query, key, value, atten_mask=None, input_layout="BSH", head_dim=c, head_num=1
+                query,
+                key,
+                value,
+                attention_mask=None,
+                input_layout="BSH",
+                head_dim=c // 2,
+                head_num=2,  # FIXME: different from torch. To make head_dim 256 instead of 512
             )
 
             attn_output = npu_config.restore_dtype(hidden_states)

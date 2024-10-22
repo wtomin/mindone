@@ -60,6 +60,8 @@ class NPUConfig:
         gc.set_threshold(700, 10, 10000)
         self.fa_mask_dtype = choose_flash_attention_dtype()
         self.flash_attn_valid_head_dims = [64, 80, 96, 120, 128, 256]
+        self.FA_dtype = ms.bfloat16
+        assert self.FA_dtype in [ms.float16, ms.bfloat16], f"Unsupported flash-attention dtype: {self.FA_dtype}"
 
     def set_npu_env(self, args):
         rank_id, device_num = init_env(

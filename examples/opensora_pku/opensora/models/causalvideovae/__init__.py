@@ -47,7 +47,7 @@ class WFVAEModelWrapper(nn.Cell):
         self.scale = ms.Tensor(self.vae.config.scale)[None, :, None, None, None]
 
     def encode(self, x):
-        x = (self.vae.encode(x).sample() - self.shift.to(dtype=x.dtype)) * self.scale.to(dtype=x.dtype)
+        x = (self.vae.encode(x) - self.shift.to(dtype=x.dtype)) * self.scale.to(dtype=x.dtype)
         return x
 
     def decode(self, x):
