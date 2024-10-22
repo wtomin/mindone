@@ -219,13 +219,13 @@ class InverseHaarWaveletTransform2D(nn.Cell):
         self.ad = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
         self.da = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
         self.dd = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
-        self.aa.conv.weight.set_data(aa)
+        self.aa.weight.set_data(aa)
         self.aa.requires_grad = False
-        self.ad.conv.weight.set_data(ad)
+        self.ad.weight.set_data(ad)
         self.ad.requires_grad = False
-        self.da.conv.weight.set_data(da)
+        self.da.weight.set_data(da)
         self.da.requires_grad = False
-        self.dd.conv.weight.set_data(dd)
+        self.dd.weight.set_data(dd)
         self.dd.requires_grad = False
 
     @video_to_image

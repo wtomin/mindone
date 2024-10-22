@@ -50,7 +50,15 @@ class Encoder(VideoBaseAE):
         super().__init__()
 
         self.down1 = nn.SequentialCell(
-            Conv2d(24, base_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad"),
+            Conv2d(
+                24,
+                base_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                pad_mode="pad",
+                has_bias=True,
+            ),
             *[
                 ResnetBlock2D(
                     in_channels=base_channels,
@@ -70,6 +78,7 @@ class Encoder(VideoBaseAE):
                 stride=1,
                 padding=1,
                 pad_mode="pad",
+                has_bias=True,
             ),
             *[
                 ResnetBlock3D(
@@ -95,6 +104,7 @@ class Encoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
+            has_bias=True,
         ).to_float(dtype)
         self.connect_l2 = Conv2d(
             24,
@@ -103,6 +113,7 @@ class Encoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
+            has_bias=True,
         ).to_float(dtype)
         # Mid
         mid_layers = [
@@ -265,6 +276,7 @@ class Decoder(VideoBaseAE):
                 stride=1,
                 padding=1,
                 pad_mode="pad",
+                has_bias=True,
             ),
         ).to_float(dtype)
         self.connect_l2 = nn.SequentialCell(
@@ -284,6 +296,7 @@ class Decoder(VideoBaseAE):
                 stride=1,
                 padding=1,
                 pad_mode="pad",
+                has_bias=True,
             ),
         ).to_float(dtype)
         # Out
@@ -295,6 +308,7 @@ class Decoder(VideoBaseAE):
             stride=1,
             padding=1,
             pad_mode="pad",
+            has_bias=True,
         ).to_float(dtype)
 
         self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)().to_float(dtype)
@@ -513,9 +527,9 @@ class WFVAEModel(VideoBaseAE):
 
             if end + 1 < t:
                 chunk = chunk[:, :, :-2]
-                result.append(chunk.clone())
+                result.append(chunk)
             else:
-                result.append(chunk.clone())
+                result.append(chunk)
 
         return mint.cat(result, dim=2)
 
@@ -566,6 +580,7 @@ class WFVAEModel(VideoBaseAE):
         subfolder = kwargs.pop("subfolder", None)
         variant = kwargs.pop("variant", None)
         use_safetensors = kwargs.pop("use_safetensors", None)
+        ignore_prefix = kwargs.pop("ignore_prefix", None)
 
         allow_pickle = False
         if use_safetensors is None:
@@ -643,6 +658,19 @@ class WFVAEModel(VideoBaseAE):
             model = cls.from_config(config, **unused_kwargs)
             if state_dict is None:  # edits: only load model_file if state_dict is None
                 state_dict = load_state_dict(model_file, variant=variant)
+            if ignore_prefix is not None:
+                assert len(ignore_prefix) > 0, "the ignore_prefix must not be empty"
+                num_params = len(state_dict)
+                state_dict = dict(
+                    [
+                        (k, v)
+                        for k, v in state_dict.items()
+                        if not any([k.startswith(prefix) for prefix in ignore_prefix])
+                    ]
+                )
+                logger.info(
+                    f"Excluding the parameters with prefix in {ignore_prefix}: exclude {num_params - len(state_dict)} out of {num_params} params"
+                )
             model._convert_deprecated_attention_blocks(state_dict)
 
             model, missing_keys, unexpected_keys, mismatched_keys, error_msgs = cls._load_pretrained_model(

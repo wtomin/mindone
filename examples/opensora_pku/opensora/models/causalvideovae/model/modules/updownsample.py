@@ -37,9 +37,13 @@ class Downsample(nn.Cell):
         if self.with_conv:
             # no asymmetric padding in torch conv, must do it ourselves
             if self.undown:
-                self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad")
+                self.conv = nn.Conv2d(
+                    in_channels, out_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad", has_bias=True
+                )
             else:
-                self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=0, pad_mode="pad")
+                self.conv = nn.Conv2d(
+                    in_channels, out_channels, kernel_size=3, stride=2, padding=0, pad_mode="pad", has_bias=True
+                )
 
     @video_to_image
     def construct(self, x):
