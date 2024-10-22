@@ -211,11 +211,22 @@ class HaarWaveletTransform2D(nn.Cell):
 class InverseHaarWaveletTransform2D(nn.Cell):
     def __init__(self):
         super().__init__()
-        self.aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
-        self.ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
-        self.da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
-        self.dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
-        self.conv_transpose2d = ops.Conv2DTranspose(1, kernel_size=2, stride=2)
+        aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
+        ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
+        da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
+        dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
+        self.aa = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
+        self.ad = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
+        self.da = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
+        self.dd = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
+        self.aa.conv.weight.set_data(aa)
+        self.aa.requires_grad = False
+        self.ad.conv.weight.set_data(ad)
+        self.ad.requires_grad = False
+        self.da.conv.weight.set_data(da)
+        self.da.requires_grad = False
+        self.dd.conv.weight.set_data(dd)
+        self.dd.requires_grad = False
 
     @video_to_image
     def construct(self, coeffs):
@@ -224,9 +235,9 @@ class InverseHaarWaveletTransform2D(nn.Cell):
         height = height_half * 2
         width = width_half * 2
 
-        low_low = self.conv_transpose2d(low_low.reshape(b * c, 1, height_half, width_half), self.aa)
-        low_high = self.conv_transpose2d(low_high.reshape(b * c, 1, height_half, width_half), self.ad)
-        high_low = self.conv_transpose2d(high_low.reshape(b * c, 1, height_half, width_half), self.da)
-        high_high = self.conv_transpose2d(high_high.reshape(b * c, 1, height_half, width_half), self.dd)
+        low_low = self.aa(low_low.reshape(b * c, 1, height_half, width_half))
+        low_high = self.ad(low_high.reshape(b * c, 1, height_half, width_half))
+        high_low = self.da(high_low.reshape(b * c, 1, height_half, width_half))
+        high_high = self.dd(high_high.reshape(b * c, 1, height_half, width_half))
 
         return (low_low + low_high + high_low + high_high).reshape(b, c, height, width)
