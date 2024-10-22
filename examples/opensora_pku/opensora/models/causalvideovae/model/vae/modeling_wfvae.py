@@ -201,19 +201,19 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels * 4,
                     dropout=dropout,
                     norm_type=norm_type,
-                )
+                ).to_float(dtype)
                 for _ in range(num_resblocks)
             ],
             resolve_str_to_obj(l2_upsample_block)(
                 base_channels * 4, base_channels * 4, t_interpolation=t_interpolation
-            ),
+            ).to_float(ms.float16),
             ResnetBlock3D(
                 in_channels=base_channels * 4,
                 out_channels=base_channels * 4 + energy_flow_hidden_size,
                 dropout=dropout,
                 norm_type=norm_type,
-            ),
-        ).to_float(dtype)
+            ).to_float(dtype),
+        )
         self.up1 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
