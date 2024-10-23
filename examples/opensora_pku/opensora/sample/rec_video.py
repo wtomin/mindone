@@ -33,7 +33,7 @@ from functools import partial
 import cv2
 from albumentations import Compose, Lambda, Resize, ToFloat
 from opensora.dataset.transform import center_crop_th_tw
-from opensora.models import CausalVAEModelWrapper
+from opensora.models.causalvideovae import ae_wrapper
 from opensora.npu_config import npu_config
 from opensora.utils.utils import get_precision
 
@@ -126,7 +126,7 @@ def main(args):
     else:
         state_dict = None
     kwarg = {"state_dict": state_dict, "use_safetensors": True, "dtype": dtype, "ignore_prefix": ["module."]}
-    vae = CausalVAEModelWrapper(args.ae_path, **kwarg)
+    vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
 
     if args.enable_tiling:
         vae.vae.enable_tiling()
@@ -182,6 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--sample_rate", type=int, default=1)
     parser.add_argument("--enable_tiling", action="store_true")
+    parser.add_argument("--tile_overlap_factor", type=float, default=0.25)
     # ms related
     parser.add_argument("--mode", default=1, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
     parser.add_argument(
