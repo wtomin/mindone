@@ -3,7 +3,7 @@ from mindspore import mint
 
 class DiagonalGaussianDistribution(object):
     def __init__(self, parameters, deterministic=False):
-        self.mean, self.logvar = mint.split(parameters, 2, dim=1)
+        self.mean, self.logvar = mint.split(parameters, [parameters.shape[1] // 2, parameters.shape[1] // 2], dim=1)
         self.logvar = mint.clamp(self.logvar, -30.0, 20.0)
         self.deterministic = deterministic
         self.std = mint.exp(0.5 * self.logvar)

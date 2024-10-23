@@ -474,7 +474,7 @@ class WFVAEModel(VideoBaseAE):
             h = self.encoder(coeffs)
             if self.use_quant_layer:
                 h = self.quant_conv(h)
-        posterior_mean, posterior_logvar = mint.split(h, 2, dim=1)
+        posterior_mean, posterior_logvar = mint.split(h, [h.shape[1] // 2, h.shape[1] // 2], dim=1)
         z = self.sample(posterior_mean, posterior_logvar)
 
         return z

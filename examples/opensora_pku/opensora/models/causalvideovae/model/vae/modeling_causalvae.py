@@ -376,7 +376,7 @@ class CausalVAEModel(VideoBaseAE):
         h = self.encoder(x)
         if self.use_quant_layer:
             h = self.quant_conv(h)
-        mean, logvar = mint.split(h, 2, dim=1)
+        mean, logvar = mint.split(h, [h.shape[1] // 2, h.shape[1] // 2], dim=1)
 
         return mean, logvar
 
@@ -467,7 +467,7 @@ class CausalVAEModel(VideoBaseAE):
                 moment = self.tiled_encode2d(chunk_x)
             moments.append(moment)
         moments = mint.cat(moments, dim=2)
-        mean, logvar = mint.split(moments, 2, dim=1)
+        mean, logvar = mint.split(moments, [moments.shape[1] // 2, moments.shape[1] // 2], dim=1)
         return mean, logvar
 
     def decode(self, z):
