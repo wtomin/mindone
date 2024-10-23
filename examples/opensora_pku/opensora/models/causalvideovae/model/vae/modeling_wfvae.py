@@ -5,7 +5,7 @@ from typing import List
 from opensora.npu_config import npu_config
 
 import mindspore as ms
-from mindspore import mint, nn, ops
+from mindspore import mint, nn
 
 from mindone.diffusers import __version__
 from mindone.diffusers.configuration_utils import register_to_config
@@ -417,9 +417,8 @@ class WFVAEModel(VideoBaseAE):
         self.wavelet_tranform = HaarWaveletTransform3D().to_float(dtype)
         self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D()
 
-        self.split = ops.Split(axis=1, output_num=2)
-        self.exp = ops.Exp()
-        self.stdnormal = ops.StandardNormal()
+        self.exp = mint.exp
+        self.stdnormal = mint.normal
 
         self.update_parameters_name()  # update parameter names to solve pname mismatch
 
@@ -475,7 +474,7 @@ class WFVAEModel(VideoBaseAE):
             h = self.encoder(coeffs)
             if self.use_quant_layer:
                 h = self.quant_conv(h)
-        posterior_mean, posterior_logvar = self.split(h)
+        posterior_mean, posterior_logvar = mint.split(h, 2, dim=1)
         z = self.sample(posterior_mean, posterior_logvar)
 
         return z
@@ -537,7 +536,7 @@ class WFVAEModel(VideoBaseAE):
 
     def sample(self, mean, logvar):
         # sample z from latent distribution
-        logvar = ops.clip_by_value(logvar, -30.0, 20.0)
+        logvar = mint.clamp(logvar, -30.0, 20.0)
         std = self.exp(0.5 * logvar)
         z = mean + std * self.stdnormal(mean.shape)
 
@@ -744,7 +743,7 @@ class WFVAEModel(VideoBaseAE):
                 if shape_3d[:2] != shape_2d[:2]:
                     logger.info(key_2d, shape_3d, shape_2d)
                 w = vae2d_sd[key_2d]
-                new_w = ms.ops.zeros(shape_3d, dtype=w.dtype)
+                new_w = mint.zeros(shape_3d, dtype=w.dtype)
                 # tail initialization
                 new_w[:, :, -1, :, :] = w  # cin, cout, t, h, w
 
