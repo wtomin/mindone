@@ -286,6 +286,7 @@ class Spatial2xTime2x3DUpsample(nn.Cell):
         super().__init__()
         self.dtype = dtype
         self.t_interpolation = t_interpolation
+        assert self.t_interpolation == "trilinear", "only support trilinear interpolation now"
         self.conv = CausalConv3d(in_channels, out_channels, kernel_size=3, padding=1)
         self.interpolate = TrilinearInterpolate()
         self.enable_cached = enable_cached
@@ -296,21 +297,21 @@ class Spatial2xTime2x3DUpsample(nn.Cell):
             if self.enable_cached and self.causal_cached is not None:
                 x = mint.cat([self.causal_cached, x], dim=2)
                 self.causal_cached = x[:, :, -2:-1]
-                x = ops.interpolate(x, scale_factor=(2.0, 1.0, 1.0), mode=self.t_interpolation)
+                x = npu_config.run_interpolate(self.interpolate, x, scale_factor=(2.0, 1.0, 1.0))
                 x = x[:, :, 2:]
-                x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
+                x = npu_config.run_interpolate(self.interpolate, x, scale_factor=(1.0, 2.0, 2.0))
             else:
                 if self.enable_cached:
                     self.causal_cached = x[:, :, -1:]
                 x, x_ = x[:, :, :1], x[:, :, 1:]
-                x_ = self.interpolate(x_, scale_factor=(2.0, 1.0, 1.0), mode=self.t_interpolation)
-                x_ = self.interpolate(x_, scale_factor=(1.0, 2.0, 2.0))
-                x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
+                x_ = npu_config.run_interpolate(self.interpolate, x_, scale_factor=(2.0, 1.0, 1.0))
+                x_ = npu_config.run_interpolate(self.interpolate, x_, scale_factor=(1.0, 2.0, 2.0))
+                x = npu_config.run_interpolate(self.interpolate, x, scale_factor=(1.0, 2.0, 2.0))
                 x = mint.cat([x, x_], dim=2)
         else:
             if self.enable_cached:
                 self.causal_cached = x[:, :, -1:]
-            x = self.interpolate(x, scale_factor=(1.0, 2.0, 2.0))
+            x = npu_config.run_interpolate(self.interpolate, x, scale_factor=(1.0, 2.0, 2.0))
         return self.conv(x)
 
 

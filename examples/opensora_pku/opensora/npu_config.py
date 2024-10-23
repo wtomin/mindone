@@ -158,6 +158,16 @@ class NPUConfig:
             x = operator(x, pad, mode)
         return x
 
+    def run_interpolate(self, operator, x, scale_factor=None):
+        if self.on_npu:
+            x_dtype = x.dtype
+            x = x.to(self.replaced_type)
+            x = operator.to_float(self.replaced_type)(x, scale_factor=scale_factor)
+            x = x.to(x_dtype)
+        else:
+            x = operator(x, scale_factor=scale_factor)
+        return x
+
     def run_attention(self, query, key, value, attention_mask, input_layout, head_dim, head_num):
         if self.enable_FA:
             hidden_states = self.ms_flash_attention(
