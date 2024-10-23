@@ -51,15 +51,13 @@ class Downsample(nn.Cell):
             if self.undown:
                 x = self.conv(x)
             else:
-                pad = ((0, 0), (0, 0), (0, 1), (0, 1))
-                # pad = (0, 1, 0, 1)  # (pad_left, pad_right, pad_top, pad_bottom)
-                x = nn.Pad(paddings=pad)(x)
+                pad = (0, 1, 0, 1)
+                x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
                 x = self.conv(x)
         else:
-            x_dtype = x.dtype
-            x = x.to(npu_config.replaced_type)
-            x = mint.nn.AvgPool2d(kernel_size=2, stride=2)(x)  # avgpool does not support bf16, but only fp32 and fp16
-            x = x.to(x_dtype)
+            x = mint.nn.functional.avg_pool2d(
+                x, kernel_size=2, stride=2
+            )  # avgpool does not support bf16, but only fp32 and fp16
         return x
 
 
@@ -94,8 +92,8 @@ class SpatialDownsample2x(nn.Cell):
 
     def construct(self, x):
         # x shape: (b c t h w)
-        # x = ops.pad(x, self.padding, mode="constant", value=0)
-        x = self.pad(x)
+        pad = (0, 1, 0, 1, 0, 0)
+        x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
         x = self.conv(x)
         return x
 
@@ -320,9 +318,9 @@ class Spatial2xTime2x3DDownsample(nn.Cell):
         super().__init__()
         self.dtype = dtype
         self.conv = CausalConv3d(in_channels, out_channels, kernel_size=3, padding=0, stride=2)
-        self.pad = ops.Pad(paddings=((0, 0), (0, 0), (0, 0), (0, 1), (0, 1)))
 
     def construct(self, x):
-        x = self.pad(x)
+        pad = (0, 1, 0, 1, 0, 0)
+        x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
         x = self.conv(x)
         return x
