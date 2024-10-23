@@ -58,7 +58,7 @@ class Downsample(nn.Cell):
         else:
             x_dtype = x.dtype
             x = x.to(npu_config.replaced_type)
-            x = ops.AvgPool(kernel_size=2, stride=2)(x)  # avgpool does not support bf16, but only fp32 and fp16
+            x = mint.nn.AvgPool2d(kernel_size=2, stride=2)(x)  # avgpool does not support bf16, but only fp32 and fp16
             x = x.to(x_dtype)
         return x
 
@@ -159,8 +159,8 @@ class TimeDownsample2x(nn.Cell):
     def construct(self, x):
         first_frame = x[:, :, :1, :, :]
         # first_frame_pad = ops.repeat_interleave(first_frame, self.time_pad, axis=2)
-        first_frame_pad = ops.cat([first_frame] * self.time_pad, axis=2)
-        x = ops.concat((first_frame_pad, x), axis=2)
+        first_frame_pad = mint.cat([first_frame] * self.time_pad, dim=2)
+        x = mint.cat((first_frame_pad, x), dim=2)
 
         if not self.replace_avgpool3d:
             return self.conv(x)
@@ -184,7 +184,7 @@ class TimeUpsample2x(nn.Cell):
                 x, x_ = x[:, :, :1], x[:, :, 1:]
                 # FIXME: ms2.2.10 cannot support trilinear on 910b
                 x_ = ops.interpolate(x_, scale_factor=(2.0, 1.0, 1.0), mode="trilinear")
-                x = ops.concat([x, x_], axis=2)
+                x = mint.cat([x, x_], dim=2)
             else:
                 x = ops.interpolate(x, scale_factor=(2.0, 1.0, 1.0), mode="trilinear")
 
@@ -222,12 +222,12 @@ class TimeDownsampleRes2x(nn.Cell):
         self.mix_factor = ms.Parameter(ms.Tensor([mix_factor]), requires_grad=True)
 
     def construct(self, x):
-        alpha = ops.sigmoid(self.mix_factor)
+        alpha = mint.sigmoid(self.mix_factor)
 
         first_frame = x[:, :, :1, :, :]
         # first_frame_pad = ops.repeat_interleave(first_frame, self.time_pad, axis=2)
-        first_frame_pad = ops.cat([first_frame] * self.time_pad, axis=2)
-        x = ops.concat((first_frame_pad, x), axis=2)
+        first_frame_pad = mint.cat([first_frame] * self.time_pad, dim=2)
+        x = mint.cat((first_frame_pad, x), dim=2)
 
         conv_out = self.conv(x)
 
@@ -258,13 +258,13 @@ class TimeUpsampleRes2x(nn.Cell):
         self.interpolate = TrilinearInterpolate()
 
     def construct(self, x):
-        alpha = ops.sigmoid(self.mix_factor)
+        alpha = mint.sigmoid(self.mix_factor)
         if x.shape[2] > 1:
             x, x_ = x[:, :, :1], x[:, :, 1:]
             ori_dtype = x.dtype
             # FIXME: ms2.2.10 cannot support trilinear on 910b
             x_ = self.interpolate(x_, scale_factor=(2.0, 1.0, 1.0)).to(ori_dtype)
-            x = ops.concat([x, x_], axis=2)
+            x = mint.cat([x, x_], dim=2)
 
         return alpha * x + (1 - alpha) * self.conv(x)
 

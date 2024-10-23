@@ -1,5 +1,5 @@
 import mindspore as ms
-from mindspore import mint, nn
+from mindspore import mint
 
 
 def video_to_image(func):
@@ -28,11 +28,11 @@ def video_to_image(func):
 def nonlinearity(x, upcast=False):
     # swish
     ori_dtype = x.dtype
-    # if upcast:
-    #     return x * (ops.sigmoid(x.astype(ms.float32))).astype(ori_dtype)
-    # else:
-    #     return x * (ops.sigmoid(x))
-    return nn.SiLU()(x.astype(ms.float32) if upcast else x).to(ori_dtype)
+    if upcast:
+        return x * (mint.sigmoid(x.astype(ms.float32))).astype(ori_dtype)
+    else:
+        return x * (mint.sigmoid(x))
+    # return nn.SiLU()(x.astype(ms.float32) if upcast else x).to(ori_dtype)
 
 
 def divisible_by(num, den):

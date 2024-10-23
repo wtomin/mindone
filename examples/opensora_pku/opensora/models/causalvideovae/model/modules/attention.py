@@ -1,7 +1,7 @@
 import logging
 
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn
 
 from .conv import CausalConv3d
 from .normalize import Normalize
@@ -26,8 +26,8 @@ class AttnBlock3D(nn.Cell):
         self.k = CausalConv3d(in_channels, in_channels, kernel_size=1, stride=1)
         self.v = CausalConv3d(in_channels, in_channels, kernel_size=1, stride=1)
         self.proj_out = CausalConv3d(in_channels, in_channels, kernel_size=1, stride=1)
-        self.bmm = ops.BatchMatMul()
-        self.softmax = nn.Softmax(axis=2)
+        self.bmm = mint.bmm
+        self.softmax = mint.nn.Softmax(dim=2)
 
     def construct(self, x):
         h_ = x

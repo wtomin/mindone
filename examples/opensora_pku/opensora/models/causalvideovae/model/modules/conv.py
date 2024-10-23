@@ -6,7 +6,7 @@ try:
 except ImportError:
     npu_config = None
 
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
 
 # from mindspore import mint
 
@@ -33,7 +33,7 @@ class Conv2d(nn.Conv2d):
     def rearrange_in(self, x):
         # b c f h w -> b f c h w
         B, C, F, H, W = x.shape
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
+        x = mint.permute(x, (0, 2, 1, 3, 4))
         # -> (b*f c h w)
         x = ops.reshape(x, (-1, C, H, W))
 
@@ -44,7 +44,7 @@ class Conv2d(nn.Conv2d):
         # (b*f D h w) -> (b f D h w)
         x = ops.reshape(x, (BF // F, F, D, H_, W_))
         # -> (b D f h w)
-        x = ops.transpose(x, (0, 2, 1, 3, 4))
+        x = mint.permute(x, (0, 2, 1, 3, 4))
 
         return x
 
@@ -120,12 +120,12 @@ class CausalConv3d(nn.Cell):
         if self.time_kernel_size - 1 > 0:
             if self.causal_cached is None:
                 first_frame = x[:, :, :1, :, :]
-                first_frame_pad = ops.cat([first_frame] * (self.time_kernel_size - 1), axis=2)
+                first_frame_pad = mint.cat([first_frame] * (self.time_kernel_size - 1), dim=2)
                 # first_frame_pad = x[:, :, :1, :, :].repeat((1, 1, self.time_kernel_size - 1, 1, 1))
             else:
                 first_frame_pad = self.causal_cached
 
-            x = ops.concat((first_frame_pad, x), axis=2)
+            x = mint.cat((first_frame_pad, x), dim=2)
 
         if self.enable_cached and self.time_kernel_size != 1:
             if (self.time_kernel_size - 1) // self.stride[0] != 0:
