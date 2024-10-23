@@ -384,7 +384,7 @@ class CausalVAEModel(VideoBaseAE):
         # sample z from latent distribution
         logvar = mint.clamp(logvar, -30.0, 20.0)
         std = self.exp(0.5 * logvar)
-        z = mean + std * self.stdnormal(mean.shape)
+        z = mean + std * self.stdnormal(size=mean.shape)
 
         return z
 

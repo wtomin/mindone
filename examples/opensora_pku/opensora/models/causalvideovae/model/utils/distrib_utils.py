@@ -13,7 +13,7 @@ class DiagonalGaussianDistribution(object):
             self.var = self.std = mint.zeros_like(self.mean, dtype=self.mean.dtype)
 
     def sample(self):
-        x = self.mean + self.std * self.stdnormal(self.mean.shape)
+        x = self.mean + self.std * self.stdnormal(size=self.mean.shape)
         return x
 
     def mode(self):
