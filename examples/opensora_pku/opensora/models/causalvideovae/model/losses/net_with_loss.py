@@ -1,5 +1,5 @@
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
 
 from .lpips import LPIPS
 
@@ -66,9 +66,9 @@ class GeneratorWithLoss(nn.Cell):
         mean = mean.astype(ms.float32)
         logvar = logvar.astype(ms.float32)
 
-        var = ops.exp(logvar)
-        kl_loss = 0.5 * ops.sum(
-            ops.pow(mean, 2) + var - 1.0 - logvar,
+        var = mint.exp(logvar)
+        kl_loss = 0.5 * mint.sum(
+            mint.pow(mean, 2) + var - 1.0 - logvar,
             dim=[1, 2, 3],
         )
         return kl_loss
@@ -91,7 +91,7 @@ class GeneratorWithLoss(nn.Cell):
             p_loss = self.perceptual_loss(x, recons)
             rec_loss = rec_loss + self.perceptual_weight * p_loss
 
-        nll_loss = rec_loss / ops.exp(self.logvar) + self.logvar
+        nll_loss = rec_loss / mint.exp(self.logvar) + self.logvar
         if weights is not None:
             weighted_nll_loss = weights * nll_loss
             mean_weighted_nll_loss = weighted_nll_loss.sum() / bs
@@ -116,7 +116,7 @@ class GeneratorWithLoss(nn.Cell):
                 if cond is None:
                     logits_fake = self.discriminator(recons)
                 else:
-                    logits_fake = self.discriminator(ops.concat((recons, cond), dim=1))
+                    logits_fake = self.discriminator(mint.cat((recons, cond), dim=1))
                 g_loss = -ops.reduce_mean(logits_fake)
                 # TODO: do adaptive weighting based on grad
                 # d_weight = self.calculate_adaptive_weight(mean_nll_loss, g_loss, last_layer=last_layer)
@@ -192,17 +192,17 @@ class DiscriminatorWithLoss(nn.Cell):
         if disc_loss == "hinge":
             self.disc_loss = self.hinge_loss
         else:
-            self.softplus = ops.Softplus()
+            self.softplus = mint.nn.functional.softplus
             self.disc_loss = self.vanilla_d_loss
 
     def hinge_loss(self, logits_real, logits_fake):
-        loss_real = ops.mean(ops.relu(1.0 - logits_real))
-        loss_fake = ops.mean(ops.relu(1.0 + logits_fake))
+        loss_real = mint.mean(mint.nn.functional.relu(1.0 - logits_real))
+        loss_fake = mint.mean(mint.nn.functional.relu(1.0 + logits_fake))
         d_loss = 0.5 * (loss_real + loss_fake)
         return d_loss
 
     def vanilla_d_loss(self, logits_real, logits_fake):
-        d_loss = 0.5 * (ops.mean(self.softplus(-logits_real)) + ops.mean(self.softplus(logits_fake)))
+        d_loss = 0.5 * (mint.mean(self.softplus(-logits_real)) + mint.mean(self.softplus(logits_fake)))
         return d_loss
 
     def construct(self, x: ms.Tensor, global_step=-1, cond=None):
@@ -227,8 +227,8 @@ class DiscriminatorWithLoss(nn.Cell):
             logits_real = self.discriminator(x)
             logits_fake = self.discriminator(recons)
         else:
-            logits_real = self.discriminator(ops.concat((x, cond), dim=1))
-            logits_fake = self.discriminator(ops.concat((recons, cond), dim=1))
+            logits_real = self.discriminator(mint.cat((x, cond), dim=1))
+            logits_fake = self.discriminator(mint.cat((recons, cond), dim=1))
 
         if global_step >= self.disc_start:
             disc_factor = self.disc_factor
