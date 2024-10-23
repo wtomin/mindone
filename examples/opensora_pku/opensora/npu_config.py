@@ -230,9 +230,9 @@ class NPUConfig:
                 head_dim_padding = self.flash_attn_valid_head_dims[minimum_larger_index] - head_dim
         # Head dimension is checked in Attention.set_use_memory_efficient_attention_xformers. We maybe pad on head_dim.
         if head_dim_padding > 0:
-            query_padded = ops.pad(query, (0, head_dim_padding), mode="constant", value=0.0)
-            key_padded = ops.pad(key, (0, head_dim_padding), mode="constant", value=0.0)
-            value_padded = ops.pad(value, (0, head_dim_padding), mode="constant", value=0.0)
+            query_padded = mint.nn.functional.pad(query, (0, head_dim_padding), mode="constant", value=0.0)
+            key_padded = mint.nn.functional.pad(key, (0, head_dim_padding), mode="constant", value=0.0)
+            value_padded = mint.nn.functional.pad(value, (0, head_dim_padding), mode="constant", value=0.0)
         else:
             query_padded, key_padded, value_padded = query, key, value
         flash_attn = ops.operations.nn_ops.FlashAttentionScore(
@@ -307,10 +307,10 @@ class NPUConfig:
         value = trans_tensor_shape(value, input_layout, head_num)
 
         attn_weight = query @ key.swapaxes(-2, -1) * scale
-        attn_bias = ops.zeros_like(attn_weight, dtype=query.dtype)
+        attn_bias = mint.zeros_like(attn_weight, dtype=query.dtype)
         if is_causal:
             assert attention_mask is None
-            temp_mask = ops.zeros_like(attn_weight, dtype=ms.bool).tril(diagonal=0)
+            temp_mask = mint.zeros_like(attn_weight, dtype=ms.bool).tril(diagonal=0)
             attn_bias.masked_fill(~temp_mask, npu_config.inf_float)
             attn_bias.to(query.dtype)
 
@@ -320,8 +320,8 @@ class NPUConfig:
             ) and attention_mask.dtype != ms.bool, "attention_mask must not be bool type when use this function"
 
         attn_weight += attn_bias
-        attn_weight = ops.softmax(attn_weight, axis=-1)
-        attn_weight = ops.dropout(attn_weight, p=dropout_p, train=True)
+        attn_weight = mint.nn.functional.softmax(attn_weight, dim=-1)
+        attn_weight = mint.nn.functional.dropout(attn_weight, p=dropout_p, training=True)
         output = attn_weight @ value
         if input_layout == "BSH":
             output = output.swapaxes(1, 2).view(output.shape[0], -1, head_num * output.shape[-1])
