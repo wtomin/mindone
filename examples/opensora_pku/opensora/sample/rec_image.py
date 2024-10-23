@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("--tile_sample_min_size", type=int, default=256)
     parser.add_argument("--enable_tiling", action="store_true")
     # ms related
-    parser.add_argument("--mode", default=0, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
+    parser.add_argument("--mode", default=1, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
     parser.add_argument(
         "--precision",
         default="bf16",
