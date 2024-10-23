@@ -47,7 +47,7 @@ def preprocess(image, height: int = 128, width: int = 128):
 
     image = video_transform(image=image)["image"]  # (h w c)
     # (h w c) -> (c h w) -> (c t h w)
-    image = np.transpose(image, (2, 1, 0))[:, None, :, :]
+    image = np.transpose(image, (2, 0, 1))[:, None, :, :]
     return image
 
 

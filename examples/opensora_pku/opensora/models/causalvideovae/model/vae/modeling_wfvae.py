@@ -421,6 +421,8 @@ class WFVAEModel(VideoBaseAE):
         self.exp = ops.Exp()
         self.stdnormal = ops.StandardNormal()
 
+        self.update_parameters_name()  # update parameter names to solve pname mismatch
+
     def get_encoder(self):
         if self.use_quant_layer:
             return [self.quant_conv, self.encoder]
