@@ -21,12 +21,9 @@ from decord import VideoReader, cpu
 from PIL import Image
 
 import mindspore as ms
-from mindspore import nn
 
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
-from mindone.utils.amp import auto_mixed_precision
-from mindone.utils.config import str2bool
 from mindone.utils.logger import set_logger
 from mindone.visualize.videos import save_videos
 
@@ -36,9 +33,8 @@ from functools import partial
 import cv2
 from albumentations import Compose, Lambda, Resize, ToFloat
 from opensora.dataset.transform import center_crop_th_tw
-from opensora.models import CausalVAEModelWrapper
-from opensora.models.causalvideovae.model.modules.updownsample import TrilinearInterpolate
-from opensora.utils.ms_utils import init_env
+from opensora.models.causalvideovae import ae_wrapper
+from opensora.npu_config import npu_config
 from opensora.utils.utils import get_precision
 
 logger = logging.getLogger(__name__)
@@ -117,14 +113,8 @@ def transform_to_rgb(x, rescale_to_uint8=True):
 
 
 def main(args):
-    init_env(
-        mode=args.mode,
-        device_target=args.device,
-        precision_mode=args.precision_mode,
-        jit_level=args.jit_level,
-        jit_syntax_level=args.jit_syntax_level,
-    )
-
+    npu_config.set_npu_env(args)
+    dtype = get_precision(args.precision)
     set_logger(name="", output_dir=args.output_path, rank=0)
     if args.ms_checkpoint is not None and os.path.exists(args.ms_checkpoint):
         logger.info(f"Run inference with MindSpore checkpoint {args.ms_checkpoint}")
@@ -135,39 +125,19 @@ def main(args):
         )
     else:
         state_dict = None
-    kwarg = {"state_dict": state_dict, "use_safetensors": True}
-    vae = CausalVAEModelWrapper(args.ae_path, **kwarg)
+    kwarg = {"state_dict": state_dict, "use_safetensors": True, "dtype": dtype, "ignore_prefix": ["module."]}
+    vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
 
     if args.enable_tiling:
         vae.vae.enable_tiling()
         vae.vae.tile_overlap_factor = args.tile_overlap_factor
-        if args.save_memory:
-            vae.vae.tile_sample_min_size = args.tile_sample_min_size
-            vae.vae.tile_latent_min_size = 32
-            vae.vae.tile_sample_min_size_t = 29
-            vae.vae.tile_latent_min_size_t = 8
 
     vae.set_train(False)
     for param in vae.get_parameters():
         param.requires_grad = False
-    if args.precision in ["fp16", "bf16"]:
-        amp_level = "O2"
-        dtype = get_precision(args.precision)
-        if dtype == ms.float16:
-            custom_fp32_cells = [nn.GroupNorm] if args.vae_keep_gn_fp32 else []
-        else:
-            custom_fp32_cells = [nn.AvgPool2d, TrilinearInterpolate]
-        vae = auto_mixed_precision(vae, amp_level, dtype, custom_fp32_cells=custom_fp32_cells)
-        logger.info(
-            f"Set mixed precision to {amp_level} with dtype={args.precision}, custom fp32_cells {custom_fp32_cells}"
-        )
-    elif args.precision == "fp32":
-        amp_level = "O0"
-    else:
-        raise ValueError(f"Unsupported precision {args.precision}")
 
     x_vae = preprocess(read_video(args.video_path, args.num_frames, args.sample_rate), args.height, args.width)
-    dtype = get_precision(args.precision)
+
     x_vae = ms.Tensor(x_vae, dtype).unsqueeze(0)  # b c t h w
     latents = vae.encode(x_vae)
     latents = latents.to(dtype)
@@ -203,6 +173,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--video_path", type=str, default="")
     parser.add_argument("--rec_path", type=str, default="")
+    parser.add_argument("--ae", type=str, default="")
     parser.add_argument("--ae_path", type=str, default="results/pretrained")
     parser.add_argument("--ms_checkpoint", type=str, default=None)
     parser.add_argument("--fps", type=int, default=30)
@@ -210,12 +181,10 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=336)
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--sample_rate", type=int, default=1)
-    parser.add_argument("--tile_overlap_factor", type=float, default=0.25)
-    parser.add_argument("--tile_sample_min_size", type=int, default=256)
     parser.add_argument("--enable_tiling", action="store_true")
-    parser.add_argument("--save_memory", action="store_true")
+    parser.add_argument("--tile_overlap_factor", type=float, default=0.25)
     # ms related
-    parser.add_argument("--mode", default=0, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
+    parser.add_argument("--mode", default=1, type=int, help="Specify the mode: 0 for graph mode, 1 for pynative mode")
     parser.add_argument(
         "--precision",
         default="bf16",
@@ -224,12 +193,7 @@ if __name__ == "__main__":
         help="mixed precision type, if fp32, all layer precision is float32 (amp_level=O0),  \
                 if bf16 or fp16, amp_level==O2, part of layers will compute in bf16 or fp16 such as matmul, dense, conv.",
     )
-    parser.add_argument(
-        "--vae_keep_gn_fp32",
-        default=False,
-        type=str2bool,
-        help="whether keep GroupNorm in fp32. Defaults to False in inference, better to set to True when training vae",
-    )
+
     parser.add_argument("--device", type=str, default="Ascend", help="Ascend or GPU")
     parser.add_argument(
         "--precision_mode",
