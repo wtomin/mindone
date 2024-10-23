@@ -1,7 +1,7 @@
 import math
 import os
 
-from mindspore import context, export, load, nn, ops
+from mindspore import context, export, load, mint, nn, ops
 
 try:
     import torch
@@ -52,7 +52,7 @@ def get_feats(videos, detector, bs=10):
             [
                 feats,
                 detector(
-                    ops.stack([preprocess_single(video) for video in videos[i * bs : (i + 1) * bs]]), **detector_kwargs
+                    mint.stack([preprocess_single(video) for video in videos[i * bs : (i + 1) * bs]]), **detector_kwargs
                 ).asnumpy(),
             ]
         )

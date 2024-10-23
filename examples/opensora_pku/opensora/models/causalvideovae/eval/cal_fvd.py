@@ -1,6 +1,6 @@
 from tqdm import tqdm
 
-from mindspore import ops
+from mindspore import mint
 
 
 def trans(x):
@@ -77,8 +77,8 @@ def main():
     VIDEO_LENGTH = 50
     CHANNEL = 3
     SIZE = 64
-    videos1 = ops.zeros(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE)
-    videos2 = ops.ones(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE)
+    videos1 = mint.zeros(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE)
+    videos2 = mint.ones(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE)
 
     import json
 

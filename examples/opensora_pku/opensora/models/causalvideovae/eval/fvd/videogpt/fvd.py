@@ -80,7 +80,7 @@ def preprocess(videos, target_resolution=224):
 
     b, t, h, w, c = videos.shape
     videos = Tensor(videos)
-    videos = ops.stack([preprocess_single(video, target_resolution) for video in videos])
+    videos = mint.stack([preprocess_single(video, target_resolution) for video in videos])
     return videos * 2  # [-0.5, 0.5] -> [-1, 1]
 
 
@@ -93,15 +93,15 @@ def get_fvd_logits(videos, i3d, bs=10):
 # https://github.com/tensorflow/gan/blob/de4b8da3853058ea380a6152bd3bd454013bf619/tensorflow_gan/python/eval/classifier_metrics.py#L161
 def _symmetric_matrix_square_root(mat, eps=1e-10):
     s, u, v = ops.svd(mat)
-    si = ops.where(s < eps, s, ops.sqrt(s))
-    return ops.matmul(ops.matmul(u, ops.diag(si)), v.t())
+    si = mint.where(s < eps, s, mint.sqrt(s))
+    return mint.matmul(mint.matmul(u, ops.diag(si)), v.t())
 
 
 # https://github.com/tensorflow/gan/blob/de4b8da3853058ea380a6152bd3bd454013bf619/tensorflow_gan/python/eval/classifier_metrics.py#L400
 def trace_sqrt_product(sigma, sigma_v):
     sqrt_sigma = _symmetric_matrix_square_root(sigma)
-    sqrt_a_sigmav_a = ops.matmul(sqrt_sigma, ops.matmul(sigma_v, sqrt_sigma))
-    return ops.trace(_symmetric_matrix_square_root(sqrt_a_sigmav_a))
+    sqrt_a_sigmav_a = mint.matmul(sqrt_sigma, mint.matmul(sigma_v, sqrt_sigma))
+    return mint.trace(_symmetric_matrix_square_root(sqrt_a_sigmav_a))
 
 
 # https://discuss.pytorch.org/t/covariance-and-gradient-support/16217/2
@@ -146,7 +146,7 @@ def frechet_distance(x1, x2):
     mean = mint.sum((m - m_w) ** 2)
     if x1.shape[0] > 1:
         sqrt_trace_component = trace_sqrt_product(sigma, sigma_w)
-        trace = ops.trace(sigma + sigma_w) - 2.0 * sqrt_trace_component
+        trace = mint.trace(sigma + sigma_w) - 2.0 * sqrt_trace_component
         fd = trace + mean
     else:
         fd = np.real(mean)

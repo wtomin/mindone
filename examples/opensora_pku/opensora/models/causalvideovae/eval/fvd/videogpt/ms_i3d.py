@@ -1,5 +1,5 @@
 # Original code from https://github.com/piergiaj/pytorch-i3d
-from mindspore import mint, nn, ops
+from mindspore import mint, nn
 
 
 class MaxPool3dSamePadding(nn.MaxPool3d):
@@ -25,7 +25,7 @@ class MaxPool3dSamePadding(nn.MaxPool3d):
         pad_w_b = pad_w - pad_w_f
 
         pad = (pad_w_f, pad_w_b, pad_h_f, pad_h_b, pad_t_f, pad_t_b)
-        x = ops.pad(x, pad)
+        x = mint.nn.functional.pad(x, pad)
         return super(MaxPool3dSamePadding, self).construct(x)
 
 
@@ -37,7 +37,7 @@ class Unit3D(nn.Cell):
         kernel_shape=(1, 1, 1),
         stride=(1, 1, 1),
         padding=0,
-        activation_fn=ops.relu,
+        activation_fn=mint.nn.functional.relu,
         use_batch_norm=True,
         use_bias=False,
         name="unit_3d",
@@ -87,7 +87,7 @@ class Unit3D(nn.Cell):
         pad_w_b = pad_w - pad_w_f
 
         pad = (pad_w_f, pad_w_b, pad_h_f, pad_h_b, pad_t_f, pad_t_b)
-        x = ops.pad(x, pad)
+        x = mint.nn.functional.pad(x, pad)
 
         x = self.conv3d(x)
         if self._use_batch_norm:
