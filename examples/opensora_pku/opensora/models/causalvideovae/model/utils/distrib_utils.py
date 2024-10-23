@@ -1,16 +1,16 @@
-import mindspore.ops as ops
+from mindspore import mint
 
 
 class DiagonalGaussianDistribution(object):
     def __init__(self, parameters, deterministic=False):
-        self.mean, self.logvar = ops.Split(axis=1, output_num=2)(parameters)
-        self.logvar = ops.clip_by_value(self.logvar, -30.0, 20.0)
+        self.mean, self.logvar = mint.split(parameters, 2, dim=1)
+        self.logvar = mint.clamp(self.logvar, -30.0, 20.0)
         self.deterministic = deterministic
-        self.std = ops.exp(0.5 * self.logvar)
-        self.var = ops.exp(self.logvar)
-        self.stdnormal = ops.StandardNormal()
+        self.std = mint.exp(0.5 * self.logvar)
+        self.var = mint.exp(self.logvar)
+        self.stdnormal = mint.normal
         if self.deterministic:
-            self.var = self.std = ops.zeros_like(self.mean, dtype=self.mean.dtype)
+            self.var = self.std = mint.zeros_like(self.mean, dtype=self.mean.dtype)
 
     def sample(self):
         x = self.mean + self.std * self.stdnormal(self.mean.shape)
