@@ -38,7 +38,7 @@ class TestWaveletTransforms(unittest.TestCase):
         input_shapes = {
             "HaarWaveletTransform2D": (1, 1, 6, 6),  # Example shape for 2D
             "HaarWaveletTransform3D": (1, 1, 6, 6, 6),  # Example shape for 3D
-            "InverseHaarWaveletTransform3D": (1, 1, 6, 6, 6),  # Example shape for 3D
+            "InverseHaarWaveletTransform3D": (1, 8, 6, 6, 6),  # Example shape for 3D
             "InverseHaarWaveletTransform2D": (1, 1, 6, 6),  # Example shape for 2D
         }
         shape = input_shapes[module_name]
@@ -56,7 +56,7 @@ class TestWaveletTransforms(unittest.TestCase):
 
                 abs_diff = np.abs(output_torch.numpy() - output_mindspore.asnumpy())
                 print(f"Mean Absolute Difference for {module_name}: {abs_diff.mean()}")
-                print(f"relative abs difference for {module_name}: {np.mean(abs_diff/(output_torch+1e-6))}")
+                print(f"Relative Abs Difference for {module_name}: {np.mean(abs_diff/(output_torch.numpy()+1e-6))}")
 
                 self.assertTrue(
                     np.allclose(output_torch.numpy(), output_mindspore.asnumpy(), atol=1e-5),
