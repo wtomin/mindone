@@ -21,6 +21,9 @@ from tests.torch_wavelet import InverseHaarWaveletTransform2D as InverseHaarWave
 from tests.torch_wavelet import InverseHaarWaveletTransform3D as InverseHaarWaveletTransform3D_torch
 
 sys.path.append(".")
+import mindspore as ms
+
+dtype = ms.float16
 
 
 class TestWaveletTransforms(unittest.TestCase):
@@ -52,7 +55,7 @@ class TestWaveletTransforms(unittest.TestCase):
                 module_ms, module_torch = module
 
                 output_torch = module_torch(x_torch)
-                output_mindspore = module_ms(x_mindspore)
+                output_mindspore = module_ms.to_float(dtype)(x_mindspore)
 
                 abs_diff = np.abs(output_torch.numpy() - output_mindspore.asnumpy())
                 print(f"Mean Absolute Difference for {module_name}: {abs_diff.mean()}")
