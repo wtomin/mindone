@@ -30,20 +30,21 @@ class Upsample(nn.Cell):
 
 
 class Downsample(nn.Cell):
-    def __init__(self, in_channels, out_channels, undown=False):
+    def __init__(self, in_channels, out_channels, undown=False, dtype=ms.float32):
         super().__init__()
         self.with_conv = True
         self.undown = undown
+        self.dtype = dtype
         if self.with_conv:
             # no asymmetric padding in torch conv, must do it ourselves
             if self.undown:
                 self.conv = nn.Conv2d(
                     in_channels, out_channels, kernel_size=3, stride=1, padding=1, pad_mode="pad", has_bias=True
-                )
+                ).to_float(self.dtype)
             else:
                 self.conv = nn.Conv2d(
                     in_channels, out_channels, kernel_size=3, stride=2, padding=0, pad_mode="pad", has_bias=True
-                )
+                ).to_float(self.dtype)
 
     @video_to_image
     def construct(self, x):
@@ -55,8 +56,8 @@ class Downsample(nn.Cell):
                 x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
                 x = self.conv(x)
         else:
-            x = mint.nn.functional.avg_pool2d(
-                x, kernel_size=2, stride=2
+            x = npu_config.run_pool_2d(
+                mint.nn.functional.avg_pool2d, kernel_size=2, stride=2
             )  # avgpool does not support bf16, but only fp32 and fp16
         return x
 

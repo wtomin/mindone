@@ -145,8 +145,15 @@ class NPUConfig:
     def run_conv3d(self, operator, x, out_dtype):
         return self._run(operator, x, self.conv_dtype, out_dtype)
 
-    def run_pool_2d(self, operator, x):
-        return self._run(operator, x, self.replaced_type)
+    def run_pool_2d(self, operator, x, kernel_size, stride):
+        if self.on_npu:
+            x_dtype = x.dtype
+            x = x.to(self.replaced_type)
+            x = operator(x, kernel_size=kernel_size, stride=stride)
+            x = x.to(x_dtype)
+        else:
+            x = operator(x, kernel_size=kernel_size, stride=stride)
+        return x
 
     def run_pad_2d(self, operator, x, pad, mode="constant"):
         if self.on_npu:
@@ -162,7 +169,7 @@ class NPUConfig:
         if self.on_npu:
             x_dtype = x.dtype
             x = x.to(self.replaced_type)
-            x = operator.to_float(self.replaced_type)(x, scale_factor=scale_factor)
+            x = operator(x, scale_factor=scale_factor)
             x = x.to(x_dtype)
         else:
             x = operator(x, scale_factor=scale_factor)
