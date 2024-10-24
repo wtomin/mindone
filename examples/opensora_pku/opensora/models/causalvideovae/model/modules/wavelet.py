@@ -4,6 +4,11 @@ from mindspore import Tensor, mint, nn, ops
 from ..modules import CausalConv3d
 from ..modules.ops import video_to_image
 
+try:
+    from opensora.npu_config import npu_config
+except ImportError:
+    npu_config = None
+
 
 class HaarWaveletTransform3D(nn.Cell):
     def __init__(self, *args, **kwargs) -> None:
@@ -107,6 +112,19 @@ class HaarWaveletTransform3D(nn.Cell):
         return output
 
 
+class Conv3DTranspose(nn.Cell):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.conv_transpose3d = ops.Conv3DTranspose(*args, **kwargs)
+
+    def construct(self, input, weight):
+        x_dtype = input.dtype
+        if input.dtype == ms.float32:
+            input = input.to(npu_config.conv_dtype)
+            weight = weight.to(npu_config.conv_dtype)
+        return self.conv_transpose3d(input, weight).to(x_dtype)
+
+
 class InverseHaarWaveletTransform3D(nn.Cell):
     def __init__(self, enable_cached=False, dtype=ms.float16, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -124,7 +142,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
         self.gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
         self.enable_cached = enable_cached
         self.causal_cached = None
-        self.conv_transpose3d = ops.Conv3DTranspose(1, 1, kernel_size=2, stride=2)
+        self.conv_transpose3d = Conv3DTranspose(1, 1, kernel_size=2, stride=2)
 
     def construct(self, coeffs):
         assert coeffs.ndim == 5
