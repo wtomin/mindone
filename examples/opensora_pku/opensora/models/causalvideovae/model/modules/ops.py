@@ -8,7 +8,7 @@ def video_to_image(func):
             b, c, t, h, w = x.shape
             if True:
                 # b c t h w -> (b t) c h w
-                x = x.swapaxes(0, 1).reshape(-1, c, h, w)  # (b*t, c, h, w)
+                x = x.swapaxes(1, 2).reshape(-1, c, h, w)  # (b*t, c, h, w)
                 x = func(self, x, *args, **kwargs)
                 x = x.reshape(x.shape[0] // t, t, x.shape[1], x.shape[2], x.shape[3])  # (b, t, c, h, w)
                 x = x.transpose(0, 2, 1, 3, 4)  # (b, c, t, h, w)
