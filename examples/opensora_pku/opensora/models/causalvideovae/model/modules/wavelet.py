@@ -112,25 +112,16 @@ class HaarWaveletTransform3D(nn.Cell):
         return output
 
 
-class Conv3DTranspose(nn.Cell):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.conv_transpose3d = ops.Conv3DTranspose(*args, **kwargs)
-
-    def construct(self, input, weight):
-        x_dtype = input.dtype
-        if input.dtype == ms.float32:
-            input = input.to(npu_config.conv_dtype)
-            weight = weight.to(npu_config.conv_dtype)
-        return self.conv_transpose3d(input, weight).to(x_dtype)
-
-
 class InverseHaarWaveletTransform3D(nn.Cell):
     def __init__(self, enable_cached=False, dtype=ms.float16, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.dtype = dtype
         assert self.dtype in [ms.float32, ms.float16], "Currently data type only support float16 and float32."
+        if self.dtype == ms.bfloat16:
+            self.dtype = ms.float16
+            dtype = ms.float16
+            print("conv3d transpose layer is forced to fp16")
 
         self.h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
         self.g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
@@ -142,7 +133,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
         self.gh_v = Tensor([[[1, -1], [-1, 1]], [[-1, 1], [1, -1]]], dtype=dtype).view(1, 1, 2, 2, 2) * 0.3536
         self.enable_cached = enable_cached
         self.causal_cached = None
-        self.conv_transpose3d = Conv3DTranspose(1, 1, kernel_size=2, stride=2)
+        self.conv_transpose3d = ops.Conv3DTranspose(1, 1, kernel_size=2, stride=2)
 
     def construct(self, coeffs):
         assert coeffs.ndim == 5
@@ -207,36 +198,42 @@ class InverseHaarWaveletTransform3D(nn.Cell):
 
 
 class HaarWaveletTransform2D(nn.Cell):
-    def __init__(self):
+    def __init__(self, dtype=ms.float32):
         super().__init__()
-        self.aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
-        self.ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
-        self.da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
-        self.dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
+        self.dtype = dtype
+        self.aa = Tensor([[1, 1], [1, 1]], dtype=dtype).view(1, 1, 2, 2) / 2
+        self.ad = Tensor([[1, 1], [-1, -1]], dtype=dtype).view(1, 1, 2, 2) / 2
+        self.da = Tensor([[1, -1], [1, -1]], dtype=dtype).view(1, 1, 2, 2) / 2
+        self.dd = Tensor([[1, -1], [-1, 1]], dtype=dtype).view(1, 1, 2, 2) / 2
 
     @video_to_image
     def construct(self, x):
         b, c, h, w = x.shape
         x = x.reshape(b * c, 1, h, w)
+        x_dtype = x.dtype
+        if x.dtype != self.dtype:
+            x = x.to(self.dtype)
+
         low_low = ops.conv2d(x, self.aa, stride=2).reshape(b, c, h // 2, w // 2)
         low_high = ops.conv2d(x, self.ad, stride=2).reshape(b, c, h // 2, w // 2)
         high_low = ops.conv2d(x, self.da, stride=2).reshape(b, c, h // 2, w // 2)
         high_high = ops.conv2d(x, self.dd, stride=2).reshape(b, c, h // 2, w // 2)
         coeffs = mint.cat([low_low, low_high, high_low, high_high], dim=1)
-        return coeffs
+        return coeffs.to(x_dtype)
 
 
 class InverseHaarWaveletTransform2D(nn.Cell):
-    def __init__(self):
+    def __init__(self, dtype=ms.float32):
         super().__init__()
         aa = Tensor([[1, 1], [1, 1]]).view(1, 1, 2, 2) / 2
         ad = Tensor([[1, 1], [-1, -1]]).view(1, 1, 2, 2) / 2
         da = Tensor([[1, -1], [1, -1]]).view(1, 1, 2, 2) / 2
         dd = Tensor([[1, -1], [-1, 1]]).view(1, 1, 2, 2) / 2
-        self.aa = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
-        self.ad = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
-        self.da = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
-        self.dd = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False)
+        self.dtype = dtype
+        self.aa = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False).to_float(dtype)
+        self.ad = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False).to_float(dtype)
+        self.da = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False).to_float(dtype)
+        self.dd = nn.Conv2dTranspose(1, 1, kernel_size=2, stride=2, has_bias=False).to_float(dtype)
         self.aa.weight.set_data(aa)
         self.aa.requires_grad = False
         self.ad.weight.set_data(ad)
