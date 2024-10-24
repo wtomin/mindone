@@ -11,8 +11,9 @@ except ImportError:
 
 
 class HaarWaveletTransform3D(nn.Cell):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, dtype=ms.float32) -> None:
+        super().__init__()
+        self.dtype = dtype
         h = Tensor([[[1, 1], [1, 1]], [[1, 1], [1, 1]]]) * 0.3536
         g = Tensor([[[1, -1], [1, -1]], [[1, -1], [1, -1]]]) * 0.3536
         hh = Tensor([[[1, 1], [-1, -1]], [[1, 1], [-1, -1]]]) * 0.3536
@@ -117,7 +118,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
         super().__init__(*args, **kwargs)
 
         self.dtype = dtype
-        assert self.dtype in [ms.float32, ms.float16], "Currently data type only support float16 and float32."
+
         if self.dtype == ms.bfloat16:
             self.dtype = ms.float16
             dtype = ms.float16
