@@ -62,17 +62,6 @@ class Conv2d(nn.Conv2d):
 
 
 class CausalConv3d(nn.Cell):
-    """
-    Temporal padding: Padding with the first frame, by repeating K_t-1 times.
-    Spatial padding: follow standard conv3d, determined by pad mode and padding
-    Ref: opensora plan
-
-    Args:
-        kernel_size: order (T, H, W)
-        stride: order (T, H, W)
-        padding: int, controls the amount of spatial padding applied to the input on both sides
-    """
-
     def __init__(
         self,
         chan_in,
