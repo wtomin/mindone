@@ -58,18 +58,19 @@ class Encoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
                 has_bias=True,
-            ),
+            ).to_float(dtype),
             *[
                 ResnetBlock2D(
                     in_channels=base_channels,
                     out_channels=base_channels,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for _ in range(num_resblocks)
             ],
-            resolve_str_to_obj(l1_dowmsample_block)(in_channels=base_channels, out_channels=base_channels),
-        ).to_float(dtype)
+            resolve_str_to_obj(l1_dowmsample_block)(in_channels=base_channels, out_channels=base_channels, dtype=dtype),
+        )
         self.down2 = nn.SequentialCell(
             Conv2d(
                 base_channels + energy_flow_hidden_size,
@@ -79,18 +80,19 @@ class Encoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
                 has_bias=True,
-            ),
+            ).to_float(dtype),
             *[
                 ResnetBlock3D(
                     in_channels=base_channels * 2,
                     out_channels=base_channels * 2,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for _ in range(num_resblocks)
             ],
-            resolve_str_to_obj(l2_dowmsample_block)(base_channels * 2, base_channels * 2),
-        ).to_float(dtype)
+            resolve_str_to_obj(l2_dowmsample_block)(base_channels * 2, base_channels * 2, dtype=dtype),
+        )
         # Connection
         if l1_dowmsample_block == "Downsample":  # Bad code. For temporal usage.
             l1_channels = 12
@@ -122,24 +124,24 @@ class Encoder(VideoBaseAE):
                 out_channels=base_channels * 4,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
             ResnetBlock3D(
                 in_channels=base_channels * 4,
                 out_channels=base_channels * 4,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
         ]
         if use_attention:
-            mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type))
-        self.mid = nn.SequentialCell(*mid_layers).to_float(dtype)
+            mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type, dtype=dtype))
+        self.mid = nn.SequentialCell(*mid_layers)
         self.norm_out = Normalize(base_channels * 4, norm_type=norm_type)
-        self.conv_out = CausalConv3d(base_channels * 4, latent_dim * 2, kernel_size=3, stride=1, padding=1).to_float(
-            dtype
-        )
+        self.conv_out = CausalConv3d(base_channels * 4, latent_dim * 2, kernel_size=3, stride=1, padding=1)
 
-        self.wavelet_tranform_l1 = resolve_str_to_obj(l1_downsample_wavelet)().to_float(dtype)
-        self.wavelet_tranform_l2 = resolve_str_to_obj(l2_downsample_wavelet)().to_float(dtype)
+        self.wavelet_tranform_l1 = resolve_str_to_obj(l1_downsample_wavelet)(dtype=dtype)
+        self.wavelet_tranform_l2 = resolve_str_to_obj(l2_downsample_wavelet)(dtype=dtype)
 
     def construct(self, coeffs):
         l1_coeffs = coeffs[:, :3]
@@ -187,24 +189,26 @@ class Decoder(VideoBaseAE):
 
         self.energy_flow_hidden_size = energy_flow_hidden_size
 
-        self.conv_in = CausalConv3d(latent_dim, base_channels * 4, kernel_size=3, stride=1, padding=1).to_float(dtype)
+        self.conv_in = CausalConv3d(latent_dim, base_channels * 4, kernel_size=3, stride=1, padding=1)
         mid_layers = [
             ResnetBlock3D(
                 in_channels=base_channels * 4,
                 out_channels=base_channels * 4,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
             ResnetBlock3D(
                 in_channels=base_channels * 4,
                 out_channels=base_channels * 4 + energy_flow_hidden_size,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
         ]
         if use_attention:
-            mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type))
-        self.mid = nn.SequentialCell(*mid_layers).to_float(dtype)
+            mid_layers.insert(1, AttnBlock3DFix(in_channels=base_channels * 4, norm_type=norm_type, dtype=dtype))
+        self.mid = nn.SequentialCell(*mid_layers)
         self.up2 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -212,19 +216,21 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels * 4,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for _ in range(num_resblocks)
             ],
             resolve_str_to_obj(l2_upsample_block)(
-                base_channels * 4, base_channels * 4, t_interpolation=t_interpolation
+                base_channels * 4, base_channels * 4, t_interpolation=t_interpolation, dtype=dtype
             ),
             ResnetBlock3D(
                 in_channels=base_channels * 4,
                 out_channels=base_channels * 4 + energy_flow_hidden_size,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
-        ).to_float(dtype)
+        )
         self.up1 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -232,17 +238,21 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels * 2,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for i in range(num_resblocks)
             ],
-            resolve_str_to_obj(l1_upsample_block)(in_channels=base_channels * 2, out_channels=base_channels * 2),
+            resolve_str_to_obj(l1_upsample_block)(
+                in_channels=base_channels * 2, out_channels=base_channels * 2, dtype=dtype
+            ),
             ResnetBlock3D(
                 in_channels=base_channels * 2,
                 out_channels=base_channels * 2,
                 dropout=dropout,
                 norm_type=norm_type,
+                dtype=dtype,
             ),
-        ).to_float(dtype)
+        )
         self.layer = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -250,10 +260,11 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for i in range(2)
             ],
-        ).to_float(dtype)
+        )
         # Connection
         if l1_upsample_block == "Upsample":  # Bad code. For temporal usage.
             l1_channels = 12
@@ -266,6 +277,7 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for _ in range(connect_res_layer_num)
             ],
@@ -277,8 +289,8 @@ class Decoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
                 has_bias=True,
-            ),
-        ).to_float(dtype)
+            ).to_float(dtype),
+        )
         self.connect_l2 = nn.SequentialCell(
             *[
                 ResnetBlock3D(
@@ -286,6 +298,7 @@ class Decoder(VideoBaseAE):
                     out_channels=base_channels,
                     dropout=dropout,
                     norm_type=norm_type,
+                    dtype=dtype,
                 )
                 for _ in range(connect_res_layer_num)
             ],
@@ -297,8 +310,8 @@ class Decoder(VideoBaseAE):
                 padding=1,
                 pad_mode="pad",
                 has_bias=True,
-            ),
-        ).to_float(dtype)
+            ).to_float(dtype),
+        )
         # Out
         self.norm_out = Normalize(base_channels, norm_type=norm_type)
         self.conv_out = Conv2d(
@@ -311,11 +324,8 @@ class Decoder(VideoBaseAE):
             has_bias=True,
         ).to_float(dtype)
 
-        self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)().to_float(dtype)
-        if l2_upsample_wavelet == "InverseHaarWaveletTransform3D":
-            self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)()
-        else:
-            self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)().to_float(dtype)
+        self.inverse_wavelet_tranform_l1 = resolve_str_to_obj(l1_upsample_wavelet)(dtype=dtype)
+        self.inverse_wavelet_tranform_l2 = resolve_str_to_obj(l2_upsample_wavelet)(dtype=dtype)
 
     def construct(self, z):
         h = self.conv_in(z)
