@@ -119,7 +119,7 @@ class InverseHaarWaveletTransform3D(nn.Cell):
 
         self.dtype = dtype
 
-        if self.dtype == ms.bfloat16:
+        if self.dtype == ms.float32 or self.dtype == ms.bfloat16:
             self.dtype = ms.float16
             dtype = ms.float16
             print("conv3d transpose layer is forced to fp16")
