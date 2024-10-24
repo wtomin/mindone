@@ -61,9 +61,10 @@ class AttnBlock3DFix(nn.Cell):
     Thanks to https://github.com/PKU-YuanGroup/Open-Sora-Plan/pull/172.
     """
 
-    def __init__(self, in_channels, norm_type="groupnorm"):
+    def __init__(self, in_channels, norm_type="groupnorm", dtype=ms.float32):
         super().__init__()
         self.in_channels = in_channels
+        self.dtype = dtype
 
         self.norm = Normalize(in_channels, norm_type=norm_type)
         self.q = CausalConv3d(in_channels, in_channels, kernel_size=1, stride=1)

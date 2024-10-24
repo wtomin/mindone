@@ -23,6 +23,7 @@ class ResnetBlock3D(nn.Cell):
         upcast_sigmoid=False,
     ):
         super().__init__()
+        self.dtype = dtype
         self.in_channels = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
         self.use_conv_shortcut = conv_shortcut
