@@ -55,7 +55,7 @@ class TestWaveletTransforms(unittest.TestCase):
                 module_ms, module_torch = module
 
                 output_torch = module_torch(x_torch)
-                output_mindspore = module_ms.to_float(dtype)(x_mindspore)
+                output_mindspore = module_ms(x_mindspore.to(dtype))
 
                 abs_diff = np.abs(output_torch.numpy() - output_mindspore.asnumpy())
                 print(f"Mean Absolute Difference for {module_name}: {abs_diff.mean()}")
