@@ -75,7 +75,11 @@ def main(args):
         )
     else:
         state_dict = None
-    kwarg = {"state_dict": state_dict, "use_safetensors": True, "dtype": dtype, "ignore_prefix": ["module."]}
+    kwarg = {
+        "state_dict": state_dict,
+        "use_safetensors": True,
+        "dtype": dtype,
+    }
     vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
 
     if args.enable_tiling:

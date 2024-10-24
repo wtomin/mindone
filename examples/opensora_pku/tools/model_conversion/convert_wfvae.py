@@ -7,7 +7,7 @@ from safetensors.torch import load_file, save_file
 
 def load_torch_ckpt(ckpt_file):
     # copied from modeling_wfvae.py init_from_ckpt
-    def init_from_ckpt(self, path, ignore_keys=list()):
+    def init_from_ckpt(path, ignore_keys=list()):
         sd = torch.load(path, map_location="cpu")
         print("init from " + path)
         if "ema_state_dict" in sd and len(sd["ema_state_dict"]) > 0 and os.environ.get("NOT_USE_EMA_MODEL", 0) == 0:
@@ -76,3 +76,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     convert_file(args.src, args.target)
+    print(f"converted checkpoint saved to {args.target}")
