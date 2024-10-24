@@ -7,18 +7,18 @@ import torch
 
 from mindspore import Tensor
 
-from .torch_wavelet import HaarWaveletTransform2D as HaarWaveletTransform2D_torch
-from .torch_wavelet import HaarWaveletTransform3D as HaarWaveletTransform3D_torch
-from .torch_wavelet import InverseHaarWaveletTransform2D as InverseHaarWaveletTransform2D_torch
-from .torch_wavelet import InverseHaarWaveletTransform3D as InverseHaarWaveletTransform3D_torch
-
 sys.path.insert(0, os.path.abspath("./"))
+sys.path.insert(0, os.path.abspath("../../"))
 from opensora.models.causalvideovae.model.modules.wavelet import (
     HaarWaveletTransform2D,
     HaarWaveletTransform3D,
     InverseHaarWaveletTransform2D,
     InverseHaarWaveletTransform3D,
 )
+from tests.torch_wavelet import HaarWaveletTransform2D as HaarWaveletTransform2D_torch
+from tests.torch_wavelet import HaarWaveletTransform3D as HaarWaveletTransform3D_torch
+from tests.torch_wavelet import InverseHaarWaveletTransform2D as InverseHaarWaveletTransform2D_torch
+from tests.torch_wavelet import InverseHaarWaveletTransform3D as InverseHaarWaveletTransform3D_torch
 
 sys.path.append(".")
 
@@ -49,9 +49,14 @@ class TestWaveletTransforms(unittest.TestCase):
             with self.subTest(module=module_name):
                 x_torch = self.generate_input(module_name)
                 x_mindspore = Tensor(x_torch.numpy())
+                module_ms, module_torch = module
 
-                output_torch = module(x_torch)
-                output_mindspore = module(x_mindspore)
+                output_torch = module_torch(x_torch)
+                output_mindspore = module_ms(x_mindspore)
+
+                abs_diff = np.abs(output_torch.numpy() - output_mindspore.asnumpy())
+                print(f"Mean Absolute Difference for {module_name}: {abs_diff.mean()}")
+                print(f"relative abs difference for {module_name}: {np.mean(abs_diff/(output_torch+1e-6))}")
 
                 self.assertTrue(
                     np.allclose(output_torch.numpy(), output_mindspore.asnumpy(), atol=1e-5),
