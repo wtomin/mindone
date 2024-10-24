@@ -414,8 +414,6 @@ class WFVAEModel(VideoBaseAE):
             [self.decoder.up2[-2:], self.decoder.up1, self.decoder.connect_l1, self.decoder.layer],
             self.t_upsample_times,
         )
-        self.wavelet_tranform = HaarWaveletTransform3D().to_float(dtype)
-        self.inverse_wavelet_tranform = InverseHaarWaveletTransform3D()
 
         self.exp = mint.exp
         self.stdnormal = mint.normal
@@ -460,13 +458,19 @@ class WFVAEModel(VideoBaseAE):
             start = end
         return start_end
 
-    def encode(self, x):
+    def encode(self, x, sample_posterior=True):
+        posterior_mean, posterior_logvar = self._encode(x)
+        if sample_posterior:
+            z = self.sample(posterior_mean, posterior_logvar)
+        else:
+            z = posterior_mean
+
+        return z
+
+    def _encode(self, x):
         self._empty_causal_cached(self.encoder)
 
-        dtype = x.dtype
-        x = x.to(ms.float16)
-        coeffs = self.wavelet_tranform(x)
-        coeffs = coeffs.to(dtype)
+        coeffs = HaarWaveletTransform3D()(x)
 
         if self.use_tiling:
             h = self.tile_encode(coeffs)
@@ -475,9 +479,7 @@ class WFVAEModel(VideoBaseAE):
             if self.use_quant_layer:
                 h = self.quant_conv(h)
         posterior_mean, posterior_logvar = mint.split(h, [h.shape[1] // 2, h.shape[1] // 2], dim=1)
-        z = self.sample(posterior_mean, posterior_logvar)
-
-        return z
+        return posterior_mean, posterior_logvar
 
     def tile_encode(self, x):
         b, c, t, h, w = x.shape
@@ -503,11 +505,7 @@ class WFVAEModel(VideoBaseAE):
                 z = self.post_quant_conv(z)
             dec = self.decoder(z)
 
-        dtype = dec.dtype
-        dec = dec.to(ms.float16)
-        dec = self.inverse_wavelet_tranform(dec)
-        dec = dec.to(dtype)
-
+        dec = InverseHaarWaveletTransform3D()(dec)
         return dec
 
     def tile_decode(self, x):
@@ -542,10 +540,13 @@ class WFVAEModel(VideoBaseAE):
 
         return z
 
-    def construct(self, input):
+    def construct(self, input, sample_posterior=True):
         # overall pass, mostly for training
         posterior_mean, posterior_logvar = self._encode(input)
-        z = self.sample(posterior_mean, posterior_logvar)
+        if sample_posterior:
+            z = self.sample(posterior_mean, posterior_logvar)
+        else:
+            z = posterior_mean
 
         recons = self.decode(z)
 
