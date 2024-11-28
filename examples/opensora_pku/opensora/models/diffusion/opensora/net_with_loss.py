@@ -2,9 +2,10 @@ import logging
 
 from opensora.acceleration.communications import prepare_parallel_data
 from opensora.acceleration.parallel_states import get_sequence_parallel_state, hccl_info
+from opensora.utils.ms_utils import no_grad
 
 import mindspore as ms
-from mindspore import _no_grad, mint, nn, ops
+from mindspore import nn, ops
 
 from mindone.diffusers.training_utils import compute_snr
 
@@ -13,31 +14,11 @@ __all__ = ["DiffusionWithLoss"]
 logger = logging.getLogger(__name__)
 
 
-@ms.jit_class
-class no_grad(_no_grad):
-    """
-    A context manager that suppresses gradient memory allocation in PyNative mode.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._pynative = ms.get_context("mode") == ms.PYNATIVE_MODE
-
-    def __enter__(self):
-        if self._pynative:
-            super().__enter__()
-
-    def __exit__(self, *args):
-        if self._pynative:
-            super().__exit__(*args)
-
-
 class DiffusionWithLoss(nn.Cell):
     """An training pipeline for diffusion model
 
     Args:
         model (nn.Cell): A noise prediction model to denoise the encoded image latents.
-        vae (nn.Cell): Variational Auto-Encoder (VAE) Model to encode and decode images to and from latent representations.
         noise_scheduler: (object): A class for noise scheduler, such as DDPM scheduler
         text_encoder / text_encoder_2 (nn.Cell): A text encoding model which accepts token ids and returns text embeddings in shape (T, D).
             T is the number of tokens, and D is the embedding dimension.
@@ -48,11 +29,9 @@ class DiffusionWithLoss(nn.Cell):
         self,
         network: nn.Cell,
         noise_scheduler,
-        vae: nn.Cell = None,
         text_encoder: nn.Cell = None,
         text_encoder_2: nn.Cell = None,  # not to use yet
         text_emb_cached: bool = True,
-        video_emb_cached: bool = False,
         use_image_num: int = 0,
         dtype=ms.float32,
         noise_offset: float = 0.0,
@@ -61,7 +40,6 @@ class DiffusionWithLoss(nn.Cell):
         super().__init__()
         # TODO: is set_grad() necessary?
         self.network = network.set_grad()
-        self.vae = vae
         self.noise_scheduler = noise_scheduler
         self.prediction_type = self.noise_scheduler.config.prediction_type
         self.num_train_timesteps = self.noise_scheduler.config.num_train_timesteps
@@ -72,7 +50,6 @@ class DiffusionWithLoss(nn.Cell):
         self.dtype = dtype
 
         self.text_emb_cached = text_emb_cached
-        self.video_emb_cached = video_emb_cached
 
         if self.text_emb_cached:
             self.text_encoder = None
@@ -101,44 +78,6 @@ class DiffusionWithLoss(nn.Cell):
         text_emb = ops.stack(text_emb, axis=1)
         return text_emb
 
-    def vae_encode(self, x):
-        image_latents = self.vae.encode(x)
-        return image_latents
-
-    def vae_decode(self, x):
-        """
-        Args:
-            x: (b c h w), denoised latent
-        Return:
-            y: (b H W 3), batch of images, normalized to [0, 1]
-        """
-        # b, c, f, h, w = x.shape
-        y = self.vae.decode(x)
-        y = ops.clip_by_value((y + 1.0) / 2.0, clip_value_min=0.0, clip_value_max=1.0)
-
-        return y  # b c f h w
-
-    def get_latents(self, x):
-        if x.dim() == 5:
-            B, C, F, H, W = x.shape
-            if C != 3:
-                raise ValueError("Expect input shape (b 3 f h w), but get {}".format(x.shape))
-            if self.use_image_num == 0:
-                z = self.vae_encode(x)  # (b, c, f, h, w)
-            else:
-                videos, images = x[:, :, : -self.use_image_num], x[:, :, -self.use_image_num :]
-                videos = self.vae_encode(videos)  # (b, c, f, h, w)
-                # (b, c, f, h, w) -> (b, f, c, h, w) -> (b*f, c, h, w) -> (b*f, c, 1, h, w)
-                images = images.permute(0, 2, 1, 3, 4).reshape(-1, C, H, W).unsqueeze(2)
-                images = self.vae_encode(images)  # (b*f, c, 1, h, w)
-                # (b*f, c, 1, h, w) -> (b*f, c, h, w) -> (b, f, c, h, w) -> (b, c, f, h, w)
-                _, c, _, h, w = images.shape
-                images = images.squeeze(2).reshape(B, self.use_image_num, c, h, w).permute(0, 2, 1, 3, 4)
-                z = mint.cat([videos, images], dim=2)  # b c 16+4, h, w
-        else:
-            raise ValueError("Incorrect Dimensions of x")
-        return z
-
     def construct(
         self,
         x: ms.Tensor,
@@ -150,7 +89,7 @@ class DiffusionWithLoss(nn.Cell):
         Video diffusion model forward and loss computation for training
 
         Args:
-            x: pixel values of video frames, resized and normalized to shape (b c f+num_img h w)
+            x: the latent features of video frames (b c t' h' w'), where t' h' w' are the shape of latent features after vae's encoding.
             attention_mask: the mask for latent features of shape (b t' h' w'), where t' h' w' are the shape of latent features after vae's encoding.
             text_tokens: text tokens padded to fixed shape (B F L) or text embedding of shape (B F L D) if using text embedding cache
             encoder_attention_mask: the mask for text tokens/embeddings of a fixed shape (B F L)
@@ -162,13 +101,10 @@ class DiffusionWithLoss(nn.Cell):
             - inputs should matches dataloder output order
             - assume model input/output shape: (b c f+num_img h w)
         """
-        # 1. get image/video latents z using vae
+
         x = x.to(self.dtype)
         with no_grad():
-            if not self.video_emb_cached:
-                x = ops.stop_gradient(self.get_latents(x))
-
-            # 2. get conditions
+            # get conditions
             if not self.text_emb_cached:
                 text_embed = ops.stop_gradient(self.get_condition_embeddings(text_tokens, encoder_attention_mask))
             else:
@@ -282,7 +218,7 @@ class DiffusionWithLossEval(DiffusionWithLoss):
         Video diffusion model forward and loss computation for training
 
         Args:
-            x: pixel values of video frames, resized and normalized to shape (b c f+num_img h w)
+            x: the latent features of video frames (b c t' h' w'), where t' h' w' are the shape of latent features after vae's encoding.
             attention_mask: the mask for latent features of shape (b t' h' w'), where t' h' w' are the shape of latent features after vae's encoding.
             text_tokens: text tokens padded to fixed shape (B F L) or text embedding of shape (B F L D) if using text embedding cache
             encoder_attention_mask: the mask for text tokens/embeddings of a fixed shape (B F L)
@@ -297,9 +233,6 @@ class DiffusionWithLossEval(DiffusionWithLoss):
         # 1. get image/video latents z using vae
         x = x.to(self.dtype)
         with no_grad():
-            if not self.video_emb_cached:
-                x = ops.stop_gradient(self.get_latents(x))
-
             # 2. get conditions
             if not self.text_emb_cached:
                 text_embed = ops.stop_gradient(self.get_condition_embeddings(text_tokens, encoder_attention_mask))
