@@ -98,7 +98,7 @@ class TrainOneStepWrapper(nn.TrainOneStepWithLossScaleCell):
             if gradient_accumulation_steps > 1:
                 self.accumulated_grads = optimizer.parameters.clone(prefix="grad_accumulated_", init="zeros")
 
-    @ms.jit(jit_config="O1")
+    @ms.jit(jit_config=ms.JitConfig(jit_level="O1"))
     def construct(self, *inputs):
         # compute loss
         weights = self.weights

@@ -2,10 +2,9 @@ import logging
 
 from opensora.acceleration.communications import prepare_parallel_data
 from opensora.acceleration.parallel_states import get_sequence_parallel_state, hccl_info
-from opensora.utils.ms_utils import no_grad
 
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
 
 from mindone.diffusers.training_utils import compute_snr
 
@@ -103,13 +102,7 @@ class DiffusionWithLoss(nn.Cell):
         """
 
         x = x.to(self.dtype)
-        with no_grad():
-            # get conditions
-            if not self.text_emb_cached:
-                text_embed = ops.stop_gradient(self.get_condition_embeddings(text_tokens, encoder_attention_mask))
-            else:
-                text_embed = text_tokens
-        loss = self.compute_loss(x, attention_mask, text_embed, encoder_attention_mask)
+        loss = self.compute_loss(x, attention_mask, text_tokens, encoder_attention_mask)
 
         return loss
 
@@ -173,7 +166,7 @@ class DiffusionWithLoss(nn.Cell):
         # (b c t h w),
         bsz, c, _, _, _ = model_pred.shape
         if attention_mask is not None:
-            attention_mask = attention_mask.unsqueeze(1).float().repeat(c, axis=1)  # b t h w -> b c t h w
+            attention_mask = mint.tile(attention_mask.unsqueeze(1).float(), (1, c, 1, 1, 1))
             attention_mask = attention_mask.reshape(bsz, -1)
 
         if self.snr_gamma is None:
@@ -232,13 +225,7 @@ class DiffusionWithLossEval(DiffusionWithLoss):
         """
         # 1. get image/video latents z using vae
         x = x.to(self.dtype)
-        with no_grad():
-            # 2. get conditions
-            if not self.text_emb_cached:
-                text_embed = ops.stop_gradient(self.get_condition_embeddings(text_tokens, encoder_attention_mask))
-            else:
-                text_embed = text_tokens
-        loss, model_pred, target = self.compute_loss(x, attention_mask, text_embed, encoder_attention_mask)
+        loss, model_pred, target = self.compute_loss(x, attention_mask, text_tokens, encoder_attention_mask)
 
         return loss, model_pred, target
 

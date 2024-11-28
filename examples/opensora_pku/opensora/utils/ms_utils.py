@@ -155,10 +155,9 @@ def init_env(
                 )
                 raise Exception
 
-    if mode == 0:
-        # graph mode apply jit_syntax_level
-        jit_syntax_level = ms.STRICT if jit_syntax_level == "strict" else ms.LAX
-        ms.set_context(jit_syntax_level=jit_syntax_level)
+    print(f"Jit syntax level {jit_syntax_level}")
+    jit_syntax_level = ms.STRICT if jit_syntax_level == "strict" else ms.LAX
+    ms.set_context(jit_syntax_level=jit_syntax_level)
     if precision_mode is not None and len(precision_mode) > 0:
         ms.set_context(ascend_config={"precision_mode": precision_mode})
     if global_bf16:

@@ -31,8 +31,8 @@ from opensora.utils.ms_utils import no_grad
 from opensora.utils.utils import get_precision
 
 from mindone.diffusers.models.activations import SiLU
+from mindone.diffusers.schedulers import DDPMScheduler as DDPMScheduler_diffusers
 from mindone.diffusers.schedulers import FlowMatchEulerDiscreteScheduler  # CogVideoXDDIMScheduler,
-from mindone.diffusers.schedulers import DDPMScheduler
 from mindone.trainers.checkpoint import CheckpointManager, resume_train_network
 from mindone.trainers.lr_schedule import create_scheduler
 from mindone.trainers.optim import create_optimizer
@@ -44,6 +44,12 @@ from mindone.utils.logger import set_logger
 from mindone.utils.params import count_params
 
 logger = logging.getLogger(__name__)
+
+
+@ms.jit_class
+class DDPMScheduler(DDPMScheduler_diffusers):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 def set_train(module):
@@ -610,7 +616,7 @@ def main(args):
 
     # set dynamic inputs
     _bs = ms.Symbol(unique=True)
-    video = ms.Tensor(shape=[_bs, 3, None, None, None], dtype=ms.float32)  # (b, c, f, h, w)
+    video = ms.Tensor(shape=[_bs, 8, None, None, None], dtype=ms.float32)  # (b, c, f, h, w)
     attention_mask = ms.Tensor(shape=[_bs, None, None, None], dtype=ms.float32)  # (b, f, h, w)
     text_tokens = (
         ms.Tensor(shape=[_bs, None, args.model_max_length, None], dtype=ms.float32)
