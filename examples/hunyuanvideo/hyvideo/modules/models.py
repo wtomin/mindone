@@ -10,7 +10,7 @@ from .activation_layers import get_activation_layer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .posemb_layers import apply_rotary_emb
-from .attention import VanillaAttention #, parallel_attention, get_cu_seqlens
+from .attention import VanillaAttention, FlashAttention #, parallel_attention, get_cu_seqlens
 from .embed_layers import TimestepEmbedder, PatchEmbed, TextProjection
 from .token_refiner import SingleTokenRefiner, rearrange_qkv
 
@@ -32,6 +32,7 @@ class MMDoubleStreamBlock(nn.Cell):
         qk_norm: bool = True,
         qk_norm_type: str = "rms",
         qkv_bias: bool = False,
+        attn_mode: str = 'flash',
         dtype = None,
     ):
         factory_kwargs = {"dtype": dtype}
@@ -118,8 +119,12 @@ class MMDoubleStreamBlock(nn.Cell):
             **factory_kwargs,
         )
 
-        #
-        self.compute_attention = VanillaAttention(head_dim)
+        if attn_mode == 'vanilla':
+            self.compute_attention = VanillaAttention(head_dim)
+        elif attn_mode == 'flash':
+            self.compute_attention = FlashAttention(heads_num, head_dim)
+        else:
+            raise NotImplementedError
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -138,8 +143,11 @@ class MMDoubleStreamBlock(nn.Cell):
         max_seqlen_kv: Optional[int] = None,
         freqs_cis: tuple = None,
     ):
-        # img:
-        # txt:
+        '''
+        img: (B S_v HD), HD - hidden_size = (num_heads * head_dim)
+        txt: (B S_t HD)
+        vec: (B HD), projected representation of timestep and global text embed (from CLIP)
+        '''
         (
             img_mod1_shift,
             img_mod1_scale,
@@ -147,7 +155,7 @@ class MMDoubleStreamBlock(nn.Cell):
             img_mod2_shift,
             img_mod2_scale,
             img_mod2_gate,
-        ) = self.img_mod(vec).chunk(6, axis=-1)
+        ) = self.img_mod(vec).chunk(6, axis=-1) # shift, scale, gate are all zeros initially
         (
             txt_mod1_shift,
             txt_mod1_scale,
@@ -194,6 +202,7 @@ class MMDoubleStreamBlock(nn.Cell):
         txt_k = self.txt_attn_k_norm(txt_k) # .to(txt_v)
 
         # Run actual attention.
+        # input hidden states (B, S_v+S_t, H, D)
         q = ops.concat((img_q, txt_q), axis=1)
         k = ops.concat((img_k, txt_k), axis=1)
         v = ops.concat((img_v, txt_v), axis=1)
@@ -208,9 +217,11 @@ class MMDoubleStreamBlock(nn.Cell):
 
         # attention computation end
 
+        # output hidden states (B, S_v+S_t, H, D)
         img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
 
         # Calculate the img bloks.
+        # residual connection with gate. img = img + img_attn_proj * gate, for simplicity
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
             self.img_mlp(
@@ -251,6 +262,7 @@ class MMSingleStreamBlock(nn.Cell):
         qk_norm: bool = True,
         qk_norm_type: str = "rms",
         qk_scale: float = None,
+        attn_mode: str = 'flash',
         dtype = None,
     ):
         factory_kwargs = {"dtype": dtype}
@@ -298,7 +310,12 @@ class MMSingleStreamBlock(nn.Cell):
         )
         self.hybrid_seq_parallel_attn = None
 
-        self.compute_attention = VanillaAttention(head_dim)
+        if attn_mode == 'vanilla':
+            self.compute_attention = VanillaAttention(head_dim)
+        elif attn_mode == 'flash':
+            self.compute_attention = FlashAttention(heads_num, head_dim)
+        else:
+            raise NotImplementedError
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -408,7 +425,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
     use_attention_mask: bool
         Whether to use attention mask for text encoder.
     dtype: torch.dtype
-        The dtype of the model.
+        The dtype of the model, i.e. model parameter dtype
     """
 
     # @register_to_config
@@ -431,6 +448,8 @@ class HYVideoDiffusionTransformer(nn.Cell):
         guidance_embed: bool = False,  # For modulation.
         text_projection: str = "single_refiner",
         use_attention_mask: bool = True,
+        use_conv2d_patchify: bool = False,
+        attn_mode: str = 'flash',
         dtype = None,
     ):
         factory_kwargs = {"dtype": dtype}
@@ -442,6 +461,9 @@ class HYVideoDiffusionTransformer(nn.Cell):
         self.unpatchify_channels = self.out_channels
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
+        self.use_conv2d_patchify = use_conv2d_patchify
+        self.dtype = dtype
+        print('attn_mode: ', attn_mode)
 
         # Text projection. Default to linear projection.
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
@@ -466,7 +488,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
 
         # image projection
         self.img_in = PatchEmbed(
-            self.patch_size, self.in_channels, self.hidden_size, **factory_kwargs
+            self.patch_size, self.in_channels, self.hidden_size, use_conv2d=use_conv2d_patchify, **factory_kwargs
         )
 
         # text projection
@@ -479,7 +501,9 @@ class HYVideoDiffusionTransformer(nn.Cell):
             )
         elif self.text_projection == "single_refiner":
             self.txt_in = SingleTokenRefiner(
-                self.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
+                self.text_states_dim, hidden_size, heads_num, depth=2,
+                attn_mode=attn_mode,
+                **factory_kwargs
             )
         else:
             raise NotImplementedError(
@@ -516,6 +540,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
                     qkv_bias=qkv_bias,
+                    attn_mode=attn_mode,
                     **factory_kwargs,
                 )
                 for _ in range(mm_double_blocks_depth)
@@ -532,6 +557,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
                     mlp_act_type=mlp_act_type,
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
+                    attn_mode=attn_mode,
                     **factory_kwargs,
                 )
                 for _ in range(mm_single_blocks_depth)
@@ -587,7 +613,6 @@ class HYVideoDiffusionTransformer(nn.Cell):
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )
-
         # Prepare modulation vectors.
         vec = self.time_in(t)
 
@@ -636,7 +661,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
                 # cu_seqlens_kv,
                 # max_seqlen_q,
                 # max_seqlen_kv,
-                freqs_cis,
+                freqs_cis=freqs_cis,
                 )
 
         # Merge txt and img to pass through single stream blocks.
@@ -651,7 +676,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
                     # cu_seqlens_kv,
                     # max_seqlen_q,
                     # max_seqlen_kv,
-                    (freqs_cos, freqs_sin),
+                    freqs_cis=freqs_cis,
                     )
 
         # TODO: slicing replaced with
@@ -681,6 +706,38 @@ class HYVideoDiffusionTransformer(nn.Cell):
         imgs = x.reshape((x.shape[0], c, t * pt, h * ph, w * pw))
 
         return imgs
+
+    def load_from_checkpoint(self, ckpt_path):
+        '''
+        model param dtype
+        '''
+        if ckpt_path.endswith('.pt'):
+            import torch
+            state_dict = torch.load(ckpt_path)
+            load_key = 'module'
+            sd = state_dict[load_key]
+            param_dtype = ms.float32 if self.dtype is None else self.dtype
+            # TODO: support bf16 net params
+            parameter_dict = dict()
+            # import pdb; pdb.set_trace()
+
+            for pname in sd:
+                # np doesn't support bf16
+                # print(pname, sd[pname].shape, sd[pname].dtype)
+                np_val = sd[pname].cpu().detach().float().numpy()
+                parameter_dict[pname] = ms.Parameter(ms.Tensor(np_val, dtype=param_dtype))
+
+            # import pdb; pdb.set_trace()
+            # reshape conv3d weight to conv2d if use conv2d in PatchEmbed
+            if self.use_conv2d_patchify:
+                key_3d = "img_in.proj.weight"
+                assert len(sd[key_3d].shape) == 5 and sd[key_3d].shape[-3] == 1 # c_out, c_in, 1, 2, 2
+                conv3d_weight = parameter_dict.pop(key_3d)
+                parameter_dict[key_3d] = ms.Parameter(conv3d_weight.value().squeeze(axis=-3), name=key_3d)
+
+            param_not_load, ckpt_not_load = ms.load_param_into_net(self, parameter_dict, strict_load=True)
+            print('param not load: ', param_not_load)
+            print('ckpt not load: ', ckpt_not_load)
 
     def params_count(self):
         counts = {
