@@ -738,4 +738,13 @@ HUNYUAN_VIDEO_CONFIG = {
         "mlp_width_ratio": 4,
         "guidance_embed": True,
     },
+    "HYVideo-T/2-debug": {  # light-weight model for debugging
+        "mm_double_blocks_depth": 1,
+        "mm_single_blocks_depth": 1,
+        "rope_dim_list": [4, 14, 14],
+        "hidden_size": 6 * 32,
+        "heads_num": 6,
+        "mlp_width_ratio": 1,
+        "guidance_embed": True,
+    },
 }
