@@ -544,6 +544,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
         text_states: ms.Tensor = None,
         text_mask: ms.Tensor = None,  # Now we don't use it.
         text_states_2: Optional[ms.Tensor] = None,  # Text embedding for modulation.
+        text_mask_2: Optional[ms.Tensor] = None,  # Now we don't use it.
         freqs_cos: Optional[ms.Tensor] = None,
         freqs_sin: Optional[ms.Tensor] = None,
         guidance: ms.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
@@ -554,6 +555,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
         text_states: (B S_t D_t); S_t - seq len of padded text tokens, D_t: text feature dim, from LM text encoder, default: S_t=256, D_t = 4096
         text_mask: (B S_t), 1 - retain, 0 - drop
         text_states_2: (B D_t2), from CLIP text encoder, global text feature (fuse 77 tokens), D_t2=768
+        text_mask_2: (B D_t2), 1 - retain, 0 - drop
         freqs_cos: (S attn_head_dim), S - seq len of the patchified video latent (T * H //2 * W//2)
         freqs_sin: (S attn_head_dim)
         guidance: (B,)
