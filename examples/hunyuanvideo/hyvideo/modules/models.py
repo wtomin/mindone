@@ -555,7 +555,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
         text_states: (B S_t D_t); S_t - seq len of padded text tokens, D_t: text feature dim, from LM text encoder, default: S_t=256, D_t = 4096
         text_mask: (B S_t), 1 - retain, 0 - drop
         text_states_2: (B D_t2), from CLIP text encoder, global text feature (fuse 77 tokens), D_t2=768
-        text_mask_2: (B D_t2), 1 - retain, 0 - drop
+        text_mask_2: (B 77), 1 - retain, 0 - drop, currently not used because text_states_2 is a pooled text feature
         freqs_cos: (S attn_head_dim), S - seq len of the patchified video latent (T * H //2 * W//2)
         freqs_sin: (S attn_head_dim)
         guidance: (B,)
@@ -747,6 +747,5 @@ HUNYUAN_VIDEO_CONFIG = {
         "hidden_size": 6 * 32,
         "heads_num": 6,
         "mlp_width_ratio": 1,
-        "guidance_embed": True,
     },
 }
