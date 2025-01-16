@@ -62,7 +62,8 @@ class FlashAttention(nn.Cell):
         self.flash_attention = FlashAttentionScore(
             heads, keep_prob=1 - dropout, scale_value=scale_factor, input_layout="BNSD"
         )
-        self.flash_attention.recompute(False)
+        if ms.get_context("mode") == ms.GRAPH_MODE:
+            self.flash_attention(recompute=False)
 
     def construct(self, q, k, v, mask=None):
         """
