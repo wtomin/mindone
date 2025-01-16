@@ -52,7 +52,5 @@ def load_vae(
     vae.set_train(False)
     for param in vae.trainable_params():
         param.requires_grad = False
-    if logger is not None:
-        logger.info(f"VAE to dtype: {vae.dtype}")
 
     return vae, vae_path, spatial_compression_ratio, time_compression_ratio
