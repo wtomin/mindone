@@ -356,7 +356,7 @@ def add_inference_args(parser: argparse.ArgumentParser):
     group.add_argument(
         "--use-conv2d-patchify",
         type=str2bool,
-        default=False,
+        default=True,
         help="use conv2d equivalence in PatchEmbed instead of conv3d",
     )
     group.add_argument("--output-type", type=str, default="pil", help="pil or latent")
