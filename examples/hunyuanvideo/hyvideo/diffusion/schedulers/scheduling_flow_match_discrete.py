@@ -20,6 +20,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
+
 import numpy as np
 
 import mindspore as ms
@@ -76,6 +77,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         solver: str = "euler",
         n_tokens: Optional[int] = None,
     ):
+
         sigmas = np.linspace(1, 0, num_train_timesteps + 1, dtype=np.float32)
 
         if not reverse:
@@ -109,7 +111,6 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         """
         return self._begin_index
 
-    # Copied from diffusers.schedulers.scheduling_dpmsolver_multistep.DPMSolverMultistepScheduler.set_begin_index
     def set_begin_index(self, begin_index: int = 0):
         """
         Sets the begin index for the scheduler. This function should be run from pipeline before the inference.
@@ -139,18 +140,15 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         """
         self.num_inference_steps = num_inference_steps
 
-        # sigmas = torch.linspace(1, 0, num_inference_steps + 1)
-        sigmas = np.linspace(1, 0, num_inference_steps + 1, dtype=np.float32)
+        sigmas = mint.linspace(1, 0, num_inference_steps + 1)
+
         sigmas = self.sd3_time_shift(sigmas)
 
         if not self.config.reverse:
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        self.timesteps = sigmas[:-1] * self.config.num_train_timesteps
-
-        self.sigmas = ms.Tensor(self.sigmas, dtype=ms.float32)
-        self.timesteps = ms.Tensor(self.timesteps, dtype=ms.float32)
+        self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(dtype=ms.float32)
 
         # Reset step index
         self._step_index = None
@@ -178,7 +176,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
     def scale_model_input(self, sample: ms.Tensor, timestep: Optional[int] = None) -> ms.Tensor:
         return sample
 
-    def sd3_time_shift(self, t):
+
+    def sd3_time_shift(self, t: ms.Tensor):
         return (self.config.shift * t) / (1 + (self.config.shift - 1) * t)
 
     def step(
