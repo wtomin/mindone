@@ -24,6 +24,7 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 import mindspore as ms
+from mindspore import mint
 
 from mindone.diffusers.configuration_utils import ConfigMixin, register_to_config
 from mindone.diffusers.schedulers.scheduling_utils import SchedulerMixin
