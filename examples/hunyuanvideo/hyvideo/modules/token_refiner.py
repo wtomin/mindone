@@ -22,7 +22,7 @@ def rearrange_qkv(qkv, heads_num):
     # D = head_dim # KHD // (K * self.heads_num)
     D = KHD // (3 * H)
     qkv = ops.reshape(qkv, (B, L, 3, H, D))
-    q, k, v = ops.split(qkv, 1, axis=2)
+    q, k, v = mint.split(qkv, 1, dim=2)
     q = ops.squeeze(q, axis=2)
     k = ops.squeeze(k, axis=2)
     v = ops.squeeze(v, axis=2)

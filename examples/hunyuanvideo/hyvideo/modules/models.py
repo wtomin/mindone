@@ -817,6 +817,5 @@ HUNYUAN_VIDEO_CONFIG = {
         "hidden_size": 3072,
         "heads_num": 24,
         "mlp_width_ratio": 4,
-        "guidance_embed": True,
     },
 }
