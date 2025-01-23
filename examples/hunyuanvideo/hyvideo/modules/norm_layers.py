@@ -1,13 +1,15 @@
 import numbers
-import numpy as np
-from typing import Dict, Optional, Tuple
-import mindspore as ms
-from mindspore.common.initializer import initializer
-from mindspore import Parameter, Tensor, nn, ops
 
-'''
+import mindspore as ms
+from mindspore import Parameter, Tensor, mint, nn, ops
+from mindspore.common.initializer import initializer
+
+# from typing import Tuple
+# import numpy as np
+
+
 class LayerNorm(nn.Cell):
-    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine: bool = True, dtype=ms.float32):
+    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine: bool = True, bias=True, dtype=ms.float32):
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
@@ -15,21 +17,34 @@ class LayerNorm(nn.Cell):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.gamma = Parameter(initializer("ones", normalized_shape, dtype=dtype))
-            self.beta = Parameter(initializer("zeros", normalized_shape, dtype=dtype))
+            self.weight = Parameter(initializer("ones", normalized_shape, dtype=dtype))
+            if bias:
+                self.bias = Parameter(initializer("zeros", normalized_shape, dtype=dtype))
+            else:
+                self.bias = ops.zeros(normalized_shape, dtype=dtype)
         else:
-            self.gamma = ops.ones(normalized_shape, dtype=dtype)
-            self.beta = ops.zeros(normalized_shape, dtype=dtype)
+            self.weight = ops.ones(normalized_shape, dtype=dtype)
+            self.bias = ops.zeros(normalized_shape, dtype=dtype)
 
     def construct(self, x: Tensor):
         normalized_shape = x.shape[-1:]
         # mint layer_norm fuses the operations in layer normorlization and it's faster than ops.LayerNorm
-        # TODO: if not use AMP. cast to fp32 before and cast to input type after
-        x = mint.nn.functional.layer_norm(x, normalized_shape, self.gamma, self.beta, self.eps)
+        x = mint.nn.functional.layer_norm(x, normalized_shape, self.weight, self.bias, self.eps)
 
         return x
-'''
 
+
+class FP32LayerNorm(LayerNorm):
+    def construct(self, x: Tensor):
+        origin_dtype = x.dtype
+        normalized_shape = x.shape[-1:]
+        # mint layer_norm fuses the operations in layer normorlization and it's faster than ops.LayerNorm
+        x = mint.nn.functional.layer_norm(x.float(), normalized_shape, self.weight.float(), self.bias.float(), self.eps)
+
+        return x.to(origin_dtype)
+
+
+"""
 class LayerNorm(nn.Cell):
     normalized_shape: Tuple[int, ...]
     eps: float
@@ -59,10 +74,9 @@ class LayerNorm(nn.Cell):
         self.layer_norm = ops.LayerNorm(-1, -1, epsilon=eps)
 
     def construct(self, x: Tensor):
-        # TODO: use minit layernorm for better speed
+        # AMP: sum fp32
         x, _, _ = self.layer_norm(x, self.weight.to(x.dtype), self.bias.to(x.dtype))
         return x
-
 
 class FP32LayerNorm(LayerNorm):
     def construct(self, inputs: ms.Tensor) -> ms.Tensor:
@@ -74,6 +88,7 @@ class FP32LayerNorm(LayerNorm):
         )
         return x.to(origin_dtype)
 
+"""
 
 
 class RMSNorm(nn.Cell):
@@ -96,7 +111,7 @@ class RMSNorm(nn.Cell):
             weight (nn.Parameter): Learnable scaling parameter.
 
         """
-        factory_kwargs = {"dtype": dtype}
+        # factory_kwargs = {"dtype": dtype}
         super().__init__()
         self.eps = eps
         if elementwise_affine:
@@ -112,8 +127,8 @@ class RMSNorm(nn.Cell):
 
     def construct(self, x):
         input_dtype = x.dtype
-        # TODO: no need to cast x to fp32 if RMSNorm is added to the amp fp32list
-        output = self._norm(x.to(ms.float32))
+        # AMP: pt also cast x to float32 for rmsnorm
+        output = self._norm(x.float())
         if self.weight is not None:
             output = output.to(self.weight.dtype) * self.weight
         else:
@@ -132,7 +147,8 @@ def get_norm_layer(norm_layer):
         norm_layer (nn.Module): The normalization layer.
     """
     if norm_layer == "layer":
-        return LayerNorm
+        # return LayerNorm
+        return FP32LayerNorm
     elif norm_layer == "rms":
         return RMSNorm
     else:

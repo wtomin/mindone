@@ -20,6 +20,9 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
+
+import numpy as np
+
 import mindspore as ms
 from mindspore import mint
 
@@ -75,14 +78,18 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         solver: str = "euler",
         n_tokens: Optional[int] = None,
     ):
-        sigmas = mint.linspace(1, 0, num_train_timesteps + 1)
+
+        sigmas = np.linspace(1, 0, num_train_timesteps + 1, dtype=np.float32)
 
         if not reverse:
-            sigmas = sigmas.flip(0)
+            sigmas = np.flip(sigmas, 0)
 
         self.sigmas = sigmas
         # the value fed to model
-        self.timesteps = (sigmas[:-1] * num_train_timesteps).to(dtype=ms.float32)
+        self.timesteps = sigmas[:-1] * num_train_timesteps
+
+        self.sigmas = ms.Tensor(self.sigmas, dtype=ms.float32)
+        self.timesteps = ms.Tensor(self.timesteps, dtype=ms.float32)
 
         self._step_index = None
         self._begin_index = None
@@ -105,7 +112,6 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         """
         return self._begin_index
 
-    # Copied from mindone.diffusers.schedulers.scheduling_dpmsolver_multistep.DPMSolverMultistepScheduler.set_begin_index
     def set_begin_index(self, begin_index: int = 0):
         """
         Sets the begin index for the scheduler. This function should be run from pipeline before the inference.
@@ -136,6 +142,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self.num_inference_steps = num_inference_steps
 
         sigmas = mint.linspace(1, 0, num_inference_steps + 1)
+
         sigmas = self.sd3_time_shift(sigmas)
 
         if not self.config.reverse:
@@ -163,14 +170,13 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
     def _init_step_index(self, timestep):
         if self.begin_index is None:
-            # if isinstance(timestep, ms.Tensor):
-            #     timestep = timestep.to(self.timesteps.device)
             self._step_index = self.index_for_timestep(timestep)
         else:
             self._step_index = self._begin_index
 
     def scale_model_input(self, sample: ms.Tensor, timestep: Optional[int] = None) -> ms.Tensor:
         return sample
+
 
     def sd3_time_shift(self, t: ms.Tensor):
         return (self.config.shift * t) / (1 + (self.config.shift - 1) * t)
@@ -180,7 +186,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         model_output: ms.Tensor,
         timestep: Union[float, ms.Tensor],
         sample: ms.Tensor,
-        return_dict: bool = True,
+        return_dict: bool = False,
     ) -> Union[FlowMatchDiscreteSchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion
@@ -193,6 +199,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
                 The current discrete timestep in the diffusion chain.
             sample (`ms.Tensor`):
                 A current instance of a sample created by the diffusion process.
+            generator (`ms.Generator`, *optional*):
+                A random number generator.
             n_tokens (`int`, *optional*):
                 Number of tokens in the input sequence.
             return_dict (`bool`):
@@ -205,7 +213,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
                 returned, otherwise a tuple is returned where the first element is the sample tensor.
         """
 
-        if isinstance(timestep, int) or isinstance(timestep, ms.Tensor) or isinstance(timestep, ms.Tensor):
+        if isinstance(timestep, int) or (
+            isinstance(timestep, ms.Tensor) and timestep.dtype in (ms.int16, ms.int32, ms.int64)
+        ):
             raise ValueError(
                 (
                     "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"

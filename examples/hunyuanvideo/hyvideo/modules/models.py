@@ -1,19 +1,21 @@
-import logging
 from typing import Any, List, Optional, Tuple
 
 import mindspore as ms
-from mindspore import nn, ops
+from mindspore import mint, nn, ops
+
+from mindone.diffusers.configuration_utils import ConfigMixin, register_to_config
+from mindone.diffusers.models import ModelMixin
 
 from .activation_layers import get_activation_layer
-from .attention import FlashAttention, VanillaAttention  # , parallel_attention, get_cu_seqlens
+from .attention import FlashAttentionVarLen, VanillaAttention  # , parallel_attention, get_cu_seqlens
 from .embed_layers import PatchEmbed, TextProjection, TimestepEmbedder
 from .mlp_layers import MLP, FinalLayer, MLPEmbedder
 from .modulate_layers import ModulateDiT, apply_gate, modulate
 from .norm_layers import LayerNorm, get_norm_layer
+
+# from .norm_layers import FP32LayerNorm
 from .posemb_layers import apply_rotary_emb
 from .token_refiner import SingleTokenRefiner, rearrange_qkv
-
-logger = logging.getLogger(__name__)
 
 
 class MMDoubleStreamBlock(nn.Cell):
@@ -51,7 +53,7 @@ class MMDoubleStreamBlock(nn.Cell):
             **factory_kwargs,
         )
         self.img_norm1 = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-        self.img_attn_qkv = nn.Dense(hidden_size, hidden_size * 3, has_bias=qkv_bias)
+        self.img_attn_qkv = mint.nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias)
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.img_attn_q_norm = (
@@ -60,7 +62,7 @@ class MMDoubleStreamBlock(nn.Cell):
         self.img_attn_k_norm = (
             qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
         )
-        self.img_attn_proj = nn.Dense(hidden_size, hidden_size, has_bias=qkv_bias)
+        self.img_attn_proj = mint.nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
 
         self.img_norm2 = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
         self.img_mlp = MLP(
@@ -79,17 +81,17 @@ class MMDoubleStreamBlock(nn.Cell):
         )
         self.txt_norm1 = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
 
-        self.txt_attn_qkv = nn.Dense(hidden_size, hidden_size * 3, has_bias=qkv_bias)
+        self.txt_attn_qkv = mint.nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias)
         self.txt_attn_q_norm = (
             qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
         )
         self.txt_attn_k_norm = (
             qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
         )
-        self.txt_attn_proj = nn.Dense(
+        self.txt_attn_proj = mint.nn.Linear(
             hidden_size,
             hidden_size,
-            has_bias=qkv_bias,
+            bias=qkv_bias,
         )
 
         self.txt_norm2 = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
@@ -104,7 +106,7 @@ class MMDoubleStreamBlock(nn.Cell):
         if attn_mode == "vanilla":
             self.compute_attention = VanillaAttention(head_dim)
         elif attn_mode == "flash":
-            self.compute_attention = FlashAttention(heads_num, head_dim)
+            self.compute_attention = FlashAttentionVarLen(heads_num, head_dim)
         else:
             raise NotImplementedError
 
@@ -119,17 +121,23 @@ class MMDoubleStreamBlock(nn.Cell):
         img: ms.Tensor,
         txt: ms.Tensor,
         vec: ms.Tensor,
-        cu_seqlens_q: Optional[ms.Tensor] = None,
-        cu_seqlens_kv: Optional[ms.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
+        actual_seq_qlen: ms.Tensor = None,
+        actual_seq_kvlen: ms.Tensor = None,
         freqs_cis: tuple = None,
+        attn_mask: ms.Tensor = None,
     ):
         """
         img: (B S_v HD), HD - hidden_size = (num_heads * head_dim)
         txt: (B S_t HD)
         vec: (B HD), projected representation of timestep and global text embed (from CLIP)
+        actual_seq_qlen: []
+        attn_mask: (B 1 S_v+S_t S_v+S_t)
         """
+        # DOING: img -> M
+        # txt = txt.to(self.param_dtype)
+        # vec = vec.to(self.param_dtype)
+
+        # AMP: in xx_mode, silu (input cast to bf16) -> linear (bf16), so output bf16
         (
             img_mod1_shift,
             img_mod1_scale,
@@ -152,27 +160,32 @@ class MMDoubleStreamBlock(nn.Cell):
         ).chunk(6, axis=-1)
 
         # Prepare image for attention.
+        # AMP: img bf16, norm fp32, out bf16
         img_modulated = self.img_norm1(img)
+
+        # AMP: matmul and add/sum ops, should be bf16
         img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
+
         img_qkv = self.img_attn_qkv(img_modulated)
         # "B L (K H D) -> K B L H D", K=3, H=self.heads_num
         img_q, img_k, img_v = rearrange_qkv(img_qkv, self.heads_num)
 
         # Apply QK-Norm if needed
-        # TODO: check whether need to cast to dtype of img_v
+        # AMP: img_q bf16, rms norm (fp32) output cast to bf16, out bf16
         img_q = self.img_attn_q_norm(img_q)  # .to(img_v)
         img_k = self.img_attn_k_norm(img_k)  # .to(img_v)
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
+            # AMP: img_q, img_k cast to fp32 inside, cast back in output, out bf16
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
-            # assert (
-            #    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-            # ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+
             img_q, img_k = img_qq, img_kk
 
         # Prepare txt for attention.
+        # AMP: txt bf16, norm fp32, out bf16
         txt_modulated = self.txt_norm1(txt)
+
         txt_modulated = modulate(txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale)
         txt_qkv = self.txt_attn_qkv(txt_modulated)
 
@@ -194,8 +207,13 @@ class MMDoubleStreamBlock(nn.Cell):
 
         # attention computation start
 
-        attn = self.compute_attention(q, k, v)
-        # TODO: support FA and parallel attn
+        attn = self.compute_attention(
+            q,
+            k,
+            v,
+            actual_seq_qlen=actual_seq_qlen,
+            actual_seq_kvlen=actual_seq_kvlen,
+        )
 
         # attention computation end
 
@@ -252,12 +270,12 @@ class MMSingleStreamBlock(nn.Cell):
         self.scale = qk_scale or head_dim**-0.5
 
         # qkv and mlp_in
-        self.linear1 = nn.Dense(
+        self.linear1 = mint.nn.Linear(
             hidden_size,
             hidden_size * 3 + mlp_hidden_dim,
         )
         # proj and mlp_out
-        self.linear2 = nn.Dense(
+        self.linear2 = mint.nn.Linear(
             hidden_size + mlp_hidden_dim,
             hidden_size,
         )
@@ -284,7 +302,7 @@ class MMSingleStreamBlock(nn.Cell):
         if attn_mode == "vanilla":
             self.compute_attention = VanillaAttention(head_dim)
         elif attn_mode == "flash":
-            self.compute_attention = FlashAttention(heads_num, head_dim)
+            self.compute_attention = FlashAttentionVarLen(heads_num, head_dim)
         else:
             raise NotImplementedError
 
@@ -299,12 +317,14 @@ class MMSingleStreamBlock(nn.Cell):
         x: ms.Tensor,
         vec: ms.Tensor,
         txt_len: int,
-        cu_seqlens_q: Optional[ms.Tensor] = None,
-        cu_seqlens_kv: Optional[ms.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
+        actual_seq_qlen: ms.Tensor = None,
+        actual_seq_kvlen: ms.Tensor = None,
         freqs_cis: Tuple[ms.Tensor, ms.Tensor] = None,
+        attn_mask: ms.Tensor = None,
     ) -> ms.Tensor:
+        """
+        attn_mask: (B 1 S_v+S_t S_v+S_t)
+        """
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, axis=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
         qkv, mlp = ops.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], axis=-1)
@@ -329,17 +349,14 @@ class MMSingleStreamBlock(nn.Cell):
             k = ops.concat((img_k, txt_k), axis=1)
 
         # Compute attention.
-        # assert (
-        #     cu_seqlens_q.shape[0] == 2 * x.shape[0] + 1
-        # ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, x.shape[0]:{x.shape[0]}"
 
-        # attention computation start
         attn = self.compute_attention(
             q,
             k,
             v,
+            actual_seq_qlen=actual_seq_qlen,
+            actual_seq_kvlen=actual_seq_kvlen,
         )
-        # TODO: add FA
         # attention computation end
 
         # Compute activation in mlp stream, cat again and run second linear layer.
@@ -347,8 +364,7 @@ class MMSingleStreamBlock(nn.Cell):
         return x + apply_gate(output, gate=mod_gate)
 
 
-# TODO: inherit ModelMixin, ConfigMixin
-class HYVideoDiffusionTransformer(nn.Cell):
+class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     """
     HunyuanVideo Transformer backbone
 
@@ -394,15 +410,11 @@ class HYVideoDiffusionTransformer(nn.Cell):
         The type of the text projection, default is single_refiner.
     use_attention_mask: bool
         Whether to use attention mask for text encoder.
-    dtype: ms.dtype
+    dtype: torch.dtype
         The dtype of the model, i.e. model parameter dtype
-    use_recompute: bool, default=False
-        Whether to use recompute.
-    num_no_recompute: int or tuple(list) of int, default=0
-        The number of blocks to not use recompute.
     """
 
-    # @register_to_config
+    @register_to_config
     def __init__(
         self,
         args: Any,
@@ -425,8 +437,6 @@ class HYVideoDiffusionTransformer(nn.Cell):
         use_conv2d_patchify: bool = False,
         attn_mode: str = "flash",
         dtype=None,
-        use_recompute=False,
-        num_no_recompute: int = 0,
     ):
         factory_kwargs = {"dtype": dtype}
         super().__init__()
@@ -438,10 +448,7 @@ class HYVideoDiffusionTransformer(nn.Cell):
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
         self.use_conv2d_patchify = use_conv2d_patchify
-        self.dtype = dtype
-
-        self.use_recompute = use_recompute
-        self.num_no_recompute = num_no_recompute
+        # self.dtype = dtype
         print("attn_mode: ", attn_mode)
 
         # Text projection. Default to linear projection.
@@ -452,6 +459,8 @@ class HYVideoDiffusionTransformer(nn.Cell):
         # TODO: no need to use args, just parse these two params
         self.text_states_dim = args.text_states_dim
         self.text_states_dim_2 = args.text_states_dim_2
+
+        self.param_dtype = dtype
 
         if hidden_size % heads_num != 0:
             raise ValueError(f"Hidden size {hidden_size} must be divisible by heads_num {heads_num}")
@@ -537,43 +546,6 @@ class HYVideoDiffusionTransformer(nn.Cell):
             **factory_kwargs,
         )
 
-        if self.use_recompute:
-            num_no_recompute = self.num_no_recompute
-            if isinstance(num_no_recompute, int):
-                num_no_recompute = (num_no_recompute, num_no_recompute)
-            elif isinstance(num_no_recompute, (list, tuple)):
-                assert (
-                    len(num_no_recompute) == 2
-                    and isinstance(num_no_recompute[0], int)
-                    and isinstance(num_no_recompute[1], int)
-                ), "Expect to have num_no_recompute as a list or tuple of two integers."
-
-            num_blocks = len(self.single_blocks)
-            assert (
-                num_no_recompute[0] <= num_no_recompute[1] <= num_blocks
-            ), f"num_no_recompute should be in [0, {num_blocks}], but got {num_no_recompute}"
-            logger.info(f"Excluding {num_no_recompute[0]} single_blocks from the recomputation list.")
-            for bidx, block in enumerate(self.single_blocks):
-                if bidx < num_blocks - num_no_recompute[0]:
-                    self.recompute(block)
-
-            num_blocks = len(self.double_blocks)
-            assert (
-                num_no_recompute[1] <= num_blocks
-            ), f"num_no_recompute should be in [0, {num_blocks}], but got {num_no_recompute}"
-            logger.info(f"Excluding {num_no_recompute[1]} double_blocks from the recomputation list.")
-            for bidx, block in enumerate(self.double_blocks):
-                if bidx < num_blocks - num_no_recompute[1]:
-                    self.recompute(block)
-
-    def recompute(self, b):
-        if not b._has_config_recompute:
-            b.recompute(parallel_optimizer_comm_recompute=True)
-        if isinstance(b, nn.CellList):
-            self.recompute(b[-1])
-        elif ms.get_context("mode") == ms.GRAPH_MODE:
-            b.add_flags(output_no_recompute=True)
-
     def enable_deterministic(self):
         for block in self.double_blocks:
             block.enable_deterministic()
@@ -593,18 +565,18 @@ class HYVideoDiffusionTransformer(nn.Cell):
         text_states: ms.Tensor = None,
         text_mask: ms.Tensor = None,  # Now we don't use it.
         text_states_2: Optional[ms.Tensor] = None,  # Text embedding for modulation.
-        text_mask_2: Optional[ms.Tensor] = None,  # Now we don't use it.
         freqs_cos: Optional[ms.Tensor] = None,
         freqs_sin: Optional[ms.Tensor] = None,
         guidance: ms.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
+        # actual_seq_len = None,
     ) -> ms.Tensor:
         """
-        x: (B C T H W), video latent
-        t: (B,)
-        text_states: (B S_t D_t); S_t - seq len of padded text tokens, D_t: text feature dim, from LM text encoder, default: S_t=256, D_t = 4096
-        text_mask: (B S_t), 1 - retain, 0 - drop
+        x: (B C T H W), video latent. dtype same as vae-precision, which is fp16 by default
+        t: (B,), float32
+        text_states: (B S_t D_t); S_t - seq len of padded text tokens, D_t: text feature dim, from LM text encoder,
+            default: S_t=256, D_t = 4096; dtype same as text-encoder-precision, which is fp16 by default.
+        text_mask: (B S_t), 1 - retain, 0 - drop;
         text_states_2: (B D_t2), from CLIP text encoder, global text feature (fuse 77 tokens), D_t2=768
-        text_mask_2: (B 77), 1 - retain, 0 - drop, currently not used because text_states_2 is a pooled text feature
         freqs_cos: (S attn_head_dim), S - seq len of the patchified video latent (T * H //2 * W//2)
         freqs_sin: (S attn_head_dim)
         guidance: (B,)
@@ -617,51 +589,61 @@ class HYVideoDiffusionTransformer(nn.Cell):
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )
+
         # Prepare modulation vectors.
+        # AMP: t (fp16) -> sinusoidal (fp32) -> mlp (bf16), out bf16
         vec = self.time_in(t)
 
         # text modulation
-        vec = vec + self.vector_in(text_states_2)
+        vec = vec + self.vector_in(text_states_2.to(self.param_dtype))
 
         # guidance modulation
         if self.guidance_embed:
             if guidance is None:
                 raise ValueError("Didn't get guidance strength for guidance distilled model.")
-
             # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
+            # AMP: sinusoidal (fp32) -> mlp (bf16), out bf16
             vec = vec + self.guidance_in(guidance)
 
         # Embed image and text.
-        img = self.img_in(img)
+        # AMP: img (fp16) -> conv bf16, out bf16
+        img = self.img_in(img.to(self.param_dtype))
         if self.text_projection == "linear":
             txt = self.txt_in(txt)
         elif self.text_projection == "single_refiner":
+            # TODO: remove cast after debug
+            # txt = txt.to(self.param_dtype)
+            # AMP: txt -> mask sum (fp32) -> c; txt (fp16/fp32) -> linear (bf16); out bf16
             txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
         else:
             raise NotImplementedError(f"Unsupported text_projection: {self.text_projection}")
 
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
+        bs = img.shape[0]
 
-        # TODO: support setting max_seqlen
-        # Compute cu_squlens and max_seqlen for flash attention
-        # cu_seqlens_q = get_cu_seqlens(text_mask, img_seq_len)
-        # cu_seqlens_kv = cu_seqlens_q
-        # max_seqlen_q = img_seq_len + txt_seq_len
-        # max_seqlen_kv = max_seqlen_q
+        # TODO: for stable training in graph mode, better prepare actual_seq_qlen in data prepartion
+        # import pdb; pdb.set_trace()
+        max_seq_len = img_seq_len + txt_seq_len
+        valid_text_len = text_mask.sum(axis=1)
+        actual_seq_len = ops.zeros(bs * 2, dtype=ms.int32)
+        for i in range(bs):
+            valid_seq_len = valid_text_len[i] + img_seq_len
+            actual_seq_len[2 * i] = i * max_seq_len + valid_seq_len
+            actual_seq_len[2 * i + 1] = (i + 1) * max_seq_len
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
         for _, block in enumerate(self.double_blocks):
+            # AMP: img bf16, txt bf16, vec bf16, freqs fp32
             img, txt = block(
                 img,
                 txt,
                 vec,
-                # cu_seqlens_q,
-                # cu_seqlens_kv,
-                # max_seqlen_q,
-                # max_seqlen_kv,
                 freqs_cis=freqs_cis,
+                actual_seq_qlen=actual_seq_len,
+                actual_seq_kvlen=actual_seq_len,
+                # attn_mask=mask,
             )
 
         # Merge txt and img to pass through single stream blocks.
@@ -672,14 +654,12 @@ class HYVideoDiffusionTransformer(nn.Cell):
                     x,
                     vec,
                     txt_seq_len,
-                    # cu_seqlens_q,
-                    # cu_seqlens_kv,
-                    # max_seqlen_q,
-                    # max_seqlen_kv,
                     freqs_cis=freqs_cis,
+                    actual_seq_qlen=actual_seq_len,
+                    actual_seq_kvlen=actual_seq_len,
+                    # attn_mask=mask,
                 )
 
-        # TODO: slicing replaced with
         img = x[:, :img_seq_len, ...]
 
         # ---------------------------- Final layer ------------------------------
@@ -697,7 +677,6 @@ class HYVideoDiffusionTransformer(nn.Cell):
         c = self.unpatchify_channels
         pt, ph, pw = self.patch_size
         assert t * h * w == x.shape[1]
-        # import pdb; pdb.set_trace()
         x = x.reshape((x.shape[0], t, h, w, c, pt, ph, pw))
 
         # x = torch.einsum("nthwcopq->nctohpwq", x)
@@ -714,13 +693,13 @@ class HYVideoDiffusionTransformer(nn.Cell):
         if ckpt_path.endswith(".pt"):
             import torch
 
-            state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+            state_dict = torch.load(ckpt_path)
             load_key = "module"
             sd = state_dict[load_key]
+            # NOTE: self.dtype is get from parameter.dtype in real-time
             param_dtype = ms.float32 if self.dtype is None else self.dtype
-            # TODO: support bf16 net params
+            print("D--: get param dtype: ", param_dtype)
             parameter_dict = dict()
-            # import pdb; pdb.set_trace()
 
             for pname in sd:
                 # np doesn't support bf16
@@ -728,7 +707,6 @@ class HYVideoDiffusionTransformer(nn.Cell):
                 np_val = sd[pname].cpu().detach().float().numpy()
                 parameter_dict[pname] = ms.Parameter(ms.Tensor(np_val, dtype=param_dtype))
 
-            # import pdb; pdb.set_trace()
             # reshape conv3d weight to conv2d if use conv2d in PatchEmbed
             if self.use_conv2d_patchify:
                 key_3d = "img_in.proj.weight"
@@ -789,12 +767,13 @@ HUNYUAN_VIDEO_CONFIG = {
         "mlp_width_ratio": 4,
         "guidance_embed": True,
     },
-    "HYVideo-T/2-debug": {  # light-weight model for debugging
+    "HYVideo-T/2-depth1": {
         "mm_double_blocks_depth": 1,
         "mm_single_blocks_depth": 1,
-        "rope_dim_list": [4, 14, 14],
-        "hidden_size": 6 * 32,
-        "heads_num": 6,
-        "mlp_width_ratio": 1,
+        "rope_dim_list": [16, 56, 56],
+        "hidden_size": 3072,
+        "heads_num": 24,
+        "mlp_width_ratio": 4,
+        "guidance_embed": True,
     },
 }

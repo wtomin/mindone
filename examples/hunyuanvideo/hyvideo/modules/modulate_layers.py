@@ -1,11 +1,12 @@
 from typing import Callable
 
 import mindspore as ms
-from mindspore import nn
+from mindspore import mint, nn
 
 
 class ModulateDiT(nn.Cell):
     """Modulation layer for DiT."""
+
     def __init__(
         self,
         hidden_size: int,
@@ -13,15 +14,22 @@ class ModulateDiT(nn.Cell):
         act_layer: Callable,
         dtype=None,
     ):
-        factory_kwargs = {"dtype": dtype}
+        # factory_kwargs = {"dtype": dtype}
         super().__init__()
         self.act = act_layer()
         # Zero-initialize the modulation
-        self.linear = nn.Dense(
-            hidden_size, factor * hidden_size, has_bias=True, weight_init='zero', bias_init='zero') #, **factory_kwargs)
+        self.linear = mint.nn.Linear(
+            hidden_size, factor * hidden_size, bias=True, weight_init="zero", bias_init="zero"
+        )  # , **factory_kwargs)
+
+        self.dtype = dtype
 
     def construct(self, x: ms.Tensor) -> ms.Tensor:
-        return self.linear(self.act(x))
+        # AMP: silu better be fp32, linear bf16. currently just use bf16
+        # TODO: in torch autocast, silu-exp is cast to fp32.
+        return self.linear(self.act(x.to(self.dtype)))
+
+        # return self.linear(self.act(x.float()).to(self.dtype))
 
 
 def modulate(x, shift=None, scale=None):

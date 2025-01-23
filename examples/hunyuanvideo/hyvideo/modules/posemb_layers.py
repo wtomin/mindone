@@ -1,62 +1,9 @@
 from typing import List, Tuple, Union
 
+import numpy as np
+
 import mindspore as ms
-from mindspore import mint, ops
-
-
-def _to_tuple(x, dim=2):
-    if isinstance(x, int):
-        return (x,) * dim
-    elif len(x) == dim:
-        return x
-    else:
-        raise ValueError(f"Expected length {dim} or int, but got {x}")
-
-
-def get_meshgrid_nd(start, *args, dim=2):
-    """
-    Get n-D meshgrid with start, stop and num.
-
-    Args:
-        start (int or tuple): If len(args) == 0, start is num; If len(args) == 1, start is start, args[0] is stop,
-            step is 1; If len(args) == 2, start is start, args[0] is stop, args[1] is num. For n-dim, start/stop/num
-            should be int or n-tuple. If n-tuple is provided, the meshgrid will be stacked following the dim order in
-            n-tuples.
-        *args: See above.
-        dim (int): Dimension of the meshgrid. Defaults to 2.
-
-    Returns:
-        grid (np.ndarray): [dim, ...]
-    """
-    if len(args) == 0:
-        # start is grid_size
-        num = _to_tuple(start, dim=dim)
-        start = (0,) * dim
-        stop = num
-    elif len(args) == 1:
-        # start is start, args[0] is stop, step is 1
-        start = _to_tuple(start, dim=dim)
-        stop = _to_tuple(args[0], dim=dim)
-        num = [stop[i] - start[i] for i in range(dim)]
-    elif len(args) == 2:
-        # start is start, args[0] is stop, args[1] is num
-        start = _to_tuple(start, dim=dim)  # Left-Top       eg: 12,0
-        stop = _to_tuple(args[0], dim=dim)  # Right-Bottom   eg: 20,32
-        num = _to_tuple(args[1], dim=dim)  # Target Size    eg: 32,124
-    else:
-        raise ValueError(f"len(args) should be 0, 1 or 2, but got {len(args)}")
-
-    # PyTorch implement of np.linspace(start[i], stop[i], num[i], endpoint=False)
-    axis_grid = []
-    for i in range(dim):
-        a, b, n = start[i], stop[i], num[i]
-        g = mint.linspace(a, b, n + 1, dtype=ms.float32)[:n]
-        axis_grid.append(g)
-    grid = mint.meshgrid(*axis_grid, indexing="ij")  # dim x [W, H, D]
-    grid = mint.stack(grid, dim=0)  # [dim, W, H, D]
-
-    return grid
-
+from mindspore import ops
 
 #################################################################################
 #                   Rotary Positional Embedding Functions                       #
@@ -153,8 +100,8 @@ def apply_rotary_emb(
     Args:
         xq (ms.Tensor): Query tensor to apply rotary embeddings. [B, S, H, D]
         xk (ms.Tensor): Key tensor to apply rotary embeddings.   [B, S, H, D]
-        freqs_cis (ms.Tensor or tuple): Precomputed frequency tensor for complex exponential. can be a complex tensor or a tuple of two
-              tensors (cos, sin) representing a complex
+        freqs_cis (ms.Tensor or tuple): Precomputed frequency tensor for complex exponential.
+            can be a complex tensor or a tuple of two tensors (cos, sin) representing a complex
         head_first (bool): head dimension first (except batch dim) or not. (true if FA use BNSD format for better speed). not supported.
 
     Returns:
@@ -185,6 +132,63 @@ def apply_rotary_emb(
     return xq_out, xk_out
 
 
+def _to_tuple(x, dim=2):
+    if isinstance(x, int):
+        return (x,) * dim
+    elif len(x) == dim:
+        return x
+    else:
+        raise ValueError(f"Expected length {dim} or int, but got {x}")
+
+
+def get_meshgrid_nd(start, *args, dim=2):
+    """
+    Get n-D meshgrid with start, stop and num.
+
+    Args:
+        start (int or tuple): If len(args) == 0, start is num; If len(args) == 1, start is start, args[0] is stop,
+            step is 1; If len(args) == 2, start is start, args[0] is stop, args[1] is num. For n-dim, start/stop/num
+            should be int or n-tuple. If n-tuple is provided, the meshgrid will be stacked following the dim order in
+            n-tuples.
+        *args: See above.
+        dim (int): Dimension of the meshgrid. Defaults to 2.
+
+    Returns:
+        grid (np.ndarray): [dim, ...]
+    """
+    if len(args) == 0:
+        # start is grid_size
+        num = _to_tuple(start, dim=dim)
+        start = (0,) * dim
+        stop = num
+    elif len(args) == 1:
+        # start is start, args[0] is stop, step is 1
+        start = _to_tuple(start, dim=dim)
+        stop = _to_tuple(args[0], dim=dim)
+        num = [stop[i] - start[i] for i in range(dim)]
+    elif len(args) == 2:
+        # start is start, args[0] is stop, args[1] is num
+        start = _to_tuple(start, dim=dim)  # Left-Top       eg: 12,0
+        stop = _to_tuple(args[0], dim=dim)  # Right-Bottom   eg: 20,32
+        num = _to_tuple(args[1], dim=dim)  # Target Size    eg: 32,124
+    else:
+        raise ValueError(f"len(args) should be 0, 1 or 2, but got {len(args)}")
+
+    # PyTorch implement of np.linspace(start[i], stop[i], num[i], endpoint=False)
+    axis_grid = []
+    for i in range(dim):
+        # a, b, n = start[i], stop[i], num[i]
+        # g = torch.linspace(a, b, n + 1, dtype=torch.float32)[:n]
+        g = np.linspace(start[i], stop[i], num[i] + 1, dtype=np.float32)[: num[i]]
+        axis_grid.append(g)
+
+    grid = np.meshgrid(*axis_grid, indexing="ij")  # dim x [W, H, D]
+    grid = np.stack(grid, axis=0)  # [dim, W, H, D]
+    grid = ms.Tensor(grid)
+
+    return grid
+
+
 def get_nd_rotary_pos_embed(
     rope_dim_list,
     start,
@@ -210,9 +214,8 @@ def get_nd_rotary_pos_embed(
         theta_rescale_factor (float): Rescale factor for theta. Defaults to 1.0.
 
     Returns:
-        pos_embed (ms.Tensor): [HW, D/2]
+        pos_embed (torch.Tensor): [HW, D/2]
     """
-
     grid = get_meshgrid_nd(start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
 
     if isinstance(theta_rescale_factor, int) or isinstance(theta_rescale_factor, float):
@@ -245,11 +248,11 @@ def get_nd_rotary_pos_embed(
         embs.append(emb)
 
     if use_real:
-        cos = mint.cat([emb[0] for emb in embs], dim=1)  # (WHD, D/2)
-        sin = mint.cat([emb[1] for emb in embs], dim=1)  # (WHD, D/2)
+        cos = ops.cat([emb[0] for emb in embs], axis=1)  # (WHD, D/2)
+        sin = ops.cat([emb[1] for emb in embs], axis=1)  # (WHD, D/2)
         return cos, sin
     else:
-        emb = mint.cat(embs, dim=1)  # (WHD, D/2)
+        emb = ops.cat(embs, axis=1)  # (WHD, D/2)
         return emb
 
 
@@ -271,7 +274,7 @@ def get_1d_rotary_pos_embed(
 
     Args:
         dim (int): Dimension of the frequency tensor.
-        pos (int or ms.Tensor): Position indices for the frequency tensor. [S] or scalar
+        pos (int or torch.FloatTensor): Position indices for the frequency tensor. [S] or scalar
         theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
         use_real (bool, optional): If True, return real part and imaginary part separately.
                                    Otherwise, return complex numbers.
@@ -282,20 +285,22 @@ def get_1d_rotary_pos_embed(
         freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately. [S, D]
     """
     if isinstance(pos, int):
-        pos = mint.arange(pos).float()
+        pos = ops.arange(pos).float()
 
     # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
     # has some connection to NTK literature
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor ** (dim / (dim - 2))
 
-    freqs = 1.0 / (theta ** (mint.arange(0, dim, 2)[: (dim // 2)].float() / dim))  # [D/2]
+    freqs = 1.0 / (theta ** (ops.arange(0, dim, 2)[: (dim // 2)].float() / dim))  # [D/2]
     # assert interpolation_factor == 1.0, f"interpolation_factor: {interpolation_factor}"
-    freqs = mint.outer(pos * interpolation_factor, freqs)  # [S, D/2]
+    # TODO: outer doesn't support broadcasting
+    freqs = ops.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     if use_real:
-        freqs_cos = freqs.cos().repeat_interleave(2, dim=1)  # [S, D]
-        freqs_sin = freqs.sin().repeat_interleave(2, dim=1)  # [S, D]
+        # TODO: check ms2.5 API for repeat_interleave
+        freqs_cos = ops.repeat_interleave(freqs.cos(), repeats=2, axis=1)  # [S, D]
+        freqs_sin = ops.repeat_interleave(freqs.sin(), repeats=2, axis=1)  # [S, D]
         return freqs_cos, freqs_sin
     else:
-        freqs_cis = mint.polar(mint.ones_like(freqs), freqs)  # complex64     # [S, D/2]
+        freqs_cis = ops.polar(ops.ones_like(freqs), freqs)  # complex64     # [S, D/2]
         return freqs_cis

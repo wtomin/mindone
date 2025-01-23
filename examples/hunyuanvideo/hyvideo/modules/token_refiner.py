@@ -10,6 +10,8 @@ from .mlp_layers import MLP
 from .modulate_layers import apply_gate
 from .norm_layers import LayerNorm, get_norm_layer
 
+# from .norm_layers import FP32LayerNorm
+
 
 def rearrange_qkv(qkv, heads_num):
     # qkv: shape (B L K*H*D), K=3
@@ -20,7 +22,7 @@ def rearrange_qkv(qkv, heads_num):
     # D = head_dim # KHD // (K * self.heads_num)
     D = KHD // (3 * H)
     qkv = ops.reshape(qkv, (B, L, 3, H, D))
-    q, k, v = mint.split(qkv, 1, dim=2)
+    q, k, v = ops.split(qkv, 1, axis=2)
     q = ops.squeeze(q, axis=2)
     k = ops.squeeze(k, axis=2)
     v = ops.squeeze(v, axis=2)
@@ -49,10 +51,10 @@ class IndividualTokenRefinerBlock(nn.Cell):
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
 
         self.norm1 = LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs)
-        self.self_attn_qkv = nn.Dense(
+        self.self_attn_qkv = mint.nn.Linear(
             hidden_size,
             hidden_size * 3,
-            has_bias=qkv_bias,
+            bias=qkv_bias,
         )
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.self_attn_q_norm = (
@@ -61,10 +63,10 @@ class IndividualTokenRefinerBlock(nn.Cell):
         self.self_attn_k_norm = (
             qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
         )
-        self.self_attn_proj = nn.Dense(
+        self.self_attn_proj = mint.nn.Linear(
             hidden_size,
             hidden_size,
-            has_bias=qkv_bias,
+            bias=qkv_bias,
         )
 
         self.norm2 = LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs)
@@ -79,7 +81,7 @@ class IndividualTokenRefinerBlock(nn.Cell):
 
         self.adaLN_modulation = nn.SequentialCell(
             act_layer(),
-            nn.Dense(hidden_size, 2 * hidden_size, has_bias=True, weight_init="zeros", bias_init="zeros"),
+            mint.nn.Linear(hidden_size, 2 * hidden_size, bias=True, weight_init="zeros", bias_init="zeros"),
         )
 
         if attn_mode == "vanilla":
@@ -108,8 +110,6 @@ class IndividualTokenRefinerBlock(nn.Cell):
         k = self.self_attn_k_norm(k)  # .to(v)
 
         # Self-Attention
-        # TODO; support attn_mask
-        #  import pdb; pdb.set_trace()
         attn = self.compute_attention(q, k, v, mask=attn_mask)
 
         x = x + apply_gate(self.self_attn_proj(attn), gate_msa)
@@ -166,7 +166,6 @@ class IndividualTokenRefiner(nn.Cell):
             # mask shape: (b, s)
             batch_size = mask.shape[0]
             seq_len = mask.shape[1]
-            # TODO: check tile op
             # batch_size x 1 x seq_len x seq_len
             self_attn_mask_1 = mask.reshape((batch_size, 1, 1, seq_len)).tile(
                 (1, 1, seq_len, 1),
@@ -211,10 +210,10 @@ class SingleTokenRefiner(nn.Cell):
         super().__init__()
         self.attn_mode = attn_mode
 
-        self.input_embedder = nn.Dense(
+        self.input_embedder = mint.nn.Linear(
             in_channels,
             hidden_size,
-            has_bias=True,
+            bias=True,
         )
 
         act_layer = get_activation_layer(act_type)
@@ -237,6 +236,8 @@ class SingleTokenRefiner(nn.Cell):
             **factory_kwargs,
         )
 
+        self.dtype = dtype
+
     def construct(
         self,
         x: ms.Tensor,
@@ -245,15 +246,13 @@ class SingleTokenRefiner(nn.Cell):
     ):
         """
         Inputs:
-            x: float32, (B, S_token_padded, emb_dim)
+            x: float16, (B, S_token_padded, emb_dim), text embedding (from llama)
             t: float32, (1,), e.g. [1000.]
             mask: int, (B, S_token_padded)
         Output:
             (B, S_token_padded, out_emb_dim)
         """
-
-        # import pdb; pdb.set_trace()
-
+        # AMP: t (fp32) -> TimestepEmbed (sinusoidal, mlp) -> bf16
         # (B, hidden_dim)
         timestep_aware_representations = self.t_embedder(t)
 
@@ -261,12 +260,16 @@ class SingleTokenRefiner(nn.Cell):
             context_aware_representations = x.mean(axis=1)
         else:
             mask_float = mask.float().unsqueeze(-1)  # [b, s1, 1]
+            # TODO: AMP: x fp16, mask_float fp32, should we upcast x to fp32 manully?
             context_aware_representations = (x * mask_float).sum(axis=1) / mask_float.sum(axis=1)
-        context_aware_representations = self.c_embedder(context_aware_representations)
+        # AMP: car -> c_embedder mlp (bf16) -> bf16
+        context_aware_representations = self.c_embedder(context_aware_representations.to(self.dtype))
         c = timestep_aware_representations + context_aware_representations
 
-        x = self.input_embedder(x)
+        # AMP: linear bf16, out x bf16
+        x = self.input_embedder(x.to(self.dtype))
 
-        x = self.individual_token_refiner(x, c, mask)
+        # AMP: x bf16, c float32; c -> adaLN_modulation (silu, linear)
+        x = self.individual_token_refiner(x, c.to(self.dtype), mask)
 
         return x

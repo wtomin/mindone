@@ -28,11 +28,7 @@ class VanillaAttention(nn.Cell):
         attn = attn.to(ms.float32)  # (B N Sq Sk)
 
         if mask is not None:
-            # TODO: shape of mask ??
-            # mask = self.repeat_interleave(mask.to(ms.int32), h, 0)
-            # mask = mask.to(ms.bool_)
             # TODO: get different -inf based on data type
-            # import pdb; pdb.set_trace()
             mask = mask.tile((1, num_heads, 1, 1))
             mask = ops.logical_not(mask)  # [1, 1, 0, 0 ..] -> [0, 0, 1, 1, ..]
             attn = ops.masked_fill(attn, mask, -ms.numpy.inf)
@@ -62,10 +58,8 @@ class FlashAttention(nn.Cell):
         self.flash_attention = FlashAttentionScore(
             heads, keep_prob=1 - dropout, scale_value=scale_factor, input_layout="BNSD"
         )
-        if ms.get_context("mode") == ms.GRAPH_MODE:
-            self.flash_attention.recompute(False)
 
-    def construct(self, q, k, v, mask=None):
+    def construct(self, q, k, v, mask=None, actual_seq_qlen=None, actual_seq_kvlen=None):
         """
         input:
             q/k/v: (B S N D)
@@ -73,7 +67,6 @@ class FlashAttention(nn.Cell):
         output:
             o (B S N*D)
         """
-        # input_dtype = q.dtype
         # preapre layout. (B S N D) -> (B N S D)
         q = ops.transpose(q, (0, 2, 1, 3))
         k = ops.transpose(k, (0, 2, 1, 3))
@@ -89,5 +82,43 @@ class FlashAttention(nn.Cell):
 
         B, S, N, D = out.shape
         out = out.reshape(B, S, -1)
+
+        return out
+
+
+class FlashAttentionVarLen(nn.Cell):
+    def __init__(
+        self,
+        heads: int,
+        head_dim: int,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        scale_factor = 1 / math.sqrt(head_dim)
+        self.flash_attention = FlashAttentionScore(
+            heads, keep_prob=1 - dropout, scale_value=scale_factor, input_layout="TND"
+        )
+
+    def construct(self, q, k, v, actual_seq_qlen=None, actual_seq_kvlen=None):
+        """
+        this is an equivalent impl. to flash_attn_varlen_func in torch.
+        based on npu FA api https://www.hiascend.com/document/detail/zh/Pytorch/600/ptmoddevg/trainingmigrguide/performance_tuning_0027.html
+
+        input:
+            q/k/v: (B S N D)
+            mask: (B 1 S S), attn mask, 1 - for retain, 0 - for drop. e.g. [[1, 1, 0, 0 ..], [1, 1, 0, 0 ..]]. dtype: bool
+        output:
+            o (B S N*D)
+        """
+        # preapre layout. (B S N D) -> (T N D)
+        bs, max_seq_len, heads_num, head_dim = q.shape
+        q = q.reshape((-1, heads_num, head_dim))
+        k = k.reshape((-1, heads_num, head_dim))
+        v = v.reshape((-1, heads_num, head_dim))
+
+        _, _, _, out = self.flash_attention(q, k, v, actual_seq_qlen=actual_seq_qlen, actual_seq_kvlen=actual_seq_kvlen)
+
+        # (T N D) -> (B S N*D)
+        out = out.reshape((bs, max_seq_len, heads_num * head_dim))
 
         return out
