@@ -5,6 +5,12 @@ Here we provide an efficient MindSpore implementation of [HunyuanVideo](https://
 This repository is built on the models and code released by Tencent HunyuanVideo. We are grateful for their exceptional work and generous contribution to open source.
 
 
+## 🎥 Demo
+
+The following videos are generated based on MindSpore and Ascend 910*.
+
+
+
 ## 📑 Plan
 
 - HunyuanVideo (Text-to-Video Model)
@@ -36,11 +42,26 @@ Please download all checkpoints and convert them into MindSpore checkpoints foll
 
 ## 📀 Inference
 
+Currently, we support text-to-video generation with text embeddingp pre-computing. Please refer [Text embedding cache](#text-embedding-cache) to prepare the embedding before running the t2v generation.
 
+``` bash
+python sample_video.py \
+    --video-size 544 960 \
+    --video-length 129 \
+    --infer-steps 50 \
+    --flow-reverse \
+    --seed-type 'fixed' \
+    --seed 1 \
+    --save-path ./results \
+    --dit-weight "ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt" \
+    --text-embed-path /path/to/text_embeddings.npz \
+
+```
+
+Please run `python sample_video.py --help` to see more arguments.
 
 
 ## 🔑 Training 
-
 
 
 
@@ -79,3 +100,19 @@ Afterwards, you can evaluate the PSNR via:
 ```bash
 bash hyvideo/eval/scripts/cal_psnr.sh
 ```
+## Embedding Cache
+
+### Text embedding cache
+
+```bash
+cd hyvideo
+python run_text_encoder.py
+```
+
+### Video embedding cache
+
+
+## Acknowledgements
+
+We would like to thank the contributors to the [HunyuanVideo](https://arxiv.org/abs/2412.03603), [SD3](https://huggingface.co/stabilityai/stable-diffusion-3-medium), [FLUX](https://github.com/black-forest-labs/flux), [Llama](https://github.com/meta-llama/llama), [LLaVA](https://github.com/haotian-liu/LLaVA), [diffusers](https://github.com/huggingface/diffusers) and [HuggingFace](https://huggingface.co) repositories, for their open research and exploration.
+
