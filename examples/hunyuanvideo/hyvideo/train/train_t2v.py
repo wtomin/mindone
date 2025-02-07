@@ -325,7 +325,6 @@ def main(args):
                 "text_embed",
                 "encoder_attention_mask",
                 "text_embed_2",
-                "encoder_attention_mask_2",
             ],
         )
         val_dataloader_size = val_dataloader.get_dataset_size()
@@ -543,10 +542,8 @@ def main(args):
         if args.text_embed_cache
         else ms.Tensor(shape=[_bs, args.model_max_length_2], dtype=ms.float32)
     )
-    encoder_attention_mask_2 = ms.Tensor(shape=[_bs, args.model_max_length_2], dtype=ms.uint8)
-    net_with_grads.set_inputs(
-        video, attention_mask, text_tokens, encoder_attention_mask, text_tokens_2, encoder_attention_mask_2
-    )
+
+    net_with_grads.set_inputs(video, attention_mask, text_tokens, encoder_attention_mask, text_tokens_2)
     logger.info("Dynamic inputs are initialized for training!")
 
     model = Model(
@@ -921,7 +918,7 @@ def parse_t2v_train_args(parser):
 
     parser.add_argument("--attention_mode", type=str, choices=["vanilla", "flash"], default="flash")
 
-    parser.add_argument("--model_max_length_1", type=int, default=315)  # llava llama text encoder
+    parser.add_argument("--model_max_length_1", type=int, default=256)  # llava llama text encoder
     parser.add_argument(
         "--model_max_length_2", type=int, default=77
     )  # for text encoder 2 tokenizer, but CLIP text encoder returns pooled hidden states

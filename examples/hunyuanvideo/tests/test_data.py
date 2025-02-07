@@ -171,7 +171,7 @@ def test_dataset(ds):
                     print(k, batch[k].shape, batch[k].dtype)  # , batch[k].min(), batch[k].max())
                 else:
                     print(k, "None")
-                print(f"{i+1}/{steps}, time cost: {dur * 1000} ms")
+            print(f"{i+1}/{steps}, time cost: {dur * 1000} ms")
 
         start = time.time()
 
