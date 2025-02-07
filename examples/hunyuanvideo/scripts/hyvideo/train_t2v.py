@@ -206,7 +206,7 @@ def main(args):
     # Load text encoder
     if not args.text_embed_cache:
         print_banner("text encoder init")
-        from hyvideo.run_text_encoder import build_model
+        from examples.hunyuanvideo.scripts.text_encoder.run_text_encoder import build_model
 
         text_encoder_1, text_encoder_2 = build_model(args, logger)
         text_encoder_1_dtype, text_encoder_2_dtype = args.text_encoder_precision, args.text_encoder_precision_2
