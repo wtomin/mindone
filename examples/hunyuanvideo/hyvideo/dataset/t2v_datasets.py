@@ -774,6 +774,6 @@ class T2V_dataset:
             )
         td = np.load(npz)
         text_emb = td["prompt_embeds"].astype(np.float32)
-        mask = td["prompt_embeds"].astype(np.uint8)
+        mask = td["prompt_mask"].astype(np.uint8)
         text_emb_2 = td["prompt_embeds_2"].astype(np.float32)
         return text_emb, mask, text_emb_2  # (L, D), (L), (D')

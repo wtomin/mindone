@@ -166,9 +166,12 @@ def test_dataset(ds):
         tot += dur
 
         if i < 3:
-            video = batch["pixel_values"]
-            print("D--: ", video.shape, video.dtype, video.min(), video.max())
-            print(f"{i+1}/{steps}, time cost: {dur * 1000} ms")
+            for k in batch:
+                if batch[k] is not None:
+                    print(k, batch[k].shape, batch[k].dtype)  # , batch[k].min(), batch[k].max())
+                else:
+                    print(k, "None")
+                print(f"{i+1}/{steps}, time cost: {dur * 1000} ms")
 
         start = time.time()
 
