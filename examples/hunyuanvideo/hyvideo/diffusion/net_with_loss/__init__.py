@@ -39,6 +39,7 @@ class DiffusionWithLoss(nn.Cell):
         rank_id: int = 0,
         device_num: int = 1,
         embedded_guidance_scale: float = 6.0,
+        guidance_embed: bool = False,
     ):
         super().__init__()
         # TODO: is set_grad() necessary?
@@ -48,7 +49,9 @@ class DiffusionWithLoss(nn.Cell):
         self.rank_id = rank_id
         self.device_num = device_num
         self.embedded_guidance_scale = embedded_guidance_scale
-        if self.network.guidance_embed:
+        self.guidance_embed = guidance_embed
+
+        if self.guidance_embed:
             assert (
                 self.embedded_guidance_scale is not None
             ), "embedded_guidance_scale should be set when using guidance embed"

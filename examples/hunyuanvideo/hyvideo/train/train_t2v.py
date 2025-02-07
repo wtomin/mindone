@@ -237,6 +237,7 @@ def main(args):
         rank_id=rank_id,
         device_num=device_num,
         embedded_guidance_scale=embed_cfg_scale,
+        guidance_embed=network.guidance_embed,
     )
     latent_diffusion_eval, metrics, eval_indexes = None, None, None
 
@@ -345,6 +346,7 @@ def main(args):
             use_image_num=args.use_image_num,
             dtype=model_dtype,
             embedded_guidance_scale=embed_cfg_scale,
+            guidance_embed=network.guidance_embed,
         )
         metrics = {"val loss": get_metric_fn("loss")}
         eval_indexes = [0, 1, 2]  # the indexes of the output of eval network: loss. pred and label
