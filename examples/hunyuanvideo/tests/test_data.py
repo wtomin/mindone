@@ -10,6 +10,7 @@ import mindspore as ms
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
 sys.path.append("./")
+from hyvideo.constants import PRECISIONS, PROMPT_TEMPLATE, VAE_PATH
 from hyvideo.dataset import getdataset
 from hyvideo.dataset.loader import create_dataloader
 from hyvideo.train.commons import parse_args
@@ -221,6 +222,163 @@ def parse_t2v_train_args(parser):
         default=True,
         help="whether to use decord to load videos. If not, use opencv to load videos.",
     )
+
+    # text encoder & vae & diffusion model
+    parser.add_argument(
+        "--latent_channels",
+        default=16,
+        type=int,
+    )
+    parser.add_argument("--text_states_dim", type=int, default=4096, help="Dimension of text embeddings")
+
+    parser.add_argument("--text_states_dim_2", type=int, default=768, help="Second dimension of text embeddings")
+    parser.add_argument("--vae_fp32", action="store_true")
+
+    parser.add_argument(
+        "--text_encoder_choices",
+        type=str,
+        nargs="+",
+        default=["llm", "clipL"],
+        choices=["llm", "clipL"],
+        help="Specify the text encode type.",
+    )
+
+    # text encoder llm
+    parser.add_argument(
+        "--text_encoder_name",
+        type=str,
+        default="llm",
+        help="Name of the text encoder model.",
+    )
+    parser.add_argument(
+        "--text_encoder_precision",
+        type=str,
+        default="bf16",
+        choices=PRECISIONS,
+        help="Precision mode for the text encoder model.",
+    )
+    parser.add_argument(
+        "--text_encoder_path",
+        type=str,
+        default="ckpts/text_encoder",
+        help="File path of the ckpt of the text encoder.",
+    )
+    parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default="llm",
+        help="Name of the tokenizer model.",
+    )
+    parser.add_argument(
+        "--tokenizer_path",
+        type=str,
+        default=None,
+        help="File path of the ckpt of the tokenizer.",
+    )
+    parser.add_argument(
+        "--text_len",
+        type=int,
+        default=256,
+        help="Maximum length of the text input.",
+    )
+    parser.add_argument(
+        "--prompt_template",
+        type=str,
+        default="dit-llm-encode",
+        choices=PROMPT_TEMPLATE,
+        help="Image prompt template for the decoder-only text encoder model.",
+    )
+    parser.add_argument(
+        "--prompt_template_video",
+        type=str,
+        default="dit-llm-encode-video",
+        choices=PROMPT_TEMPLATE,
+        help="Video prompt template for the decoder-only text encoder model.",
+    )
+    parser.add_argument(
+        "--hidden_state_skip_layer",
+        type=int,
+        default=2,
+        help="Skip layer for hidden states.",
+    )
+    parser.add_argument(
+        "--apply_final_norm",
+        action="store_true",
+        help="Apply final normalization to the used text encoder hidden states.",
+    )
+
+    # text encoder clipL
+    parser.add_argument(
+        "--text_encoder_name_2",
+        type=str,
+        default="clipL",
+        help="Name of the second text encoder model.",
+    )
+    parser.add_argument(
+        "--text_encoder_precision_2",
+        type=str,
+        default="fp16",
+        choices=PRECISIONS,
+        help="Precision mode for the second text encoder model.",
+    )
+    parser.add_argument(
+        "--text_encoder_path_2",
+        type=str,
+        default="ckpts/text_encoder_2",
+        help="File path of the ckpt of the second text encoder.",
+    )
+    parser.add_argument(
+        "--tokenizer_2",
+        type=str,
+        default="clipL",
+        help="Name of the second tokenizer model.",
+    )
+    parser.add_argument(
+        "--tokenizer_path_2",
+        type=str,
+        default=None,
+        help="File path of the ckpt of the second tokenizer.",
+    )
+    parser.add_argument(
+        "--text_len_2",
+        type=int,
+        default=77,
+        help="Maximum length of the second text input.",
+    )
+
+    parser.add_argument("--cogvideox_scheduler", action="store_true")
+    parser.add_argument("--v1_5_scheduler", action="store_true")
+    parser.add_argument("--rf_scheduler", action="store_true")
+    parser.add_argument(
+        "--weighting_scheme", type=str, default="logit_normal", choices=["sigma_sqrt", "logit_normal", "mode", "cosmap"]
+    )
+    parser.add_argument(
+        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--mode_scale",
+        type=float,
+        default=1.29,
+        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+    )
+
+    # diffusion setting
+    parser.add_argument("--offload_ema", action="store_true", help="Offload EMA model to CPU during training step.")
+    parser.add_argument("--foreach_ema", action="store_true", help="Use faster foreach implementation of EMAModel.")
+    parser.add_argument("--rescale_betas_zero_snr", action="store_true")
+
+    # validation & logs
+    parser.add_argument("--enable_profiling", action="store_true")
+    parser.add_argument("--num_sampling_steps", type=int, default=20)
+    parser.add_argument(
+        "--embedded_cfg_scale",
+        type=float,
+        default=6.0,
+        help="Embeded classifier free guidance scale.",
+    )
     parser.add_argument("--output_dir", default="outputs/", help="The directory where training results are saved.")
     parser.add_argument("--dataset", type=str, default="t2v")
     parser.add_argument(
@@ -230,11 +388,35 @@ def parse_t2v_train_args(parser):
         help="The training dataset text file specifying the path of video folder, text embedding cache folder, and the annotation json file",
     )
     parser.add_argument(
+        "--val_data",
+        type=str,
+        default=None,
+        help="The validation dataset text file, same format as the training dataset text file.",
+    )
+    parser.add_argument("--cache_dir", type=str, default="./ckpts")
+    parser.add_argument(
         "--filter_nonexistent",
         type=str2bool,
         default=True,
         help="Whether to filter out non-existent samples in image datasets and video datasets." "Defaults to True.",
     )
+    parser.add_argument(
+        "--text_embed_cache",
+        type=str2bool,
+        default=True,
+        help="Whether to use T5 embedding cache. Must be provided in image/video_data.",
+    )
+    parser.add_argument("--vae_latent_folder", default=None, type=str, help="root dir for the vae latent data")
+    parser.add_argument(
+        "--vae",
+        type=str,
+        default="884-16c-hy",
+        choices=list(VAE_PATH),
+        help="Name of the VAE model.",
+    )
+    # parser.add_argument("--model", type=str, choices=list(HUNYUAN_VIDEO_CONFIG.keys()), default="HYVideo-T/2")
+
+    parser.add_argument("--downsampler", type=str, default=None)
 
     parser.add_argument("--sample_rate", type=int, default=1)
     parser.add_argument("--train_fps", type=int, default=24)
@@ -245,34 +427,71 @@ def parse_t2v_train_args(parser):
     parser.add_argument("--max_width", type=int, default=240)
     parser.add_argument("--group_frame", action="store_true")
     parser.add_argument("--group_resolution", action="store_true")
-    parser.add_argument("--cache_dir", type=str, default="./ckpts")
+    parser.add_argument("--pretrained", type=str, default=None)
+
+    parser.add_argument("--vae_tiling", action="store_true")
+
+    parser.add_argument("--attention_mode", type=str, choices=["vanilla", "flash"], default="flash")
+
     parser.add_argument("--model_max_length_1", type=int, default=315)  # llava llama text encoder
-    parser.add_argument("--text_encoder_name", type=str, default="DeepFloyd/t5-v1_1-xxl")
-    parser.add_argument("--text_encoder_name_2", type=str, default=None)
     parser.add_argument(
         "--model_max_length_2", type=int, default=77
     )  # for text encoder 2 tokenizer, but CLIP text encoder returns pooled hidden states
-    parser.add_argument(
-        "--text_embed_cache",
-        type=str2bool,
-        default=True,
-        help="Whether to use T5 embedding cache. Must be provided in image/video_data.",
-    )
     parser.add_argument("--multi_scale", action="store_true")
 
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--use_img_from_vid", action="store_true")
-
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=None,
+        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
+    )
+    parser.add_argument(
+        "--checkpointing_steps",
+        type=int,
+        default=500,
+        help=(
+            "Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
+            " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
+            " training using `--resume_from_checkpoint`."
+        ),
+    )
     parser.add_argument("--cfg", type=float, default=0.1)
-
+    parser.add_argument(
+        "--num_no_recompute",
+        type=int,
+        default=0,
+        nargs="+",
+        help="If gradient_checkpointing is True, `num_no_recompute` single_blocks and `num_no_recompute` double_blocks will be removed from recomputation list."
+        "if it is a positive integer. If it is a tuple (m, n), the m single_blocks and n double_blocks will be removed from recomputation list.",
+    )
     parser.add_argument("--dataloader_prefetch_size", type=int, default=None, help="minddata prefetch size setting")
     parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
-
+    parser.add_argument(
+        "--vae_keep_gn_fp32",
+        default=False,
+        type=str2bool,
+        help="whether keep GroupNorm in fp32. Defaults to False in inference, better to set to True when training vae",
+    )
+    parser.add_argument(
+        "--vae_precision",
+        type=str,
+        default="fp16",
+        choices=PRECISIONS,
+        help="Precision mode for the VAE model.",
+    )
     parser.add_argument(
         "--enable_parallel_fusion", default=True, type=str2bool, help="Whether to parallel fusion for AdamW"
     )
     parser.add_argument("--jit_level", default="O0", help="Set jit level: # O0: KBK, O1:DVM, O2: GE")
+    parser.add_argument("--ema_start_step", type=int, default=0)
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+    )
 
     return parser
 
