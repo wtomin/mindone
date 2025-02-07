@@ -378,6 +378,8 @@ class Collate:
         assert not np.any(np.isnan(pad_batch_tubes)), "after pad_batch_tubes"
         if input_ids_2 is not None and cond_mask_2 is not None:
             return pad_batch_tubes, attention_mask, input_ids_1, cond_mask_1, input_ids_2, cond_mask_2
+        elif input_ids_2 is not None and cond_mask_2 is None:
+            return pad_batch_tubes, attention_mask, input_ids_1, cond_mask_1, input_ids_2
         else:
             return pad_batch_tubes, attention_mask, input_ids_1, cond_mask_1
 

@@ -285,7 +285,6 @@ def main(args):
             "text_embed",
             "encoder_attention_mask",
             "text_embed_2",
-            "encoder_attention_mask_2",
         ],
     )
     dataloader_size = dataloader.get_dataset_size()
