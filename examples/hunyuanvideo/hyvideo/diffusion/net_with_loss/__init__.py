@@ -219,7 +219,9 @@ class DiffusionWithLoss(nn.Cell):
         # (b c t h w),
         bsz, c, _, _, _ = loss.shape
         if attention_mask is not None:
-            attention_mask = attention_mask.unsqueeze(1).float().repeat(c, axis=1)  # b t h w -> b c t h w
+            attention_mask = (
+                attention_mask.unsqueeze(1).float().repeat_interleave(repeats=c, dim=1)
+            )  # b t h w -> b c t h w
             attention_mask = attention_mask.reshape(bsz, -1)
 
         loss = loss.reshape(bsz, -1)
