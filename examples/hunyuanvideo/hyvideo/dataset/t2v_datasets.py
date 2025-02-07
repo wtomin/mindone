@@ -229,15 +229,11 @@ class T2V_dataset:
             folder_anno = [i.strip().split(",") for i in f.readlines() if len(i.strip()) > 0]
         assert len(folder_anno) > 0, "input dataset file cannot be empty!"
         for input_dataset in tqdm(folder_anno):
-            text_embed_folder_1, text_embed_folder_2 = None, None
+            text_embed_folder = None
             if len(input_dataset) == 2:
                 assert not self.return_text_emb, "Train without text embedding cache!"
             elif len(input_dataset) == 3:
-                text_embed_folder_1 = input_dataset[1]
-                sub_root, anno = input_dataset[0], input_dataset[-1]
-            elif len(input_dataset) == 4:
-                text_embed_folder_1 = input_dataset[1]
-                text_embed_folder_2 = input_dataset[2]
+                text_embed_folder = input_dataset[1]
                 sub_root, anno = input_dataset[0], input_dataset[-1]
             else:
                 raise ValueError("Not supported input dataset file!")
@@ -259,14 +255,9 @@ class T2V_dataset:
 
                 if self.return_text_emb:
                     text_embeds_paths = self.get_text_embed_file_path(i)
-                    if text_embed_folder_1 is not None:
-                        i["text_embed_path_1"] = [opj(text_embed_folder_1, tp) for tp in text_embeds_paths]
-                        if any([not os.path.exists(p) for p in i["text_embed_path_1"]]):
-                            cnt_no_existent += 1
-                            continue
-                    if text_embed_folder_2 is not None:
-                        i["text_embed_path_2"] = [opj(text_embed_folder_2, tp) for tp in text_embeds_paths]
-                        if any([not os.path.exists(p) for p in i["text_embed_path_2"]]):
+                    if text_embed_folder is not None:
+                        i["text_embed_path"] = [opj(text_embed_folder, tp) for tp in text_embeds_paths]
+                        if any([not os.path.exists(p) for p in i["text_embed_path"]]):
                             cnt_no_existent += 1
                             continue
 
@@ -573,21 +564,19 @@ class T2V_dataset:
             )
 
         else:
-            if "text_embed_path_1" in video_data:
-                text_embed_paths = video_data["text_embed_path_1"]
+            if "text_embed_path" in video_data:
+                text_embed_paths = video_data["text_embed_path"]
                 text_embed_path = random.choice(text_embed_paths)
-                text_emb_1, cond_mask_1 = self.parse_text_emb(text_embed_path)
-            text_emb_2, cond_mask_2 = None, None
-            if "text_embed_path_2" in video_data:
-                text_embed_paths = video_data["text_embed_path_2"]
-                text_embed_path = random.choice(text_embed_paths)
-                text_emb_2, cond_mask_2 = self.parse_text_emb(text_embed_path)
+                text_emb_1, cond_mask_1, text_emb_2 = self.parse_text_emb(text_embed_path)
+            else:
+                text_emb_1, cond_mask_1, text_emb_2 = None, None, None
+
             return dict(
                 pixel_values=video,
                 input_ids_1=text_emb_1,
                 cond_mask_1=cond_mask_1,
                 input_ids_2=text_emb_2,
-                cond_mask_2=cond_mask_2,
+                cond_mask_2=None,
             )
 
     def get_image(self, idx):
@@ -648,21 +637,19 @@ class T2V_dataset:
                 cond_mask_2=cond_mask_2,
             )
         else:
-            if "text_embed_path_1" in image_data:
-                text_embed_paths = image_data["text_embed_path_1"]
+            if "text_embed_path" in image_data:
+                text_embed_paths = image_data["text_embed_path"]
                 text_embed_path = random.choice(text_embed_paths)
-                text_emb_1, cond_mask_1 = self.parse_text_emb(text_embed_path)
-            text_emb_2, cond_mask_2 = None, None
-            if "text_embed_path_2" in image_data:
-                text_embed_paths = image_data["text_embed_path_2"]
-                text_embed_path = random.choice(text_embed_paths)
-                text_emb_2, cond_mask_2 = self.parse_text_emb(text_embed_path)
+                text_emb_1, cond_mask_1, text_emb_2 = self.parse_text_emb(text_embed_path)
+            else:
+                text_emb_1, cond_mask_1, text_emb_2 = None, None, None
+
             return dict(
                 pixel_values=image,
                 input_ids_1=text_emb_1,
                 cond_mask_1=cond_mask_1,
                 input_ids_2=text_emb_2,
-                cond_mask_2=cond_mask_2,
+                cond_mask_2=None,
             )
 
     def decord_read(self, video_data):
@@ -786,6 +773,7 @@ class T2V_dataset:
                 f"text embedding file {npz} not found. Please check the text_emb_folder and make sure the text embeddings are already generated"
             )
         td = np.load(npz)
-        text_emb = td["text_emb"].astype(np.float32)
-        mask = td["mask"].astype(np.uint8)
-        return text_emb, mask  # (L, D), (L)
+        text_emb = td["prompt_embeds"].astype(np.float32)
+        mask = td["prompt_embeds"].astype(np.uint8)
+        text_emb_2 = td["prompt_embeds_2"].astype(np.float32)
+        return text_emb, mask, text_emb_2  # (L, D), (L), (D')
