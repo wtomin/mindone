@@ -1,32 +1,31 @@
 import logging
-import math
 import os
 import sys
+from typing import Dict, Tuple, Union
 
-import yaml
+from jsonargparse import ActionConfigFile, ArgumentParser
+from jsonargparse.typing import path_type
 
-import mindspore as ms
-from mindspore import Model
-from mindspore.communication.management import GlobalComm
-from mindspore.train import get_metric_fn
-from mindspore.train.callback import TimeMonitor
+import mindspore.dataset as ds
+from mindspore import GRAPH_MODE, Model, Symbol, Tensor, amp
+from mindspore import dtype as mstype
+from mindspore import get_context, nn, set_context, set_seed
 
-mindone_lib_path = os.path.abspath("../../")
-sys.path.insert(0, mindone_lib_path)
-sys.path.append("./")
+# TODO: remove in future when mindone is ready for install
+__dir__ = os.path.dirname(os.path.abspath(__file__))
+mindone_lib_path = os.path.abspath(os.path.join(__dir__, "../../../"))
+sys.path.append(mindone_lib_path)
+sys.path.append(os.path.join(__dir__, ".."))
+
+
+from hyvideo.acceleration import create_parallel_group
 from hyvideo.constants import PRECISION_TO_TYPE, PRECISIONS, PROMPT_TEMPLATE, VAE_PATH
-from hyvideo.dataset import getdataset
-from hyvideo.dataset.loader import create_dataloader
+from hyvideo.dataset import ImageVideoDataset, bucket_split_function
 from hyvideo.diffusion.net_with_loss import DiffusionWithLoss
 from hyvideo.diffusion.schedulers.rectified_flow_trainer import RFlowEvalLoss, RFlowLossWrapper
 from hyvideo.modules.models import HUNYUAN_VIDEO_CONFIG, HYVideoDiffusionTransformer
-from hyvideo.train.commons import create_loss_scaler, parse_args
-from hyvideo.utils.callbacks import EMAEvalSwapCallback, PerfRecorderCallback
-from hyvideo.utils.dataset_utils import Collate, LengthGroupedSampler
-from hyvideo.utils.ema import EMA
-from hyvideo.utils.helpers import set_model_param_dtype
-from hyvideo.utils.message_utils import print_banner
-from hyvideo.utils.ms_utils import init_env
+from hyvideo.utils import EMA, init_model, resume_train_net
+from hyvideo.utils.callbacks import PerfRecorderCallback, ReduceLROnPlateauByStep, ValidationCallback
 from hyvideo.utils.parallel_states import get_sequence_parallel_state, hccl_info
 from hyvideo.utils.utils import get_precision
 from hyvideo.vae import load_vae
@@ -46,32 +45,9 @@ from mindone.utils.params import count_params
 logger = logging.getLogger(__name__)
 
 
-def set_all_reduce_fusion(
-    params,
-    split_num: int = 7,
-    distributed: bool = False,
-    parallel_mode: str = "data",
-) -> None:
-    """Set allreduce fusion strategy by split_num."""
-
-    if distributed and parallel_mode == "data":
-        all_params_num = len(params)
-        step = all_params_num // split_num
-        split_list = [i * step for i in range(1, split_num)]
-        split_list.append(all_params_num - 1)
-        logger.info(f"Distribute config set: dall_params_num: {all_params_num}, set all_reduce_fusion: {split_list}")
-        ms.set_auto_parallel_context(all_reduce_fusion_config=split_list)
-
-
-#################################################################################
-#                                  Training Loop                                #
-#################################################################################
-
-
 def main(args):
     # 1. init
-    if args.num_frames == 1 or args.use_image_num != 0:
-        args.sp_size = 1
+
     save_src_strategy = args.use_parallel and args.parallel_mode == "optim"
     rank_id, device_num = init_env(
         args.mode,
@@ -439,12 +415,6 @@ def main(args):
         warmup_steps=args.lr_warmup_steps,
         decay_steps=args.lr_decay_steps,
         total_steps=total_train_steps,
-    )
-    set_all_reduce_fusion(
-        latent_diffusion_with_loss.trainable_params(),
-        split_num=7,
-        distributed=args.use_parallel,
-        parallel_mode=args.parallel_mode,
     )
 
     # build optimizer
