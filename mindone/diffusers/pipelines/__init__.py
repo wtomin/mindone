@@ -66,6 +66,7 @@ _import_structure = {
         "FluxPipeline",
     ],
     "hunyuandit": ["HunyuanDiTPipeline"],
+    "hunyuan_video": ["HunyuanVideoPipeline"],
     "i2vgen_xl": ["I2VGenXLPipeline"],
     "latent_diffusion": ["LDMSuperResolutionPipeline", "LDMTextToImagePipeline"],
     "kandinsky": [
