@@ -25,3 +25,5 @@ Customized activation functions for supporting various models in 🤗 Diffusers.
 ::: mindone.diffusers.models.activations.GEGLU
 
 ::: mindone.diffusers.models.activations.ApproximateGELU
+
+::: mindone.diffusers.models.activations.LinearActivation

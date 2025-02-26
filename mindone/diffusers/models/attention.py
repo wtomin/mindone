@@ -17,7 +17,7 @@ import mindspore as ms
 from mindspore import nn, ops
 
 from ..utils import logging
-from .activations import GEGLU, GELU, ApproximateGELU, FP32SiLU, SwiGLU
+from .activations import GEGLU, GELU, ApproximateGELU, FP32SiLU, LinearActivation, SwiGLU
 from .attention_processor import Attention, JointAttnProcessor2_0
 from .embeddings import SinusoidalPositionalEmbedding
 from .normalization import (
@@ -883,6 +883,8 @@ class FeedForward(nn.Cell):
             act_fn = ApproximateGELU(dim, inner_dim, bias=bias)
         elif activation_fn == "swiglu":
             act_fn = SwiGLU(dim, inner_dim, bias=bias)
+        elif activation_fn == "linear-silu":
+            act_fn = LinearActivation(dim, inner_dim, bias=bias, activation="silu")
 
         net = []
         # project in
