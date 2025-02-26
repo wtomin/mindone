@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
 
+import mindspore as ms
 from mindspore import Tensor
 from mindspore import dtype as mstype
 
@@ -41,8 +42,8 @@ EXAMPLE_DOC_STRING = """
     Examples:
         ```python
         >>> import mindspore as ms
-        >>> from diffusers import HunyuanVideoPipeline, HunyuanVideoTransformer3DModel
-        >>> from diffusers.utils import export_to_video
+        >>> from mindone.diffusers import HunyuanVideoPipeline, HunyuanVideoTransformer3DModel
+        >>> from mindone.diffusers.utils import export_to_video
 
         >>> model_id = "hunyuanvideo-community/HunyuanVideo"
         >>> transformer = HunyuanVideoTransformer3DModel.from_pretrained(
@@ -193,7 +194,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         prompt: Union[str, List[str]],
         prompt_template: Dict[str, Any],
         num_videos_per_prompt: int = 1,
-        dtype: Optional[mstype] = None,
+        dtype: Optional[ms.Type] = None,
         max_sequence_length: int = 256,
         num_hidden_layers_to_skip: int = 2,
     ) -> Tuple[Tensor, Tensor]:
@@ -256,7 +257,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         self,
         prompt: Union[str, List[str]],
         num_videos_per_prompt: int = 1,
-        dtype: Optional[mstype] = None,
+        dtype: Optional[ms.Type] = None,
         max_sequence_length: int = 77,
     ) -> Tensor:
         dtype = dtype or self.text_encoder_2.dtype
@@ -300,7 +301,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         prompt_embeds: Optional[Tensor] = None,
         pooled_prompt_embeds: Optional[Tensor] = None,
         prompt_attention_mask: Optional[Tensor] = None,
-        dtype: Optional[mstype] = None,
+        dtype: Optional[ms.Type] = None,
         max_sequence_length: int = 256,
     ):
         if prompt_embeds is None:
@@ -379,7 +380,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         height: int = 720,
         width: int = 1280,
         num_frames: int = 129,
-        dtype: Optional[mstype] = None,
+        dtype: Optional[ms.Type] = None,
         generator: Optional[Union[np.random.Generator, List[np.random.Generator]]] = None,
         latents: Optional[Tensor] = None,
     ) -> Tensor:
