@@ -410,7 +410,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Cell):
 
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = mint.nn.Linear(hidden_size, mlp_dim)
-        self.act_mlp = nn.GELU(approximate="tanh")
+        self.act_mlp = nn.GELU(approximate=True)
         self.proj_out = mint.nn.Linear(hidden_size + mlp_dim, hidden_size)
 
     def construct(

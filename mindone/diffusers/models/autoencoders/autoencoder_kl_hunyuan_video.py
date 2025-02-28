@@ -114,12 +114,14 @@ class HunyuanVideoCausalConv3d(nn.Cell):
 
     def __init__(
         self,
-        chan_in,
-        chan_out,
-        kernel_size: Union[int, Tuple[int, int, int]],
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, int, int]] = 3,
         stride: Union[int, Tuple[int, int, int]] = 1,
+        padding: Union[int, Tuple[int, int, int]] = 0,
         dilation: Union[int, Tuple[int, int, int]] = 1,
-        pad_mode="replicate",
+        bias: bool = True,
+        pad_mode: str = "replicate",
         dtype=ms.bfloat16,
         **kwargs,
     ):
@@ -136,9 +138,16 @@ class HunyuanVideoCausalConv3d(nn.Cell):
         )
 
         self.time_causal_padding = padding
-        bias = kwargs.pop("bias", True)
+
         self.conv = nn.Conv3d(
-            chan_in, chan_out, kernel_size, stride=stride, dilation=dilation, has_bias=bias, pad_mode="valid", **kwargs
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            dilation=dilation,
+            has_bias=bias,
+            pad_mode="valid",
+            **kwargs,
         ).to_float(dtype)
         self.dtype = dtype
         assert self.pad_mode == "replicate", f"pad mode {self.pad_mode} is not supported other than `replicate`"
