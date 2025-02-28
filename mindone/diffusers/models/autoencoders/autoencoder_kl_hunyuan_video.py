@@ -319,6 +319,7 @@ class HunyuanVideoMidBlock3D(nn.Cell):
                     heads=in_channels // attention_head_dim,
                     dim_head=attention_head_dim,
                     eps=resnet_eps,
+                    norm_num_groups=resnet_groups,
                     residual_connection=True,
                     bias=True,
                     upcast_softmax=True,
@@ -757,8 +758,8 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
             mid_block_add_attention=mid_block_add_attention,
         )
 
-        self.quant_conv = nn.Conv3d(2 * latent_channels, 2 * latent_channels, kernel_size=1)
-        self.post_quant_conv = nn.Conv3d(latent_channels, latent_channels, kernel_size=1)
+        self.quant_conv = nn.Conv3d(2 * latent_channels, 2 * latent_channels, kernel_size=1, has_bias=True)
+        self.post_quant_conv = nn.Conv3d(latent_channels, latent_channels, kernel_size=1, has_bias=True)
 
         self.spatial_compression_ratio = spatial_compression_ratio
         self.temporal_compression_ratio = temporal_compression_ratio
