@@ -210,7 +210,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             prompt_template_input = self.tokenizer(
                 prompt_template["template"],
                 padding="max_length",
-                return_tensors="pt",
+                return_tensors="np",
                 return_length=False,
                 return_overflowing_tokens=False,
                 return_attention_mask=False,
@@ -225,19 +225,19 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             max_length=max_sequence_length,
             padding="max_length",
             truncation=True,
-            return_tensors="pt",
+            return_tensors="np",
             return_length=False,
             return_overflowing_tokens=False,
             return_attention_mask=True,
         )
-        text_input_ids = text_inputs.input_ids
-        prompt_attention_mask = text_inputs.attention_mask
+        text_input_ids = Tensor(text_inputs.input_ids)
+        prompt_attention_mask = Tensor(text_inputs.attention_mask)
 
         prompt_embeds = self.text_encoder(
             input_ids=text_input_ids,
             attention_mask=prompt_attention_mask,
             output_hidden_states=True,
-        ).hidden_states[-(num_hidden_layers_to_skip + 1)]
+        )[0][-(num_hidden_layers_to_skip + 1)]
         prompt_embeds = prompt_embeds.to(dtype=dtype)
 
         if crop_start is not None and crop_start > 0:
@@ -270,11 +270,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             padding="max_length",
             max_length=max_sequence_length,
             truncation=True,
-            return_tensors="pt",
+            return_tensors="np",
         )
 
         text_input_ids = text_inputs.input_ids
-        untruncated_ids = self.tokenizer_2(prompt, padding="longest", return_tensors="pt").input_ids
+        untruncated_ids = self.tokenizer_2(prompt, padding="longest", return_tensors="np").input_ids
         if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not np.array_equal(
             text_input_ids, untruncated_ids
         ):
@@ -284,7 +284,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 f" {max_sequence_length} tokens: {removed_text}"
             )
 
-        prompt_embeds = self.text_encoder_2(text_input_ids, output_hidden_states=False).pooler_output
+        prompt_embeds = self.text_encoder_2(Tensor(text_input_ids), output_hidden_states=False)[1]  # .pooler_output
 
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.tile((1, num_videos_per_prompt))
