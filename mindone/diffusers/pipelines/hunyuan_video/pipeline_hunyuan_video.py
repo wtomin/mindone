@@ -237,7 +237,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             input_ids=text_input_ids,
             attention_mask=prompt_attention_mask,
             output_hidden_states=True,
-        )[0][-(num_hidden_layers_to_skip + 1)]
+        )[-1][-(num_hidden_layers_to_skip + 1)]
         prompt_embeds = prompt_embeds.to(dtype=dtype)
 
         if crop_start is not None and crop_start > 0:
