@@ -548,10 +548,10 @@ class Attention(nn.Cell):
 
         if out_dim == 3:
             if attention_mask.shape[0] < batch_size * head_size:
-                attention_mask = attention_mask.repeat_interleave(head_size, axis=0)
+                attention_mask = attention_mask.repeat_interleave(head_size, dim=0)
         elif out_dim == 4:
             attention_mask = attention_mask.unsqueeze(1)
-            attention_mask = attention_mask.repeat_interleave(head_size, axis=1)
+            attention_mask = attention_mask.repeat_interleave(head_size, dim=1)
 
         if attention_mask_dtype == ms.bool_:
             attention_mask = attention_mask.bool()
