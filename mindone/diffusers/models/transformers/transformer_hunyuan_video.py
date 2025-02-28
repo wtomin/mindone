@@ -369,7 +369,7 @@ class HunyuanVideoRotaryPosEmbed(nn.Cell):
             # differences in layerwise debugging outputs, but visually it is the same.
             grid = ops.arange(0, rope_sizes[i], dtype=ms.float32)
             axes_grids.append(grid)
-        grid = mint.meshgrid(*axes_grids, indexing="ij")  # [W, H, T]
+        grid = ops.meshgrid(*axes_grids, indexing="ij")  # [W, H, T]
         grid = ops.stack(grid, axis=0)  # [3, W, H, T]
 
         freqs = []
