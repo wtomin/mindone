@@ -164,6 +164,6 @@ class LinearActivation(nn.Cell):
         self.proj = nn.Dense(dim_in, dim_out, has_bias=bias)
         self.activation = get_activation(activation)
 
-    def forward(self, hidden_states):
+    def construct(self, hidden_states):
         hidden_states = self.proj(hidden_states)
         return self.activation(hidden_states)
