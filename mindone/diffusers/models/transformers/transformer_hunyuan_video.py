@@ -164,7 +164,7 @@ class HunyuanVideoAdaNorm(nn.Cell):
 
     def construct(self, temb: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         temb = self.linear(self.nonlinearity(temb))
-        gate_msa, gate_mlp = temb.chunk(2, dim=1)
+        gate_msa, gate_mlp = ops.chunk(temb, 2, axis=1)
         gate_msa, gate_mlp = gate_msa.unsqueeze(1), gate_mlp.unsqueeze(1)
         return gate_msa, gate_mlp
 
