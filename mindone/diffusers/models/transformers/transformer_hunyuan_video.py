@@ -761,7 +761,7 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         latent_sequence_length = hidden_states.shape[1]
         condition_sequence_length = encoder_hidden_states.shape[1]
         sequence_length = latent_sequence_length + condition_sequence_length
-        attention_mask = ops.zeros(batch_size, sequence_length, dtype=ms.bool_)  # [B, N]
+        attention_mask = ops.zeros((batch_size, sequence_length), dtype=ms.bool_)  # [B, N]
 
         effective_condition_sequence_length = encoder_attention_mask.sum(axis=1, dtype=ms.int32)  # [B,]
         effective_sequence_length = latent_sequence_length + effective_condition_sequence_length
