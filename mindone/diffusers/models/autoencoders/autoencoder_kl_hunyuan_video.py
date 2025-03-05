@@ -179,7 +179,7 @@ class HunyuanVideoUpsampleCausal3D(nn.Cell):
         super().__init__()
 
         out_channels = out_channels or in_channels
-        self.upsample_factor = upsample_factor
+        self.upsample_factor = tuple([float(x) for x in upsample_factor])
 
         self.conv = HunyuanVideoCausalConv3d(in_channels, out_channels, kernel_size, stride, bias=bias)
         self.ms_interpolate = MSInterpolate()
