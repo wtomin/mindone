@@ -192,7 +192,7 @@ class HunyuanVideoUpsampleCausal3D(nn.Cell):
 
         num_frames = hidden_states.shape[2]
 
-        first_frame, other_frames = hidden_states.split((1, num_frames - 1), dim=2)
+        first_frame, other_frames = mint.split(hidden_states, (1, num_frames - 1), dim=2)
         first_frame = self.ms_interpolate(
             first_frame.squeeze(2), scale_factor=self.upsample_factor[1:], mode="nearest"
         ).unsqueeze(2)
@@ -879,7 +879,7 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
                 [`~models.autoencoder_kl.AutoencoderKLOutput`] is returned, otherwise a plain `tuple` is returned.
         """
         if self.use_slicing and x.shape[0] > 1:
-            encoded_slices = [self._encode(x_slice) for x_slice in x.split(1)]
+            encoded_slices = [self._encode(x_slice) for x_slice in mint.split(x, 1)]
             h = mint.cat(encoded_slices)
         else:
             h = self._encode(x)
@@ -924,7 +924,7 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
                 returned.
         """
         if self.use_slicing and z.shape[0] > 1:
-            decoded_slices = [self._decode(z_slice)[0] for z_slice in z.split(1)]
+            decoded_slices = [self._decode(z_slice)[0] for z_slice in mint.split(z, 1)]
             decoded = mint.cat(decoded_slices)
         else:
             decoded = self._decode(z, return_dict=False)[0]
