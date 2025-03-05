@@ -58,7 +58,8 @@ EXAMPLE_DOC_STRING = """
         ...     width=512,
         ...     num_frames=61,
         ...     num_inference_steps=30,
-        ... ).frames[0]
+        ...     guidance_scale=6,
+        ... )[0][0]
         >>> export_to_video(output, "output.mp4", fps=15)
         ```
 """
@@ -728,7 +729,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             video = latents
 
         # Offload all models
-        self.maybe_free_model_hooks()
+        # self.maybe_free_model_hooks()
 
         if not return_dict:
             return (video,)
