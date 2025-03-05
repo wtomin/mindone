@@ -10,6 +10,8 @@ except ImportError:
 import mindspore as ms
 from mindspore.communication import get_group_size, get_rank, init
 
+from mindone.utils.seed import set_random_seed
+
 from .version_control import MS_VERSION
 
 _logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ def init_train_env(
     Returns:
         A tuple containing the device ID, rank ID and number of devices.
     """
-    ms.set_seed(seed)
+    set_random_seed(seed)
 
     if debug and mode == ms.GRAPH_MODE:  # force PyNative mode when debugging
         _logger.warning("Debug mode is on, switching execution mode to PyNative.")
