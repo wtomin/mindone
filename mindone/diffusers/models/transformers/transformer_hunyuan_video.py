@@ -150,7 +150,7 @@ class HunyuanVideoPatchEmbed(nn.Cell):
 
     def construct(self, hidden_states: Tensor) -> Tensor:
         hidden_states = self.proj(hidden_states)
-        hidden_states = hidden_states.flatten(start_dim=2).transpose((0, 2, 1))  # BCFHW -> BNC
+        hidden_states = mint.flatten(hidden_states, start_dim=2).transpose((0, 2, 1))  # BCFHW -> BNC
         return hidden_states
 
 
@@ -790,7 +790,10 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
             batch_size, post_patch_num_frames, post_patch_height, post_patch_width, -1, p_t, p, p
         )
         hidden_states = hidden_states.permute(0, 4, 1, 5, 2, 6, 3, 7)
-        hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+        # hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+        hidden_states = mint.flatten(hidden_states, 6, 7)
+        hidden_states = mint.flatten(hidden_states, 4, 5)
+        hidden_states = mint.flatten(hidden_states, 2, 3)
 
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
