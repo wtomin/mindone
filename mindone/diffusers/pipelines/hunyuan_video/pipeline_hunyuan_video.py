@@ -49,7 +49,7 @@ EXAMPLE_DOC_STRING = """
         >>> transformer = HunyuanVideoTransformer3DModel.from_pretrained(
         ...     model_id, subfolder="transformer", mindspore_dtype=ms.bfloat16, use_safetensors=True
         ... )
-        >>> pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, mindspore_dtype=ms.float16, use_safetensors=True)
+        >>> pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, mindspore_dtype=ms.bfloat16, use_safetensors=True)
         >>> pipe.vae.enable_tiling()
 
         >>> output = pipe(
