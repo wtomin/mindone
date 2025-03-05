@@ -51,7 +51,7 @@ class HunyuanVideoAttnProcessor2_0:
         attention_mask: Optional[Tensor] = None,
         image_rotary_emb: Optional[Tensor] = None,
     ) -> Tensor:
-        if hasattr(attn, "add_q_proj") and attn.add_q_proj is None and encoder_hidden_states is not None:
+        if attn.add_q_proj is None and encoder_hidden_states is not None:
             hidden_states = mint.cat([hidden_states, encoder_hidden_states], dim=1)
 
         # 1. QKV projections
@@ -73,7 +73,7 @@ class HunyuanVideoAttnProcessor2_0:
         if image_rotary_emb is not None:
             from ..embeddings import apply_rotary_emb
 
-            if hasattr(attn, "add_q_proj") and attn.add_q_proj is None and encoder_hidden_states is not None:
+            if attn.add_q_proj is None and encoder_hidden_states is not None:
                 query = mint.cat(
                     [
                         apply_rotary_emb(query[:, :, : -encoder_hidden_states.shape[1]], image_rotary_emb),
@@ -93,7 +93,7 @@ class HunyuanVideoAttnProcessor2_0:
                 key = apply_rotary_emb(key, image_rotary_emb)
 
         # 4. Encoder condition QKV projection and normalization
-        if hasattr(attn, "add_q_proj") and attn.add_q_proj is not None and encoder_hidden_states is not None:
+        if attn.add_q_proj is not None and encoder_hidden_states is not None:
             encoder_query = attn.add_q_proj(encoder_hidden_states)
             encoder_key = attn.add_k_proj(encoder_hidden_states)
             encoder_value = attn.add_v_proj(encoder_hidden_states)
