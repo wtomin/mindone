@@ -250,7 +250,7 @@ class HunyuanVideoResnetBlockCausal3D(nn.Cell):
         super().__init__()
         out_channels = out_channels or in_channels
 
-        self.nonlinearity = get_activation(non_linearity)
+        self.nonlinearity = get_activation(non_linearity)()
 
         self.norm1 = GroupNorm(groups, in_channels, eps=eps, affine=True)
         self.conv1 = HunyuanVideoCausalConv3d(in_channels, out_channels, 3, 1, 0)
@@ -927,7 +927,7 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
             decoded_slices = [self._decode(z_slice)[0] for z_slice in z.split(1)]
             decoded = mint.cat(decoded_slices)
         else:
-            decoded = self._decode(z)[0]
+            decoded = self._decode(z, return_dict=False)[0]
 
         if not return_dict:
             return (decoded,)
