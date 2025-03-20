@@ -105,7 +105,7 @@ class MMDoubleStreamBlock(nn.Cell):
             bias=True,
             **factory_kwargs,
         )
-
+        self.hybrid_seq_parallel_attn = None
         if attn_mode == "vanilla":
             self.compute_attention = VanillaAttention(head_dim)
         elif attn_mode == "flash":
@@ -210,14 +210,23 @@ class MMDoubleStreamBlock(nn.Cell):
         # ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape[0]:{img.shape[0]}"
 
         # attention computation start
-
-        attn = self.compute_attention(
-            q,
-            k,
-            v,
-            actual_seq_qlen=actual_seq_qlen,
-            actual_seq_kvlen=actual_seq_kvlen,
-        )
+        if not self.hybrid_seq_parallel_attn:
+            attn = self.compute_attention(
+                q,
+                k,
+                v,
+                actual_seq_qlen=actual_seq_qlen,
+                actual_seq_kvlen=actual_seq_kvlen,
+            )
+        else:
+            attn = parallel_attention(
+                self.hybrid_seq_parallel_attn,
+                q,
+                k,
+                v,
+                actual_seq_qlen=actual_seq_qlen,
+                actual_seq_kvlen=actual_seq_kvlen,
+            )
 
         # attention computation end
 
@@ -355,14 +364,24 @@ class MMSingleStreamBlock(nn.Cell):
             k = ops.concat((img_k, txt_k), axis=1)
 
         # Compute attention.
+        if not self.hybrid_seq_parallel_attn:
+            attn = self.compute_attention(
+                q,
+                k,
+                v,
+                actual_seq_qlen=actual_seq_qlen,
+                actual_seq_kvlen=actual_seq_kvlen,
+            )
+        else:
+            attn = parallel_attention(
+                self.hybrid_seq_parallel_attn,
+                q,
+                k,
+                v,
+                actual_seq_qlen=actual_seq_qlen,
+                actual_seq_kvlen=actual_seq_kvlen,
+            )
 
-        attn = self.compute_attention(
-            q,
-            k,
-            v,
-            actual_seq_qlen=actual_seq_qlen,
-            actual_seq_kvlen=actual_seq_kvlen,
-        )
         # attention computation end
 
         # Compute activation in mlp stream, cat again and run second linear layer.

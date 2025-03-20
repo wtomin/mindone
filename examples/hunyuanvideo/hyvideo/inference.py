@@ -1,8 +1,12 @@
+import functools
 import random
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
+from hyvideo.acceleration import get_sequence_parallel_group
+from hyvideo.acceleration.communications import _communicate_along_dim
 from hyvideo.constants import NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from hyvideo.diffusion.pipelines import HunyuanVideoPipeline
 from hyvideo.diffusion.schedulers import FlowMatchDiscreteScheduler
@@ -14,13 +18,73 @@ from hyvideo.vae import load_vae
 from loguru import logger
 
 import mindspore as ms
-from mindspore import amp
+from mindspore import amp, mint, ops
+from mindspore.communication import get_group_size, get_rank
 
 from mindone.utils.amp import auto_mixed_precision
 
 
 def parallelize_transformer(pipe):
-    raise NotImplementedError
+    transformer = pipe.transformer
+    original_construct = transformer.construct
+
+    @functools.wraps(transformer.__class__.construct)
+    def new_construct(
+        self,
+        x: ms.tensor,
+        t: ms.tensor,  # Should be in range(0, 1000).
+        text_states: ms.tensor = None,
+        text_mask: ms.tensor = None,  # Now we don't use it.
+        text_states_2: Optional[ms.tensor] = None,  # Text embedding for modulation.
+        freqs_cos: Optional[ms.tensor] = None,
+        freqs_sin: Optional[ms.tensor] = None,
+        guidance: ms.tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
+    ):
+        if (sp_group := get_sequence_parallel_group()) is not None:
+            sp_group_size = get_group_size(sp_group)
+        else:
+            sp_group_size = 1
+        if x.shape[-2] // 2 % sp_group_size == 0:
+            # try to split x by height
+            split_dim = -2
+        elif x.shape[-1] // 2 % sp_group_size == 0:
+            # try to split x by width
+            split_dim = -1
+        else:
+            raise ValueError(f"Cannot split video sequence into ulysses_degree ({sp_group_size()}) parts evenly")
+
+        # patch sizes for the temporal, height, and width dimensions are 1, 2, and 2.
+        temporal_size, h, w = x.shape[2], x.shape[3] // 2, x.shape[4] // 2
+
+        x = mint.chunk(x, sp_group_size, dim=split_dim)[get_rank(sp_group)]
+
+        dim_thw = freqs_cos.shape[-1]
+        freqs_cos = freqs_cos.reshape(temporal_size, h, w, dim_thw)
+        freqs_cos = mint.chunk(freqs_cos, sp_group_size, dim=split_dim - 1)[get_rank(sp_group)]
+        freqs_cos = freqs_cos.reshape(-1, dim_thw)
+        dim_thw = freqs_sin.shape[-1]
+        freqs_sin = freqs_sin.reshape(temporal_size, h, w, dim_thw)
+        freqs_sin = mint.chunk(freqs_sin, sp_group_size, dim=split_dim - 1)[get_rank(sp_group)]
+        freqs_sin = freqs_sin.reshape(-1, dim_thw)
+
+        for block in transformer.double_blocks + transformer.single_blocks:
+            block.hybrid_seq_parallel_attn = MSLongContextAttention()
+
+        output = original_construct(
+            x,
+            t,
+            text_states,
+            text_mask,
+            text_states_2,
+            freqs_cos,
+            freqs_sin,
+            guidance,
+        )
+        output = _communicate_along_dim(output, dim=split_dim, func=ops.AllGather(group=sp_group))
+        return output
+
+    new_construct = new_construct.__get__(transformer)
+    transformer.construct = new_construct
 
 
 class Inference(object):
@@ -302,6 +366,9 @@ class HunyuanVideoSampler(Inference):
         )
 
         self.default_negative_prompt = NEGATIVE_PROMPT
+
+        if self.parallel_args["ulysses_degree"] > 1 or self.parallel_args["ring_degree"] > 1:
+            parallelize_transformer(self.pipeline)
 
     def load_diffusion_pipeline(
         self,
