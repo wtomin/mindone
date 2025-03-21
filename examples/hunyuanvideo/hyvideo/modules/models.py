@@ -389,13 +389,11 @@ class MMSingleStreamBlock(nn.Cell):
         q = self.q_norm(q)  # .to(v)
         k = self.k_norm(k)  # .to(v)
         if self.sp_group_size is not None:
-            sub_txt_len = txt_len // self.sp_group_size
-        else:
-            sub_txt_len = txt_len
+            txt_len = txt_len // self.sp_group_size
         # Apply RoPE if needed.
         if freqs_cos is not None:
-            img_q, txt_q = q[:, :-sub_txt_len, :, :], q[:, -sub_txt_len:, :, :]
-            img_k, txt_k = k[:, :-sub_txt_len, :, :], k[:, -sub_txt_len:, :, :]
+            img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
+            img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
             img_qq, img_kk = RoPE()(img_q, img_k, freqs_cos, freqs_sin, head_first=False)
             # assert (
             #    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
@@ -406,9 +404,9 @@ class MMSingleStreamBlock(nn.Cell):
 
         # Compute attention.
         # sequence_parallel
-        q = ops.concat((self.alltoall(q[:, :-sub_txt_len]), self.alltoall(q[:, -sub_txt_len:])), axis=1)
-        k = ops.concat((self.alltoall(k[:, :-sub_txt_len]), self.alltoall(k[:, -sub_txt_len:])), axis=1)
-        v = ops.concat((self.alltoall(v[:, :-sub_txt_len]), self.alltoall(v[:, -sub_txt_len:])), axis=1)
+        q = self.alltoall(q)
+        k = self.alltoall(k)
+        v = self.alltoall(v)
         attn = self.compute_attention(
             q,
             k,
@@ -417,7 +415,7 @@ class MMSingleStreamBlock(nn.Cell):
             actual_seq_kvlen=actual_seq_kvlen,
         )
         # attention computation end
-        attn = ops.concat((self.alltoall_out(attn[:, :-txt_len]), self.alltoall_out(attn[:, -txt_len:])), axis=1)
+        attn = self.alltoall_out(attn)
         # Compute activation in mlp stream, cat again and run second linear layer.
         output = self.linear2(ops.concat((attn, self.mlp_act(mlp)), axis=2))
         return x + apply_gate(output, gate=mod_gate)
