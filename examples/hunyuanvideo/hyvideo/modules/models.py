@@ -198,13 +198,6 @@ class MMDoubleStreamBlock(nn.Cell):
         img_q = self.img_attn_q_norm(img_q)  # .to(img_v)
         img_k = self.img_attn_k_norm(img_k)  # .to(img_v)
 
-        # Apply RoPE if needed.
-        if freqs_cos is not None:
-            # AMP: img_q, img_k cast to fp32 inside, cast back in output, out bf16
-            img_qq, img_kk = RoPE()(img_q, img_k, freqs_cos, freqs_sin, head_first=False)
-
-            img_q, img_k = img_qq.to(img_q.dtype), img_kk.to(img_k.dtype)
-
         # Prepare txt for attention.
         # AMP: txt bf16, norm fp32, out bf16
         txt_modulated = self.txt_norm1(txt)
@@ -227,6 +220,13 @@ class MMDoubleStreamBlock(nn.Cell):
         txt_k = self.alltoall(txt_k)
         txt_v = self.alltoall(txt_v)
         img_seq_len = img_q.shape[1]
+
+        # Apply RoPE if needed.
+        if freqs_cos is not None:
+            # AMP: img_q, img_k cast to fp32 inside, cast back in output, out bf16
+            img_qq, img_kk = RoPE()(img_q, img_k, freqs_cos, freqs_sin, head_first=False)
+
+            img_q, img_k = img_qq.to(img_q.dtype), img_kk.to(img_k.dtype)
 
         # Run actual attention.
         # input hidden states (B, S_v+S_t, H, D)
@@ -392,23 +392,26 @@ class MMSingleStreamBlock(nn.Cell):
             sub_txt_len = txt_len // self.sp_group_size
         else:
             sub_txt_len = txt_len
+
+        img_q, txt_q = q[:, :-sub_txt_len, :, :], q[:, -sub_txt_len:, :, :]
+        img_k, txt_k = k[:, :-sub_txt_len, :, :], k[:, -sub_txt_len:, :, :]
+        img_v, txt_v = v[:, :-sub_txt_len, :, :], v[:, -sub_txt_len:, :, :]
+        img_q, txt_q = self.alltoall(img_q), self.alltoall(txt_q)
+        img_k, txt_k = self.alltoall(img_k), self.alltoall(txt_k)
+        img_v, txt_v = self.alltoall(img_v), self.alltoall(txt_v)
         # Apply RoPE if needed.
         if freqs_cos is not None:
-            img_q, txt_q = q[:, :-sub_txt_len, :, :], q[:, -sub_txt_len:, :, :]
-            img_k, txt_k = k[:, :-sub_txt_len, :, :], k[:, -sub_txt_len:, :, :]
             img_qq, img_kk = RoPE()(img_q, img_k, freqs_cos, freqs_sin, head_first=False)
             # assert (
             #    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
             # ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
             img_q, img_k = img_qq.to(img_q.dtype), img_kk.to(img_k.dtype)
-            q = ops.concat((img_q, txt_q), axis=1)
-            k = ops.concat((img_k, txt_k), axis=1)
 
         # Compute attention.
         # sequence_parallel
-        q = ops.concat((self.alltoall(q[:, :-sub_txt_len]), self.alltoall(q[:, -sub_txt_len:])), axis=1)
-        k = ops.concat((self.alltoall(k[:, :-sub_txt_len]), self.alltoall(k[:, -sub_txt_len:])), axis=1)
-        v = ops.concat((self.alltoall(v[:, :-sub_txt_len]), self.alltoall(v[:, -sub_txt_len:])), axis=1)
+        q = ops.concat((img_q, txt_q), axis=1)
+        k = ops.concat((img_k, txt_k), axis=1)
+        v = ops.concat((img_v, txt_v), axis=1)
         attn = self.compute_attention(
             q,
             k,
@@ -417,7 +420,9 @@ class MMSingleStreamBlock(nn.Cell):
             actual_seq_kvlen=actual_seq_kvlen,
         )
         # attention computation end
-        attn = ops.concat((self.alltoall_out(attn[:, :-txt_len]), self.alltoall_out(attn[:, -txt_len:])), axis=1)
+        attn_img, attn_txt = attn[:, :-txt_len, ...], attn[:, -txt_len:, ...]
+        attn_img, attn_txt = self.alltoall_out(attn_img), self.alltoall_out(attn_txt)
+        attn = ops.concat((attn_img, attn_txt), axis=1)
         # Compute activation in mlp stream, cat again and run second linear layer.
         output = self.linear2(ops.concat((attn, self.mlp_act(mlp)), axis=2))
         return x + apply_gate(output, gate=mod_gate)
@@ -749,20 +754,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # sequence parallel start
         img = self.split_forward_gather_backward(img)
-        if freqs_cos is not None and freqs_sin is not None:
-            if freqs_cos.ndim == 2:
-                # (S, attn_head_dim)
-                freqs_cos = self.split_forward_gather_backward(freqs_cos.unsqueeze(0))[0]
-                freqs_sin = self.split_forward_gather_backward(freqs_sin.unsqueeze(0))[0]
-            elif freqs_cos.ndim == 3:
-                # (B, S, attn_head_dim)
-                freqs_cos = self.split_forward_gather_backward(freqs_cos)[0]
-                freqs_sin = self.split_forward_gather_backward(freqs_sin)[0]
-            else:
-                raise ValueError(
-                    f"Expect that the n dimensions of freqs_cos(freqs_sin) is 2 or 3, but got {freqs_cos.ndim}"
-                )
-
         txt = self.split_forward_gather_backward(txt)
         # --------------------- Pass through DiT blocks ------------------------
         for _, block in enumerate(self.double_blocks):
