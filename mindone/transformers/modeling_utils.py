@@ -293,18 +293,18 @@ def load_state_dict(checkpoint_file: Union[str, os.PathLike]):
 
 
 def _load_state_dict_into_model(model_to_load, state_dict, start_prefix, is_sharded=False):
-    # # add prefix to the name of parameters
-    # if len(start_prefix) > 0:
-    #     for name, param in model_to_load.parameters_and_names():
-    #         if param.name != name:
-    #             logger.error(
-    #                 f"When Loading state dict into model {model_to_load.__class__.__name__}, the attribute 'name' of 'mindspore.ms.Parameter' object is {param.name} which should be {name}.\n"  # noqa: E501
-    #                 f"There are several possible reasons for this misalignment:\n"
-    #                 f"  1. {model_to_load.__class__.__name__} didn't call 'MSPreTrainedModel.post_init()' correctly.\n"
-    #                 f"  2. You have made changes to the model before loading the weights, which may be implicit. For example, you created an optimizer using the parameters of model.\n"  # noqa: E501
-    #                 f"If you encounter this error, please report it to the developer."
-    #             )
-    #         param.name = start_prefix + name
+    # add prefix to the name of parameters
+    if len(start_prefix) > 0:
+        for name, param in model_to_load.parameters_and_names():
+            if param.name != name:
+                logger.error(
+                    f"When Loading state dict into model {model_to_load.__class__.__name__}, the attribute 'name' of 'mindspore.ms.Parameter' object is {param.name} which should be {name}.\n"  # noqa: E501
+                    f"There are several possible reasons for this misalignment:\n"
+                    f"  1. {model_to_load.__class__.__name__} didn't call 'MSPreTrainedModel.post_init()' correctly.\n"
+                    f"  2. You have made changes to the model before loading the weights, which may be implicit. For example, you created an optimizer using the parameters of model.\n"  # noqa: E501
+                    f"If you encounter this error, please report it to the developer."
+                )
+        model_to_load.update_parameters_name(prefix=start_prefix)  # recursively adding prefix to the name of parameters
 
     # TODO: error_msgs is always empty for now. Maybe we need to rewrite MindSpore's `load_param_into_net`.
     #  Error msgs should contain caught exception like size mismatch instead of missing/unexpected keys.
