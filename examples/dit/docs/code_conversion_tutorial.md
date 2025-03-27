@@ -156,11 +156,7 @@ git clone https://github.com/facebookresearch/DiT.git
 这段代码实现了训练的迭代过程，主要包括训练批数据加载、VAE和DiT的前向计算、损失函数计算、以及模型参数和EMA的更新。
 
 
-## 模型前向对齐
-
-目的：确保在相同输入下，加载相同权重后，PyTorch和MindSpore模型输出一致，验证模型转换正确性。
-
-### 模型结构分析
+## 模型结构分析及代码迁移
 
 DiT是基于Transformer架构的扩散生成模型，相比Stable Diffusion这类使用U-Net骨干网络的生成模型，DiT的可扩展性更好，是当前图像视频生成式SoTA的主流架构。其网络结构如下：
 
@@ -392,173 +388,9 @@ dit/
 └── tools/
 ```
 
-### 模型前向精度验证
-
-为了验证模型组网的正确性及其精度，我们需要首先控制两个模型的权重相同。 两个模型分别载入`models/DiT-XL-2-256x256.pt`和`models/DiT-XL-2-256x256.ckpt`， 以确保两个模型的权重相同。其次，我们需要控制模型的输入相同。DiT模型的输入包括：潜在噪声`x`、标签`y`和噪声时间步`t`。
-
-我们首先在PyTorch环境上，运行在以下前向计算脚本获得Pytorch的前向结果：
-
-```python
-import os
-import sys
-
-import numpy as np
-import torch
-
-TORCH_PATH = "./DiT"  # the directory to https://github.com/facebookresearch/DiT
-sys.path.append(os.path.abspath(TORCH_PATH))
-from models import DiT_models
-
-def load_pt_dit(model_name="DiT-XL/2", dtype="fp16", dit_checkpoint="models/DiT-XL-2-256x256.pt", device="cuda"):
-    image_size = int(dit_checkpoint.split(".")[0].split("-")[-1].split("x")[-1])
-    latent_size = image_size // 8
-    dit_model = DiT_models[model_name](
-        input_size=latent_size,
-        num_classes=1000,
-    ).to(device)
-
-    if dit_checkpoint:
-        state_dict = torch.load(dit_checkpoint, weights_only=True, map_location="cpu")
-        dit_model.load_state_dict(state_dict)
-    else:
-        print("Initialize DIT randomly")
-    dit_model.eval()
-    return dit_model
-
-def init_inputs(image_size, device="cuda"):
-    latent_size = image_size // 8
-    bs = 2
-    num_channels = 4
-    x = torch.randn(bs, num_channels, latent_size, latent_size)
-    y = torch.randint(0, 2, (bs,))
-    t = torch.arange(bs)
-    # save the inputs to .npz
-    np.savez("pt_inputs.npz", x=x.numpy(), y=y.numpy(), t=t.numpy())
-    # send to device
-    x, y, t = x.to(device), y.to(device), t.to(device)
-    return x, y, t
-
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    x, y, t = init_inputs(256, device)
-    dit_model = load_pt_dit(device=device)
-    output = dit_model(x, y, t)
-    print(output.shape)
-    np.save("pt_output.npy", output.cpu().detach().numpy())
-```
-
-上述命令会初始化一个PyTorch的DiT模型，并载入`models/DiT-XL-2-256x256.pt`权重文件。随机初始化`x`,`y`和`t`并且将这些输入保存到`pt_inputs.npz`文件中。随后执行模型前向，将PyTorch模型的前向输出保存到`pt_output.npy`文件中。
-
-随后，我们在MindSpore环境运行以下前向计算脚本获得MindSpore的前向结果：
-
-```python
-import os
-import sys
-import numpy as np
-import mindspore as ms
-from mindspore import mint
-from utils.model_utils import load_dit_ckpt_params
-
-from mindone.models.dit import DiT_models
-from mindone.utils.amp import auto_mixed_precision
-
-
-def load_ms_dit(model_name="DiT-XL/2", dtype="fp16", dit_checkpoint="models/DiT-XL-2-256x256.ckpt"):
-    image_size = int(dit_checkpoint.split(".")[0].split("-")[-1].split("x")[-1])
-    latent_size = image_size // 8
-    dit_model = DiT_models[model_name](
-        input_size=latent_size,
-        num_classes=1000,
-        block_kwargs={"enable_flash_attention": True},
-    )
-
-    if dtype == "fp16":
-        model_dtype = ms.float16
-        dit_model = auto_mixed_precision(dit_model, amp_level="O2", dtype=model_dtype)
-    elif dtype == "bf16":
-        model_dtype = ms.bfloat16
-        dit_model = auto_mixed_precision(dit_model, amp_level="O2", dtype=model_dtype)
-    else:
-        model_dtype = ms.float32
-
-    if dit_checkpoint:
-        dit_model = load_dit_ckpt_params(dit_model, dit_checkpoint)
-    else:
-        print("Initialize DIT ramdonly")
-    dit_model = dit_model.set_train(False)
-    for param in dit_model.get_parameters():  # freeze dit_model
-        param.requires_grad = False
-    return dit_model
-
-
-def init_inputs(image_size):
-    latent_size = image_size // 8
-    bs = 2
-    num_channels = 4
-    x = mint.randn(bs, num_channels, latent_size, latent_size)
-    y = mint.randint(0, 2, (bs,))
-    t = mint.arange(bs)
-    # save the inputs to .npz
-    np.savez("ms_inputs.npz", x=x.asnumpy(), y=y.asnumpy(), t=t.asnumpy())
-    return x, y, t
-
-
-def load_inputs(pt_inputs="./pt_inputs.npz"):
-    pt_inputs = np.load(pt_inputs)
-    x = mint.Tensor(pt_inputs["x"])
-    y = mint.Tensor(pt_inputs["y"])
-    t = mint.Tensor(pt_inputs["t"])
-    return x, y, t
-
-
-if __name__ == "__main__":
-    ms.set_context(mode=ms.GRAPH_MODE)
-    # x,y,t = init_inputs(256)
-    x, y, t = load_inputs(pt_inputs="./pt_inputs.npz")
-    dit_model = load_ms_dit()
-    output = dit_model(x, y, t)
-    print(output.shape)
-    np.save("ms_output.npy", output.asnumpy())
-```
-
-上述命令会初始化一个MindSpore的DiT模型，并载入`models/DiT-XL-2-256x256.ckpt`权重文件。通过载入`pt_inputs.npz`文件来保证两个模型的输入完全相同。随后执行模型前向，将MindSpore模型的前向输出保存到`ms_output.npy`文件中。
-
-最后对比两个输出，运行以下脚本：
-```bash
-import numpy as np
-
-def load_npy_file(file_path):
-    return np.load(file_path)
-
-def calculate_mse(output1, output2):
-    return np.mean((output1 - output2) ** 2)
-
-def main():
-    ms_output = load_npy_file("ms_output.npy")
-    pt_output = load_npy_file("pt_output.npy")
-
-    mse = calculate_mse(ms_output, pt_output)
-
-    print(f"Mean Squared Error (MSE): {mse}")
-
-    if mse < 0.001:
-        print("The mse is less than 0.001, the model is correct.")
-
-if __name__ == "__main__":
-    main()
-```
-
-得到的输出为：
-```bash
-Mean Squared Error (MSE): 1.9583489120222977e-05
-The mse is less than 0.001, the model is correct.
-```
-
-通过以上结果, 可判断网络前向已对齐，网络结构迁移结果正确。
-
 ## 数据处理对齐
 
-在模型训练过程中，数据处理是相当重要的一个环节，相同的模型使用不同的数据增强方法，其训练结果往往也存在差异。因此，为了对齐训练效果，我们应该尽量保证数据集读取、数据增强、数据采样方式与原始实现一致。
+在模型训练过程中，数据处理是相当重要的一个环节，相同的模型使用不同的数据增强方法，其训练结果往往也存在差异。
 
 ### 数据处理代码迁移
 
@@ -800,16 +632,6 @@ msrun --bind_core=True --worker_num=2 --local_worker_num=2 --master_port=9000 --
 ```
 训练过程中的log文件可以通过`tail -f outputs/class_cond_train/parallel_logs/worker_0.log`查看。在上述的训练结束后，训练过程中的Loss会保存在`outputs/class_cond_train/exp/result.log`中。
 
-训练结束后，我们可以用以下的命令来绘制损失函数的曲线图：
-```bash
-# https://github.com/wtomin/mindone/blob/dit-readme/examples/dit/tools/plot.py
-python tools/plot.py --input Dit/results/000-DiT-XL-2/log.txt outputs/class_cond_train/exp/result.log --output compare_loss.png --smooth --alpha 0.1
-```
-得到的图片如下所示：
-
-![compare_loss.png](compare_loss.png)
-
-可以看到，在相同的训练超参和相同的初始权重下，MindSpore和PyTorch的训练精度基本一致。
 
 ## **训练性能与总结**
 
