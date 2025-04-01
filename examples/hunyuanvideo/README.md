@@ -13,6 +13,7 @@ Here is the development plan of the project:
     - [x] Training
 - HunyuanVideo (13B):
     - [x] Inference
+    - [x] Sequence Parallel (Ulysses SP)
     - [x] Training stage 1: T2I 256px
     - [ ] Training stage 2: T2I  256px 512px (buckts)
     - [ ] Training stage 3: T2I/V up to 720x1280x129 (buckts)
@@ -38,6 +39,35 @@ Here is the development plan of the project:
     ```shell
     pip install -r requirements.txt
     ```
+    In case `decord` package is not available, try `pip install eva-decord`.
+    For EulerOS, instructions on ffmpeg and decord installation are as follows.
+
+    <details onclose>
+    <summary>How to install ffmpeg and decord</summary>
+
+    ```
+    1. install ffmpeg 4, referring to https://ffmpeg.org/releases
+        wget https://ffmpeg.org/releases/ffmpeg-4.0.1.tar.bz2 --no-check-certificate
+        tar -xvf ffmpeg-4.0.1.tar.bz2
+        mv ffmpeg-4.0.1 ffmpeg
+        cd ffmpeg
+        ./configure --enable-shared         # --enable-shared is needed for sharing libavcodec with decord
+        make -j 64
+        make install
+
+    2. install decord, referring to https://github.com/dmlc/decord?tab=readme-ov-file#install-from-source
+        git clone --recursive https://github.com/dmlc/decord
+        cd decord
+        rm build && mkdir build && cd build
+        cmake .. -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release
+        make -j 64
+        make install
+        cd ../python
+        python3 setup.py install --user
+    ```
+
+    </details>
+
 
 ## 🚀 Quick Start
 
@@ -67,9 +97,11 @@ bash scripts/hyvideo/run_t2v_sample.sh
 ```
 If you want change to another prompt, please set `--prompt` to the new prompt.
 
+If you want to run T2V inference using sequence parallel (Ulysses SP), please use `scripts/hyvideo/run_t2v_sample_sp.sh`. You can revise the SP size using `--sp-size`, which should be aligned with `ASCEND_RT_VISIBLE_DEVICES`, `--worker_num` and `--local_worker_num`. See more usage information about `msrun` from this [website](https://www.mindspore.cn/docs/en/r2.4.10/model_train/parallel/msrun_launcher.html).
+
 ### Run Image-to-Video Inference
 
-Coming Soon.
+Please find more information about HunyuanVideo Image-to-Video Inference at this [url](https://github.com/mindspore-lab/mindone/tree/master/examples/hunyuanvideo-i2v).
 
 ## 🔑 Training
 
@@ -77,7 +109,7 @@ In this section, we provide instructions on how to train the HunyuanVideo model.
 
 ### Dataset Preparation
 
-To prepare the dataset for training HuyuanVideo, please refer to the [dataset format](./docs/dataset_docs.md).
+To prepare the dataset for training HunyuanVideo, please refer to the [dataset format](./docs/dataset_docs.md).
 
 ### Extract Text Embeddings
 
@@ -101,7 +133,13 @@ python scripts/run_text_encoder.py \
 To run stage 1 (256px) trainig with HunyuanVideo (13B) on multiple NPUs, we use ZeRO3 and data parallelism with the following script:
 
 ```bash
-bash scripts/hyvideo/train_t2v_zero3.sh
+bash scripts/hyvideo/train_t2v_stage1.sh
+```
+
+To run stage 2 (512px) trainig with HunyuanVideo (13B) on multiple NPUs using Ulysses SP, please run the following command:
+
+```bash
+bash scripts/hyvideo/train_t2v_stage2.sh
 ```
 
 For the finetuning experiment with a small dataset, please refer to `scripts/hyvideo/train_t2v_256x256x29_finetune.sh`.

@@ -80,8 +80,8 @@ def main(args):
         device_num = device_num // args.train.sequence_parallel.shards
         shard_rank_id = rank_id // args.train.sequence_parallel.shards
 
-    # FIXME: Improve seed setting
-    set_seed(args.env.seed + shard_rank_id)  # set different seeds per NPU for sampling different timesteps
+    # set different seeds per NPU for sampling different timesteps, but if sp is enabled, force the timestep to be the same as rank_0
+    set_seed(args.env.seed + shard_rank_id)
     ds.set_seed(args.env.seed)  # keep MS.dataset's seed consistent as datasets first shuffled and then distributed
 
     set_logger("", output_dir=args.train.output_path, rank=rank_id)
@@ -148,6 +148,7 @@ def main(args):
             f"Initializing the dataloader: assigning shard ID {shard_rank_id} out of {device_num} total shards."
         )
     dataloader, dataset_len = initialize_dataset(args.dataset, args.dataloader, device_num, shard_rank_id)
+    logger.info(f"Num train batches: {dataloader.get_dataset_size()}")
 
     eval_diffusion_with_loss, val_dataloader = None, None
     if args.valid.dataset is not None:
@@ -161,6 +162,7 @@ def main(args):
             video_emb_cached=bool(args.valid.dataset.init_args.vae_latent_folder),
             embedded_guidance_scale=embed_cfg_scale,
         )
+        logger.info(f"Num validation batches: {val_dataloader.get_dataset_size()}")
 
     # 5. build training utils: lr, optim, callbacks, trainer
     # 5.1 LR
@@ -301,6 +303,7 @@ def main(args):
                 f"Max grad norm: {args.train.settings.clip_norm}",
                 f"EMA: {ema is not None}",
                 f"Attention mode: {args.model.factor_kwargs['attn_mode']}",
+                f"Sequence parallelism shards: {args.train.sequence_parallel.shards}",
             ]
         )
         key_info += "\n" + "=" * 50
