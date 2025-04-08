@@ -33,13 +33,18 @@ dataset:
   empty_text_emb: datasets/mixkit-100videos/empty_string_text_embeddings.npz
   deterministic_sample: False
   text_drop_prob: 0.0
-  target_size: [ 256, 256 ]
-  sample_n_frames: 29
+  target_size: 256px
   vae_scale_factor: 0.476986  # must be the same to vae scaling_factor
   output_columns: [ "video", "prompt_embeds", "prompt_mask", "prompt_embeds_2", "freqs_cos", "freqs_sin"]
 
 dataloader:
-  batch_size: 1
+  batch_size:
+    # num_frames: batch size
+    1: 1
+    64: 1
+    128: 1
+    192: 1
+    256: 1
   shuffle: True
   num_workers_dataset: 2
 
