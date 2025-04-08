@@ -115,17 +115,21 @@ def main(args):
     # size verification: num_frames -1 should be a multiple of 4, height and width should be a multiple of 16
     if (sample_n_frames - 1) % 4 != 0:
         raise ValueError(f"`sample_n_frames - 1` must be a multiple of 4, got {sample_n_frames}")
-    if not isinstance(args.dataset.target_size, (list, tuple)):
-        args.dataset.target_size = [args.dataset.target_size, args.dataset.target_size]
-    height, width = args.dataset.target_size
-    target_height = align_to(height, 16)
-    target_width = align_to(width, 16)
-    if target_height != height or target_width != width:
-        logger.warning(
-            f"The target size {height}x{width} is not a multiple of 16, "
-            f"so it will be aligned to {target_height}x{target_width}."
-        )
-        args.dataset.target_size = [target_height, target_width]
+    if isinstance(args.dataset.target_size, str):
+        # buckets
+        logger.info("Buckets sampling is enabled!")
+    else:
+        if not isinstance(args.dataset.target_size, (list, tuple)):
+            args.dataset.target_size = [args.dataset.target_size, args.dataset.target_size]
+        height, width = args.dataset.target_size
+        target_height = align_to(height, 16)
+        target_width = align_to(width, 16)
+        if target_height != height or target_width != width:
+            logger.warning(
+                f"The target size {height}x{width} is not a multiple of 16, "
+                f"so it will be aligned to {target_height}x{target_width}."
+            )
+            args.dataset.target_size = [target_height, target_width]
 
     # 2.2 Llama 3
     logger.info("Transformer init")
