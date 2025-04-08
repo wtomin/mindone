@@ -113,8 +113,10 @@ def main(args):
 
     sample_n_frames = args.dataset.sample_n_frames
     # size verification: num_frames -1 should be a multiple of 4, height and width should be a multiple of 16
-    if (sample_n_frames - 1) % 4 != 0:
-        raise ValueError(f"`sample_n_frames - 1` must be a multiple of 4, got {sample_n_frames}")
+    if isinstance(sample_n_frames, int):
+        # size verification: num_frames -1 should be a multiple of 4, height and width should be a multiple of 16
+        if (sample_n_frames - 1) % 4 != 0:
+            raise ValueError(f"`sample_n_frames - 1` must be a multiple of 4, got {sample_n_frames}")
     if isinstance(args.dataset.target_size, str):
         # buckets
         logger.info("Buckets sampling is enabled!")
