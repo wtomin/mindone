@@ -47,8 +47,8 @@ def bucket_split_function(frames: Dict[int, int]) -> Tuple[Callable[[np.ndarray]
             cnt += 1
 
     def _bucket_split_function(video: np.ndarray) -> int:
-        # video: (T C H W)
-        t, _, h, w = video.shape
+        # video: (C T H W)
+        _, t, h, w = video.shape
         ar = _ARS[np.argmin(np.abs(_ARS - w / h))]  # find the closest matching AR
         return hashed_buckets[t][ar]
 
