@@ -6,7 +6,7 @@ import numpy as np
 __all__ = ["get_target_size", "bucket_split_function"]
 
 AR = {"1:1", "5:4", "4:3", "16:9", "16:10", "21:9", "2:1"}
-RESOLUTIONS = {"256px": 256**2, "768px": 768**2}
+RESOLUTIONS = {"256px": 256**2, "512px": 512**2, "720px": 720**2}
 
 # for internal use
 _AR = {ar: int(ar.split(":")[0]) / int(ar.split(":")[1]) for ar in AR}  # horizontal
