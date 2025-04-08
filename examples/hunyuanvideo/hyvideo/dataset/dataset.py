@@ -113,7 +113,6 @@ class ImageVideoDataset:
         self.model_rope_dim_list = model_rope_dim_list
         assert self.vae_type in VAE_PATH, f"Expected vae_type to be one of {VAE_PATH.keys()}"
         self.rope_theta = rope_theta
-        self.freqs_cos, self.freqs_sin = self.get_rotary_pos_embed(sample_n_frames, target_size[0], target_size[1])
 
         # prepare replacement data in case the loading of a sample fails
         self._prev_ok_sample = self._get_replacement()
@@ -226,6 +225,7 @@ class ImageVideoDataset:
         idx: int,
     ) -> Tuple[np.ndarray, ...]:
         data = self._data[idx].copy()
+        # load text embedding
         if self._text_emb_folder:
             if self._empty_text_emb and random.random() <= self._text_drop_prob:
                 data["text_emb"] = self._empty_text_emb
@@ -237,10 +237,13 @@ class ImageVideoDataset:
                         data.update({"prompt_embeds_2": td["prompt_embeds_2"]})
 
         if self._vae_latent_folder:
+            # if vae cache, mixed resolution is disabled. self.target_siz must be [int, int]
+            # if vae cache, dynamic num_frames is supported.
             assert isinstance(
                 self.target_size, (list, tuple)
             ), "When vae latent cache is provided, target_size must be a tuple of (h, w)"
-            height, width = self.target_size[0] // 8, self.target_size[1] // 8
+            height, width = self.target_size
+            latent_height, latent_width = self.target_size[0] // 8, self.target_size[1] // 8
 
             vae_latent_data = np.load(data["vae_latent"])
             latent_mean, latent_std = vae_latent_data["latent_mean"], vae_latent_data["latent_std"]  # C T H W
@@ -248,9 +251,11 @@ class ImageVideoDataset:
             # find min_length
             min_length = 1
             if "884" in self.vae_type:
-                frames_after_compression = lambda num_frames: (num_frames - 1) // 4 + 1
+                frames_after_compression = lambda x: (x - 1) // 4 + 1
+                frames_before_compression = lambda x: (x - 1) * 4 + 1
             elif "888" in self.vae_type:
-                frames_after_compression = lambda num_frames: (num_frames - 1) // 8 + 1
+                frames_after_compression = lambda x: (x - 1) // 8 + 1
+                frames_before_compression = lambda x: (x - 1) * 8 + 1
             else:
                 raise ValueError("vae_type must be 884 or 888")
             if latent_mean.shape[1] > 1:
@@ -269,17 +274,18 @@ class ImageVideoDataset:
 
             start_pos = 0 if self._deterministic else random.randint(0, latent_mean.shape[1] - min_length)
             batch_index = np.linspace(start_pos, start_pos + min_length - 1, min_length, dtype=int)
-
+            latent_length = len(batch_index)
             latent_mean, latent_std = latent_mean[:, batch_index], latent_std[:, batch_index]
             vae_latent = np.random.normal(latent_mean, latent_std).astype(np.float32)
 
             vae_latent = vae_latent * self._vae_scale_factor
             assert vae_latent.shape[1:] == (
-                min_length,
-                height,
-                width,
-            ), f"Expect to have latent of shape (C, {min_length, height, width})"
+                latent_length,
+                latent_height,
+                latent_width,
+            ), f"Expect to have latent of shape (C, {latent_length, latent_height, latent_width})"
             data["video"] = vae_latent
+            num_frames = frames_before_compression(latent_length)
         else:
             if data["video"].lower().endswith(IMAGE_EXT):
                 num_frames = 1
@@ -299,6 +305,8 @@ class ImageVideoDataset:
                             num_frames = self._frames[i]
                             min_length = (self._frames[i] - 1) * self._stride + 1
                             break
+                    num_frames = (num_frames // 4) * 4 + 1  # 4n+1
+                    min_length = (num_frames - 1) * self._stride + 1
                 if decord_vr.get_num_frames() < min_length:
                     raise ValueError(f"Video is too short: {data['video']}")
 
@@ -330,14 +338,16 @@ class ImageVideoDataset:
             pixel_values = np.transpose(pixel_values, (3, 0, 1, 2))
             data["video"] = pixel_values / 127.5 - 1.0
             data["num_frames"] = np.array(num_frames, dtype=np.float32)
+            height, width = pixel_values.shape[-2:]
 
         if self._fmask_gen is not None:
             # return frames mask with respect to the vae's latent temporal compression
             data["frames_mask"] = self._fmask_gen(self._t_compress_func(num_frames))
 
         # rope frequencies
-        data["freqs_cos"] = self.freqs_cos
-        data["freqs_sin"] = self.freqs_sin
+        data["freqs_cos"], data["freqs_sin"] = self.get_rotary_pos_embed(
+            video_length=num_frames, height=height, width=width
+        )
 
         if "caption" in self.output_columns and not self._text_emb_folder:
             if self.tokenizer is None:
