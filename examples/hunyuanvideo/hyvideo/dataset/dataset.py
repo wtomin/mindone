@@ -157,7 +157,7 @@ class ImageVideoDataset:
             use_real=True,
             theta_rescale_factor=1,
         )
-        return freqs_cos.asnumpy(), freqs_sin.asnumpy()
+        return freqs_cos.asnumpy().astype(np.float32), freqs_sin.asnumpy().astype(np.float32)
 
     @staticmethod
     def _read_data(
@@ -284,7 +284,7 @@ class ImageVideoDataset:
                 latent_height,
                 latent_width,
             ), f"Expect to have latent of shape (C, {latent_length, latent_height, latent_width})"
-            data["video"] = vae_latent
+            data["video"] = vae_latent.astype(np.float32)
             num_frames = frames_before_compression(latent_length)
         else:
             if data["video"].lower().endswith(IMAGE_EXT):
@@ -336,7 +336,7 @@ class ImageVideoDataset:
             pixel_values = np.stack(list(output.values()), axis=0)
             # (t h w c) -> (c t h w)
             pixel_values = np.transpose(pixel_values, (3, 0, 1, 2))
-            data["video"] = pixel_values / 127.5 - 1.0
+            data["video"] = (pixel_values / 127.5 - 1.0).astype(np.float32)
             data["num_frames"] = np.array(num_frames, dtype=np.float32)
             height, width = pixel_values.shape[-2:]
 
