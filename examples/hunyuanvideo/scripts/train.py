@@ -48,15 +48,18 @@ def initialize_dataset(
         rank_id=shard_rank_id,
         **dataloader_args,
     )
-    if isinstance(batch_size, dict):  # if buckets are used
-        hash_func, bucket_boundaries, bucket_batch_sizes = bucket_split_function(**batch_size)
-        dataloader = dataloader.bucket_batch_by_length(
-            ["video"],
-            bucket_boundaries,
-            bucket_batch_sizes,
-            element_length_function=hash_func,
-            drop_remainder=dataloader_args["drop_remainder"],
-        )
+    # Bucketization
+    hash_func, bucket_boundaries, bucket_batch_sizes = bucket_split_function(
+        batch_size if isinstance(batch_size, dict) else {dataset_args.sample_n_frames: batch_size}
+    )
+    dataloader = dataloader.bucket_batch_by_length(
+        ["video"],
+        bucket_boundaries,
+        bucket_batch_sizes,
+        element_length_function=hash_func,
+        drop_remainder=dataloader_args["drop_remainder"],
+    )
+    dataloader.dataset_size = 1  # prevent MS from iterating over the dataset once at the beginning
     return dataloader, len(dataset)
 
 
@@ -110,19 +113,25 @@ def main(args):
 
     sample_n_frames = args.dataset.sample_n_frames
     # size verification: num_frames -1 should be a multiple of 4, height and width should be a multiple of 16
-    if (sample_n_frames - 1) % 4 != 0:
-        raise ValueError(f"`sample_n_frames - 1` must be a multiple of 4, got {sample_n_frames}")
-    if not isinstance(args.dataset.target_size, (list, tuple)):
-        args.dataset.target_size = [args.dataset.target_size, args.dataset.target_size]
-    height, width = args.dataset.target_size
-    target_height = align_to(height, 16)
-    target_width = align_to(width, 16)
-    if target_height != height or target_width != width:
-        logger.warning(
-            f"The target size {height}x{width} is not a multiple of 16, "
-            f"so it will be aligned to {target_height}x{target_width}."
-        )
-        args.dataset.target_size = [target_height, target_width]
+    if isinstance(sample_n_frames, int):
+        # size verification: num_frames -1 should be a multiple of 4, height and width should be a multiple of 16
+        if (sample_n_frames - 1) % 4 != 0:
+            raise ValueError(f"`sample_n_frames - 1` must be a multiple of 4, got {sample_n_frames}")
+    if isinstance(args.dataset.target_size, str):
+        # buckets
+        logger.info("Buckets sampling is enabled!")
+    else:
+        if not isinstance(args.dataset.target_size, (list, tuple)):
+            args.dataset.target_size = [args.dataset.target_size, args.dataset.target_size]
+        height, width = args.dataset.target_size
+        target_height = align_to(height, 16)
+        target_width = align_to(width, 16)
+        if target_height != height or target_width != width:
+            logger.warning(
+                f"The target size {height}x{width} is not a multiple of 16, "
+                f"so it will be aligned to {target_height}x{target_width}."
+            )
+            args.dataset.target_size = [target_height, target_width]
 
     # 2.2 Llama 3
     logger.info("Transformer init")
@@ -187,25 +196,40 @@ def main(args):
 
     # TODO: validation graph?
     # if bucketing is used in Graph mode, activate dynamic inputs
-    if mode == GRAPH_MODE and isinstance(args.dataloader.batch_size, dict):
-        _bs = ms.Symbol(unique=True)
-        video = ms.Tensor(shape=[_bs, 3, None, None, None], dtype=ms.float32)  # (b, c, f, h, w)
-        text_embed_cache = args.dataset.text_emb_folder is not None
-        text_tokens = (
-            ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
-            if text_embed_cache
-            else ms.Tensor(shape=[_bs, None], dtype=ms.float32)
-        )
-        encoder_attention_mask = ms.Tensor(shape=[_bs, None], dtype=ms.uint8)
+    if mode == GRAPH_MODE:
+        if args.train.sequence_parallel.shards <= 1:
+            _bs = ms.Symbol(unique=True)
+            video = ms.Tensor(shape=[_bs, 3, None, None, None], dtype=ms.float32)  # (b, c, f, h, w)
+            text_embed_cache = args.dataset.text_emb_folder is not None
+            text_tokens = (
+                ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
+                if text_embed_cache
+                else ms.Tensor(shape=[_bs, None], dtype=ms.float32)
+            )
+            encoder_attention_mask = ms.Tensor(shape=[_bs, None], dtype=ms.uint8)
 
-        text_tokens_2 = (
-            ms.Tensor(shape=[_bs, None], dtype=ms.float32)  # pooled hidden states
-            if text_embed_cache
-            else ms.Tensor(shape=[_bs, None], dtype=ms.float32)
-        )
-        encoder_attention_mask_2 = ms.Tensor(shape=[_bs, None], dtype=ms.uint8)
-        net_with_grads.set_inputs(video, text_tokens, encoder_attention_mask, text_tokens_2, encoder_attention_mask_2)
-        logger.info("Dynamic inputs are initialized for training!")
+            text_tokens_2 = (
+                ms.Tensor(shape=[_bs, None], dtype=ms.float32)  # pooled hidden states
+                if text_embed_cache
+                else ms.Tensor(shape=[_bs, None], dtype=ms.float32)
+            )
+            encoder_attention_mask_2 = ms.Tensor(shape=[_bs, None], dtype=ms.uint8)
+            freqs_cos = ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
+            freqs_sin = ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
+            net_with_grads.set_inputs(
+                video,
+                text_tokens,
+                encoder_attention_mask,
+                text_tokens_2,
+                freqs_cos,
+                freqs_sin,
+                encoder_attention_mask_2,
+            )
+            logger.info("Dynamic inputs are initialized for training!")
+        elif args.train.sequence_parallel.shards > 1:
+            logger.warning(
+                "Dynamic shape is not supported with sequence parallelism. The graph will be re-compiled for each new shape."
+            )
 
     model = Model(net_with_grads)
 

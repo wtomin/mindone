@@ -13,6 +13,8 @@ from hyvideo.modules.posemb_layers import get_nd_rotary_pos_embed
 from hyvideo.utils.dataset_utils import DecordDecoder, create_video_transforms
 from tqdm import tqdm
 
+from .buckets import get_target_size
+
 _logger = logging.getLogger(__name__)
 
 
@@ -53,8 +55,8 @@ class ImageVideoDataset:
         vae_latent_folder: Optional[str] = None,
         vae_scale_factor: float = 0.476986,
         vae_shift_factor: float = None,
-        target_size: Optional[Tuple[int, int]] = None,
-        sample_n_frames: int = 16,
+        target_size: Union[Tuple[int, int], str] = "256px",
+        sample_n_frames: Union[List[int], int] = 16,
         sample_stride: int = 1,
         deterministic_sample: bool = False,
         frames_mask_generator: Optional[Callable[[int], np.ndarray]] = None,
@@ -73,9 +75,13 @@ class ImageVideoDataset:
         rope_theta: int = 256,
     ):
         self._data = self._read_data(video_folder, csv_path, text_emb_folder, vae_latent_folder, filter_data)
-        self._frames = sample_n_frames
+        self._frames = sample_n_frames if isinstance(sample_n_frames, int) else sorted(sample_n_frames)
+        if isinstance(self._frames, list) and self._frames[0] == 1:
+            self._frames.pop(0)
+        if isinstance(self._frames, (list, tuple)):
+            _logger.info(f"Using multiple frame numbers for sampling: {self._frames}")
         self._stride = sample_stride
-        self._min_length = (self._frames - 1) * self._stride + 1
+
         self._deterministic = deterministic_sample
 
         self._text_emb_folder = text_emb_folder
@@ -87,6 +93,9 @@ class ImageVideoDataset:
         self._text_drop_prob = text_drop_prob
 
         self._vae_latent_folder = vae_latent_folder
+        if self._vae_latent_folder and self._stride > 1:
+            _logger.warning("vae latent folder is specified, strides for sampling will be ignored.")
+
         self._vae_scale_factor = vae_scale_factor
         assert self._vae_scale_factor is not None, "vae_scale_factor must be specified"
         self._vae_shift_factor = vae_shift_factor
@@ -95,14 +104,6 @@ class ImageVideoDataset:
 
         self.output_columns = output_columns
         self.tokenizer = tokenizer
-
-        self.pixel_transforms = create_video_transforms(
-            size=target_size,
-            crop_size=target_size,
-            random_crop=False,
-            disable_flip=False,
-            num_frames=sample_n_frames,
-        )
         self.target_size = target_size
 
         self.vae_type = vae_type
@@ -112,7 +113,6 @@ class ImageVideoDataset:
         self.model_rope_dim_list = model_rope_dim_list
         assert self.vae_type in VAE_PATH, f"Expected vae_type to be one of {VAE_PATH.keys()}"
         self.rope_theta = rope_theta
-        self.freqs_cos, self.freqs_sin = self.get_rotary_pos_embed(sample_n_frames, target_size[0], target_size[1])
 
         # prepare replacement data in case the loading of a sample fails
         self._prev_ok_sample = self._get_replacement()
@@ -157,7 +157,7 @@ class ImageVideoDataset:
             use_real=True,
             theta_rescale_factor=1,
         )
-        return freqs_cos.asnumpy(), freqs_sin.asnumpy()
+        return freqs_cos.asnumpy().astype(np.float32), freqs_sin.asnumpy().astype(np.float32)
 
     @staticmethod
     def _read_data(
@@ -220,10 +220,12 @@ class ImageVideoDataset:
 
         raise RuntimeError(f"Fail to load a replacement sample in {attempts} attempts. Error: {repr(error)}")
 
-    def _get_item(self, idx: int, thw: Optional[Tuple[int, int, int]] = None) -> Tuple[np.ndarray, ...]:
+    def _get_item(
+        self,
+        idx: int,
+    ) -> Tuple[np.ndarray, ...]:
         data = self._data[idx].copy()
-        num_frames = self._frames
-
+        # load text embedding
         if self._text_emb_folder:
             if self._empty_text_emb and random.random() <= self._text_drop_prob:
                 data["text_emb"] = self._empty_text_emb
@@ -235,35 +237,55 @@ class ImageVideoDataset:
                         data.update({"prompt_embeds_2": td["prompt_embeds_2"]})
 
         if self._vae_latent_folder:
-            # 884
-            if "884" in self.vae_type:
-                latents_length = (num_frames - 1) // 4 + 1
-                min_length = (self._min_length - 1) // 4 + 1
-            elif "888" in self.vae_type:
-                latents_length = (num_frames - 1) // 8 + 1
-                min_length = (self._min_length - 1) // 8 + 1
-            else:
-                raise ValueError("vae_type must be 884 or 888")
-            height, width = self.target_size[0] // 8, self.target_size[1] // 8
+            # if vae cache, mixed resolution is disabled. self.target_siz must be [int, int]
+            # if vae cache, dynamic num_frames is supported.
+            assert isinstance(
+                self.target_size, (list, tuple)
+            ), "When vae latent cache is provided, target_size must be a tuple of (h, w)"
+            height, width = self.target_size
+            latent_height, latent_width = self.target_size[0] // 8, self.target_size[1] // 8
 
             vae_latent_data = np.load(data["vae_latent"])
             latent_mean, latent_std = vae_latent_data["latent_mean"], vae_latent_data["latent_std"]  # C T H W
-            if 1 < latent_mean.shape[1] < min_length:  # TODO: add support for buckets
-                raise ValueError(f"Video is too short: {data['video']}")
+
+            # find min_length
+            min_length = 1
+            if "884" in self.vae_type:
+                frames_after_compression = lambda x: (x - 1) // 4 + 1
+                frames_before_compression = lambda x: (x - 1) * 4 + 1
+            elif "888" in self.vae_type:
+                frames_after_compression = lambda x: (x - 1) // 8 + 1
+                frames_before_compression = lambda x: (x - 1) * 8 + 1
+            else:
+                raise ValueError("vae_type must be 884 or 888")
+            if latent_mean.shape[1] > 1:
+                # video
+                if isinstance(self._frames, int):
+                    min_length = frames_after_compression(self._frames)
+                else:
+                    min_length = float("inf")
+                    for i in range(len(self._frames) - 1, -1, -1):
+                        target_n_frames = frames_after_compression(self._frames[i])
+                        if latent_mean.shape[1] >= target_n_frames:
+                            min_length = target_n_frames
+                            break
+                if latent_mean.shape[1] < min_length:
+                    raise ValueError(f"Video is too short: {data['video']}")
 
             start_pos = 0 if self._deterministic else random.randint(0, latent_mean.shape[1] - min_length)
-            batch_index = np.linspace(start_pos, start_pos + min_length - 1, latents_length, dtype=int)
-
+            batch_index = np.linspace(start_pos, start_pos + min_length - 1, min_length, dtype=int)
+            latent_length = len(batch_index)
             latent_mean, latent_std = latent_mean[:, batch_index], latent_std[:, batch_index]
             vae_latent = np.random.normal(latent_mean, latent_std).astype(np.float32)
 
             vae_latent = vae_latent * self._vae_scale_factor
             assert vae_latent.shape[1:] == (
-                latents_length,
-                height,
-                width,
-            ), f"Expect to have latent of shape (C, {latents_length, height, width})"
-            data["video"] = vae_latent
+                latent_length,
+                latent_height,
+                latent_width,
+            ), f"Expect to have latent of shape (C, {latent_length, latent_height, latent_width})"
+            data["video"] = vae_latent.astype(np.float32)
+            num_frames = frames_before_compression(latent_length)
         else:
             if data["video"].lower().endswith(IMAGE_EXT):
                 num_frames = 1
@@ -273,12 +295,21 @@ class ImageVideoDataset:
                 ]  # (1, H, W, 3)
             else:
                 decord_vr = DecordDecoder(data["video"])
-                min_length = self._min_length
-                if thw is not None:
-                    num_frames, *data["size"] = thw
+                if isinstance(self._frames, int):
+                    num_frames = self._frames
+                    min_length = (self._frames - 1) * self._stride + 1
+                else:
+                    min_length = float("inf")
+                    for i in range(len(self._frames) - 1, -1, -1):
+                        if decord_vr.get_num_frames() >= (self._frames[i] - 1) * self._stride + 1:
+                            num_frames = self._frames[i]
+                            min_length = (self._frames[i] - 1) * self._stride + 1
+                            break
+                    num_frames = (num_frames // 4) * 4 + 1  # 4n+1
                     min_length = (num_frames - 1) * self._stride + 1
                 if decord_vr.get_num_frames() < min_length:
                     raise ValueError(f"Video is too short: {data['video']}")
+
                 start_pos = 0 if self._deterministic else random.randint(0, decord_vr.get_num_frames() - min_length)
                 frame_indices = np.arange(start_pos, decord_vr.get_num_frames())[:: self._stride]
                 if len(frame_indices) < num_frames:
@@ -292,20 +323,31 @@ class ImageVideoDataset:
             for i in range(num_frames - 1):
                 inputs[f"image{i}"] = pixel_values[i + 1]
 
-            output = self.pixel_transforms(**inputs)
+            h, w = data["video"].shape[1], data["video"].shape[2]  # support images and videos
+            th, tw = (
+                self.target_size if isinstance(self.target_size, tuple) else get_target_size(self.target_size, h, w)
+            )
+
+            # scale = max(th / h, tw / w)
+            # if (new_scale := max(th / w, tw / h)) < scale:  # preserve orientation
+            #     scale = new_scale
+            #     th, tw = tw, th
+            output = self.train_transforms(target_size=(th, tw), sample_n_frames=num_frames)(**inputs)
             pixel_values = np.stack(list(output.values()), axis=0)
             # (t h w c) -> (c t h w)
             pixel_values = np.transpose(pixel_values, (3, 0, 1, 2))
-            data["video"] = pixel_values / 127.5 - 1.0
+            data["video"] = (pixel_values / 127.5 - 1.0).astype(np.float32)
             data["num_frames"] = np.array(num_frames, dtype=np.float32)
+            height, width = pixel_values.shape[-2:]
 
         if self._fmask_gen is not None:
             # return frames mask with respect to the vae's latent temporal compression
             data["frames_mask"] = self._fmask_gen(self._t_compress_func(num_frames))
 
         # rope frequencies
-        data["freqs_cos"] = self.freqs_cos
-        data["freqs_sin"] = self.freqs_sin
+        data["freqs_cos"], data["freqs_sin"] = self.get_rotary_pos_embed(
+            video_length=num_frames, height=height, width=width
+        )
 
         if "caption" in self.output_columns and not self._text_emb_folder:
             if self.tokenizer is None:
@@ -313,10 +355,6 @@ class ImageVideoDataset:
             data["caption"] = self.tokenizer(data["caption"])
 
         return tuple(data[c] for c in self.output_columns)
-
-    def get_bucket(self, thw: Tuple[int, int, int], sample_ids: List[int]) -> Tuple[np.ndarray, ...]:
-        batch = [self._get_item(sample_id, thw) for sample_id in sample_ids]
-        return tuple(np.stack(item) for item in map(list, zip(*batch)))
 
     def __getitem__(self, idx: int) -> Tuple[np.ndarray, ...]:
         try:
@@ -333,3 +371,20 @@ class ImageVideoDataset:
 
     def __len__(self):
         return len(self._data)
+
+    def train_transforms(
+        self,
+        target_size: Tuple[int, int],
+        sample_n_frames: int,
+    ) -> List[dict]:
+        if not self._vae_latent_folder:
+            pixel_transforms = create_video_transforms(
+                size=target_size,
+                crop_size=target_size,
+                random_crop=False,
+                disable_flip=False,
+                num_frames=sample_n_frames,
+            )
+        else:
+            pixel_transforms = None
+        return pixel_transforms
