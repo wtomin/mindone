@@ -214,8 +214,16 @@ def main(args):
                 else ms.Tensor(shape=[_bs, None], dtype=ms.float32)
             )
             encoder_attention_mask_2 = ms.Tensor(shape=[_bs, None], dtype=ms.uint8)
+            freqs_cos = ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
+            freqs_sin = ms.Tensor(shape=[_bs, None, None], dtype=ms.float32)
             net_with_grads.set_inputs(
-                video, text_tokens, encoder_attention_mask, text_tokens_2, encoder_attention_mask_2
+                video,
+                text_tokens,
+                encoder_attention_mask,
+                text_tokens_2,
+                freqs_cos,
+                freqs_sin,
+                encoder_attention_mask_2,
             )
             logger.info("Dynamic inputs are initialized for training!")
         elif args.train.sequence_parallel.shards > 1:
