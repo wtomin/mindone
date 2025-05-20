@@ -2,8 +2,7 @@ from typing import Callable, List, Optional, Tuple, Union
 
 import mindspore as ms
 import mindspore.nn as nn
-import mindspore.ops as ops
-from mindspore import Parameter, Tensor
+from mindspore import Parameter, Tensor, mint
 from mindspore.common.initializer import Normal, initializer
 
 from mindone.transformers.mindspore_adapter.utils import _DTYPE_2_MIN
@@ -34,7 +33,7 @@ _CONFIG_FOR_DOC = "CohereConfig"
 class CohereLayerNorm(nn.Cell):
     def __init__(self, hidden_size=None, eps=1e-5, bias=False):
         super().__init__()
-        self.weight = Parameter(ops.ones(hidden_size, ms.float32))
+        self.weight = Parameter(mint.ones(hidden_size, ms.float32))
         self.variance_epsilon = eps
 
     def construct(self, hidden_states):
@@ -42,7 +41,7 @@ class CohereLayerNorm(nn.Cell):
         hidden_states = hidden_states.to(ms.float32)
         mean = hidden_states.mean(-1, keep_dims=True)
         variance = (hidden_states - mean).pow(2).mean(-1, keep_dims=True)
-        hidden_states = (hidden_states - mean) * ops.rsqrt(variance + self.variance_epsilon)
+        hidden_states = (hidden_states - mean) * mint.rsqrt(variance + self.variance_epsilon)
         hidden_states = self.weight.to(ms.float32) * hidden_states
         return hidden_states.to(input_dtype)
 
@@ -65,7 +64,7 @@ class CohereRotaryEmbedding(nn.Cell):
         self.original_inv_freq = self.inv_freq
 
     def _dynamic_frequency_update(self, position_ids):
-        seq_len = ops.max(position_ids) + 1
+        seq_len = mint.max(position_ids) + 1
         if seq_len > self.max_seq_len_cached:
             inv_freq, self.attention_scaling = self.rope_init_fn(self.config, seq_len=seq_len)
             self.inv_freq = inv_freq
@@ -83,7 +82,7 @@ class CohereRotaryEmbedding(nn.Cell):
         position_ids_expanded = position_ids[:, None, :].to(ms.float32)
 
         freqs = (inv_freq_expanded @ position_ids_expanded).swapaxes(1, 2)
-        emb = ops.repeat_interleave(freqs, 2, dim=-1)
+        emb = mint.repeat_interleave(freqs, 2, dim=-1)
         cos = emb.cos()
         sin = emb.sin()
 
@@ -99,9 +98,9 @@ class CohereMLP(nn.Cell):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = nn.Dense(self.hidden_size, self.intermediate_size, has_bias=False)
-        self.up_proj = nn.Dense(self.hidden_size, self.intermediate_size, has_bias=False)
-        self.down_proj = nn.Dense(self.intermediate_size, self.hidden_size, has_bias=False)
+        self.gate_proj = mint.nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.up_proj = mint.nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.down_proj = mint.nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def construct(self, x):
@@ -130,13 +129,13 @@ def eager_attention_forward(
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
 
-    attn_weights = ops.matmul(query, key_states.swapaxes(2, 3)) * scaling
+    attn_weights = mint.matmul(query, key_states.swapaxes(2, 3)) * scaling
     if attention_mask is not None:
         causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
         attn_weights = attn_weights + causal_mask
 
-    attn_weights = ops.softmax(attn_weights, axis=-1).to(query.dtype)
-    attn_output = ops.matmul(attn_weights, value_states)
+    attn_weights = mint.nn.functional.softmax(attn_weights, dim=-1).to(query.dtype)
+    attn_output = mint.matmul(attn_weights, value_states)
     attn_output = attn_output.swapaxes(1, 2)
 
     return attn_output, attn_weights
@@ -145,7 +144,7 @@ def eager_attention_forward(
 def rotate_half(x):
     x1 = x[..., ::2]
     x2 = x[..., 1::2]
-    rot_x = ops.stack([-x2, x1], axis=-1).flatten(-2)
+    rot_x = mint.stack([-x2, x1], dim=-1).flatten(-2)
     return rot_x
 
 
@@ -171,17 +170,17 @@ class CohereAttention(nn.Cell):
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
-        self.q_proj = nn.Dense(
-            config.hidden_size, config.num_attention_heads * self.head_dim, has_bias=config.attention_bias
+        self.q_proj = mint.nn.Linear(
+            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
         )
-        self.k_proj = nn.Dense(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, has_bias=config.attention_bias
+        self.k_proj = mint.nn.Linear(
+            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
         )
-        self.v_proj = nn.Dense(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, has_bias=config.attention_bias
+        self.v_proj = mint.nn.Linear(
+            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
         )
-        self.o_proj = nn.Dense(
-            config.num_attention_heads * self.head_dim, config.hidden_size, has_bias=config.attention_bias
+        self.o_proj = mint.nn.Linear(
+            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
         )
         self.use_qk_norm = config.use_qk_norm
         if self.use_qk_norm:
@@ -331,7 +330,7 @@ class CoherePreTrainedModel(MSPreTrainedModel):
 
     def _init_weights(self, module):
         std = self.config.initializer_range
-        if isinstance(module, nn.Dense):
+        if isinstance(module, mint.nn.Linear):
             module.weight.set_data(initializer(Normal(std), module.weight.shape, module.weight.dtype))
             if module.bias is not None:
                 module.bias.set_data(initializer("zeros", module.bias.shape, module.bias.dtype))
@@ -476,7 +475,7 @@ class CohereModel(CoherePreTrainedModel):
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = ops.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1])
+            cache_position = mint.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1])
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
@@ -597,10 +596,10 @@ class CohereModel(CoherePreTrainedModel):
             causal_mask = attention_mask
         else:
             min_dtype = _DTYPE_2_MIN[ms.float32]
-            causal_mask = ops.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype)
+            causal_mask = mint.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype)
             if sequence_length != 1:
-                causal_mask = ops.triu(causal_mask, diagonal=1)
-            causal_mask *= ops.arange(target_length) > cache_position.reshape(-1, 1)
+                causal_mask = mint.triu(causal_mask, diagonal=1)
+            causal_mask *= mint.arange(target_length) > cache_position.reshape(-1, 1)
             causal_mask = causal_mask[None, None, :, :].broadcast_to((batch_size, 1, -1, -1))
             if attention_mask is not None:
                 mask_length = attention_mask.shape[-1]
@@ -625,7 +624,7 @@ class CohereForCausalLM(CoherePreTrainedModel, GenerationMixin):
         super().__init__(config)
         self.model = CohereModel(config)
         self.vocab_size = config.vocab_size
-        self.lm_head = nn.Dense(config.hidden_size, config.vocab_size, has_bias=False)
+        self.lm_head = mint.nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.logit_scale = config.logit_scale
         self.tie_word_embeddings = config.tie_word_embeddings
 
