@@ -38,23 +38,28 @@ class CohereModelTester:
         use_input_mask=True,
         use_token_type_ids=False,
         use_labels=True,
+        # config
         vocab_size=99,
         hidden_size=32,
+        intermediate_size=37,
+        logit_scale=0.0625,
         num_hidden_layers=2,
         num_attention_heads=4,
         num_key_value_heads=2,
-        intermediate_size=37,
-        hidden_act="gelu",
-        hidden_dropout_prob=0.1,
-        attention_probs_dropout_prob=0.1,
+        hidden_act="silu",
         max_position_embeddings=512,
-        type_vocab_size=16,
-        type_sequence_label_size=2,
         initializer_range=0.02,
-        num_labels=3,
-        num_choices=4,
+        layer_norm_eps=1e-5,
+        use_cache=True,
         pad_token_id=0,
-        scope=None,
+        bos_token_id=5,
+        eos_token_id=255001,
+        tie_word_embeddings=True,
+        rope_theta=10000,
+        rope_scaling=None,
+        attention_bias=False,
+        attention_dropout=0.0,
+        use_qk_norm=False,
     ):
         self.batch_size = batch_size
         self.seq_length = seq_length
@@ -69,16 +74,20 @@ class CohereModelTester:
         self.num_key_value_heads = num_key_value_heads
         self.intermediate_size = intermediate_size
         self.hidden_act = hidden_act
-        self.hidden_dropout_prob = hidden_dropout_prob
-        self.attention_probs_dropout_prob = attention_probs_dropout_prob
+        self.logit_scale = logit_scale
+        self.attention_dropout = attention_dropout
         self.max_position_embeddings = max_position_embeddings
-        self.type_vocab_size = type_vocab_size
-        self.type_sequence_label_size = type_sequence_label_size
         self.initializer_range = initializer_range
-        self.num_labels = num_labels
-        self.num_choices = num_choices
+        self.layer_norm_eps = layer_norm_eps
+        self.use_cache = use_cache
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
         self.pad_token_id = pad_token_id
-        self.scope = scope
+        self.tie_word_embeddings = tie_word_embeddings
+        self.rope_theta = rope_theta
+        self.rope_scaling = rope_scaling
+        self.attention_bias = attention_bias
+        self.use_qk_norm = use_qk_norm
         self.head_dim = self.hidden_size // self.num_attention_heads
 
     def prepare_config_and_inputs(self):
@@ -108,21 +117,25 @@ class CohereModelTester:
         return self.config_class(
             vocab_size=self.vocab_size,
             hidden_size=self.hidden_size,
+            intermediate_size=self.intermediate_size,
+            logit_scale=self.logit_scale,
             num_hidden_layers=self.num_hidden_layers,
             num_attention_heads=self.num_attention_heads,
             num_key_value_heads=self.num_key_value_heads,
-            intermediate_size=self.intermediate_size,
             hidden_act=self.hidden_act,
-            hidden_dropout_prob=self.hidden_dropout_prob,
-            attention_probs_dropout_prob=self.attention_probs_dropout_prob,
             max_position_embeddings=self.max_position_embeddings,
-            type_vocab_size=self.type_vocab_size,
-            is_decoder=False,
             initializer_range=self.initializer_range,
+            layer_norm_eps=self.layer_norm_eps,
+            use_cache=self.use_cache,
             pad_token_id=self.pad_token_id,
-            head_dim=self.head_dim,
-            use_qk_norm=True,
-            attention_bias=True,
+            bos_token_id=self.bos_token_id,
+            eos_token_id=self.eos_token_id,
+            tie_word_embeddings=self.tie_word_embeddings,
+            rope_theta=self.rope_theta,
+            rope_scaling=self.rope_scaling,
+            attention_bias=self.attention_bias,
+            attention_dropout=self.attention_dropout,
+            use_qk_norm=self.use_qk_norm,
         )
 
 
