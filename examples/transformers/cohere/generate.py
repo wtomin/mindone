@@ -15,6 +15,11 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     model = CohereForCausalLM.from_pretrained(model_id, mindspore_dtype=ms.float16)
+    # from transformers import CohereConfig
+    # config = CohereConfig()
+    # config.num_hidden_layers = 1
+    # config._attn_implementation = "sdpa"
+    # model = CohereForCausalLM(config)
 
     prompt = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
 
