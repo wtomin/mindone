@@ -33,7 +33,7 @@ _CONFIG_FOR_DOC = "CohereConfig"
 class CohereLayerNorm(nn.Cell):
     def __init__(self, hidden_size=None, eps=1e-5, bias=False):
         super().__init__()
-        self.weight = Parameter(mint.ones(hidden_size, ms.float32))
+        self.weight = Parameter(mint.ones(hidden_size, dtype=ms.float32))
         self.variance_epsilon = eps
 
     def construct(self, hidden_states):
