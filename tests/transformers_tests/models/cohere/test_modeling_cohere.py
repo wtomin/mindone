@@ -38,6 +38,10 @@ class CohereModelTester:
         use_input_mask=True,
         use_token_type_ids=False,
         use_labels=True,
+        type_vocab_size=16,
+        type_sequence_label_size=2,
+        num_labels=3,
+        num_choices=4,
         # config
         vocab_size=99,
         hidden_size=32,
@@ -67,6 +71,10 @@ class CohereModelTester:
         self.use_input_mask = use_input_mask
         self.use_token_type_ids = use_token_type_ids
         self.use_labels = use_labels
+        self.type_vocab_size = type_vocab_size
+        self.type_sequence_label_size = type_sequence_label_size
+        self.num_labels = num_labels
+        self.num_choices = num_choices
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
