@@ -40,7 +40,7 @@ from mindone.transformers import CohereForCausalLM
 
 model_id = "CohereLabs/c4ai-command-r-v01"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = CohereForCausalLM.from_pretrained(model_id, attn_implementation="sdpa", mindspore_dtype=ms.float16)
+model = CohereForCausalLM.from_pretrained(model_id, mindspore_dtype=ms.float16)
 
 message = [{"role": "user", "content": "How do plants make energy?"}]
 prompt = tokenizer.apply_chat_template(message, add_generation_prompt=True, tokenize=False)
