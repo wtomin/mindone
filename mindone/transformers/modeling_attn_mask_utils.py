@@ -176,8 +176,7 @@ class AttentionMaskConverter:
             raise ValueError(
                 "AttentionMaskConverter._unmask_unattended expects a float `expanded_mask`, got a BoolTensor."
             )
-
-        return expanded_mask.mul(~mint.all(expanded_mask == min_dtype, dim=-1, keepdim=True))
+        return expanded_mask * (~mint.all(expanded_mask == min_dtype, dim=-1, keepdim=True)).to(expanded_mask.dtype)
 
     @staticmethod
     def _ignore_causal_mask_sdpa(

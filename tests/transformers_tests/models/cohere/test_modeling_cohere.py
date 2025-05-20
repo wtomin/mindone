@@ -163,7 +163,7 @@ COHERE_CASES = [
     [
         "CohereModel",
         "transformers.CohereModel",
-        "mindway.transformers.CohereModel",
+        "mindone.transformers.CohereModel",
         (config,),
         {},
         (input_ids,),
