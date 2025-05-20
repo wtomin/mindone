@@ -33,7 +33,7 @@ def main():
     output = model(input_ids)
 
     print(f"Inference time: {time() - infer_start:.3f}s")
-    print(tokenizer.batch_decode(output, skip_special_tokens=True)[0])
+    print(output)
 
 
 if __name__ == "__main__":
