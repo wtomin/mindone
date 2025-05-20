@@ -5,16 +5,16 @@ from transformers import AutoTokenizer
 import mindspore as ms
 from mindspore import Tensor
 
-from mindone.transformers import AutoModelForCausalLM
+from mindone.transformers import CohereForCausalLM
 
 ms.set_context(mode=ms.PYNATIVE_MODE)
 
 
 def main():
-    model_id = "CohereLabs/c4ai-command-r7b-12-2024"
+    model_id = "CohereLabs/c4ai-command-r-v01"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-    model = AutoModelForCausalLM.from_pretrained(model_id, mindspore_dtype=ms.float16, attn_implementation="sdpa")
+    model = CohereForCausalLM.from_pretrained(model_id, mindspore_dtype=ms.float16)
 
     prompt = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
 
