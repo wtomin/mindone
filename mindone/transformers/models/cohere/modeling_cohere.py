@@ -81,7 +81,7 @@ class CohereRotaryEmbedding(nn.Cell):
         inv_freq_expanded = self.inv_freq[None, :, None].to(ms.float32).broadcast_to((position_ids.shape[0], -1, 1))
         position_ids_expanded = position_ids[:, None, :].to(ms.float32)
 
-        freqs = (mint.matmal(inv_freq_expanded, position_ids_expanded)).swapaxes(1, 2)
+        freqs = (mint.matmul(inv_freq_expanded, position_ids_expanded)).swapaxes(1, 2)
         emb = mint.repeat_interleave(freqs, 2, dim=-1)
         cos = emb.cos()
         sin = emb.sin()
@@ -605,9 +605,10 @@ class CohereModel(CoherePreTrainedModel):
                 mask_length = attention_mask.shape[-1]
                 padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :]
                 padding_mask = padding_mask == 0
-                causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill(
-                    padding_mask, min_dtype
-                )
+                # causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill( padding_mask, min_dtype)
+                mask_temp = causal_mask[:, :, :, :mask_length].copy()
+                mask_temp = mask_temp.masked_fill(padding_mask, min_dtype)
+                causal_mask = mint.cat([mask_temp, causal_mask[:, :, :, mask_length:]], dim=-1)
 
         return causal_mask
 
