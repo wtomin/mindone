@@ -81,7 +81,7 @@ class CohereRotaryEmbedding(nn.Cell):
         inv_freq_expanded = self.inv_freq[None, :, None].to(ms.float32).broadcast_to((position_ids.shape[0], -1, 1))
         position_ids_expanded = position_ids[:, None, :].to(ms.float32)
 
-        freqs = (inv_freq_expanded @ position_ids_expanded).swapaxes(1, 2)
+        freqs = (mint.matmal(inv_freq_expanded, position_ids_expanded)).swapaxes(1, 2)
         emb = mint.repeat_interleave(freqs, 2, dim=-1)
         cos = emb.cos()
         sin = emb.sin()

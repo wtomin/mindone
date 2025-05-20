@@ -119,6 +119,9 @@ class CohereModelTester:
 
         config = self.get_config()
 
+        # set _attn_implementation
+        config._attn_implementation = "eager"
+
         return config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
 
     def get_config(self):
