@@ -6,6 +6,8 @@ import mindspore.ops as ops
 from mindspore import Parameter, Tensor
 from mindspore.common.initializer import Normal, initializer
 
+from mindone.transformers.mindspore_adapter.utils import _DTYPE_2_MIN
+
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache, StaticCache
 from ...generation import GenerationMixin
@@ -576,7 +578,7 @@ class CohereModel(CoherePreTrainedModel):
         )
 
         if self.config._attn_implementation == "sdpa" and attention_mask is not None and not output_attentions:
-            min_dtype = ms.float32.min
+            min_dtype = _DTYPE_2_MIN[ms.float32]
             causal_mask = AttentionMaskConverter._unmask_unattended(causal_mask, min_dtype)
 
         return causal_mask
@@ -594,7 +596,7 @@ class CohereModel(CoherePreTrainedModel):
         if attention_mask is not None and attention_mask.dim() == 4:
             causal_mask = attention_mask
         else:
-            min_dtype = ms.float32.min
+            min_dtype = _DTYPE_2_MIN[ms.float32]
             causal_mask = ops.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype)
             if sequence_length != 1:
                 causal_mask = ops.triu(causal_mask, diagonal=1)
