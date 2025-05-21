@@ -8,7 +8,7 @@ from mindspore.common.initializer import Normal, initializer
 from mindone.transformers.mindspore_adapter.utils import _DTYPE_2_MIN
 
 from ...activations import ACT2FN
-from ...cache_utils import Cache, DynamicCache, StaticCache
+from ...cache_utils import Cache, StaticCache
 from ...generation import GenerationMixin
 from ...modeling_attn_mask_utils import AttentionMaskConverter
 
@@ -320,13 +320,13 @@ class CoherePreTrainedModel(MSPreTrainedModel):
     base_model_prefix = "model"
     _no_split_modules = ["CohereDecoderLayer"]
     _skip_keys_device_placement = ["past_key_values"]
-    _supports_flash_attn_2 = True
-    _supports_sdpa = True
-    _supports_flex_attn = True
-    _supports_cache_class = True
-    _supports_quantized_cache = True
+    _supports_flash_attn_2 = False
+    _supports_sdpa = False
+    _supports_flex_attn = False
+    _supports_cache_class = False
+    _supports_quantized_cache = False
     _supports_static_cache = True
-    _supports_attention_backend = True
+    _supports_attention_backend = False
 
     def _init_weights(self, module):
         std = self.config.initializer_range
@@ -426,6 +426,7 @@ class CohereModel(CoherePreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+        self.max_seq_len_cached = config.max_position_embeddings
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
         self.layers = nn.CellList(
@@ -441,6 +442,17 @@ class CohereModel(CoherePreTrainedModel):
 
     def set_input_embeddings(self, value):
         self.embed_tokens = value
+
+    def prepare_static_cache(self, input_embeds, max_cache_len):
+        bs = input_embeds.shape[0]
+        max_batch_size, cache_dtype = (
+            getattr(self.config, "num_beams", 1) * bs,
+            self.dtype,
+        )
+        past_key_values = StaticCache(
+            config=self.config, max_batch_size=max_batch_size, max_cache_len=max_cache_len, dtype=cache_dtype
+        )
+        return past_key_values
 
     # @add_start_docstrings_to_model_forward(COHERE_INPUTS_DOCSTRING)
     def construct(
@@ -471,11 +483,11 @@ class CohereModel(CoherePreTrainedModel):
             inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
+            past_key_values = self.prepare_static_cache(inputs_embeds, max_cache_len=self.max_seq_len_cached)
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = mint.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1])
+            past_seen_tokens = int(past_key_values.get_seq_length()) if past_key_values is not None else 0
+            cache_position = mint.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], dtype=ms.int32)
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
@@ -543,7 +555,7 @@ class CohereModel(CoherePreTrainedModel):
             #     return attention_mask
             raise NotImplementedError("flex_attention is not implemented for Cohere")
 
-        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+        past_seen_tokens = int(past_key_values.get_seq_length()) if past_key_values is not None else 0
         using_static_cache = isinstance(past_key_values, StaticCache)
 
         if self.config._attn_implementation == "sdpa" and not using_static_cache and not output_attentions:
@@ -558,7 +570,7 @@ class CohereModel(CoherePreTrainedModel):
         dtype, device = input_tensor.dtype, input_tensor.device
         sequence_length = input_tensor.shape[1]
         if using_static_cache:
-            target_length = past_key_values.get_max_cache_shape()
+            target_length = past_key_values.get_max_length()
         else:
             target_length = (
                 attention_mask.shape[-1]
