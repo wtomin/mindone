@@ -35,12 +35,30 @@ huggingface-cli download --resume-download CohereLabs/c4ai-command-r-v01
 
 The example below shows how to use the Cohere Command-R model:
 ```python
+from time import time
+from functools import partial
+
+from transformers import AutoTokenizer
+
 import mindspore as ms
+from mindspore import Tensor
+
 from mindone.transformers import CohereForCausalLM
+import mindspore
+import mindspore.mint.distributed as dist
+from mindspore.communication import GlobalComm
+
+from mindone.trainers.zero import prepare_network
+
+ms.set_context(mode=ms.PYNATIVE_MODE)
+dist.init_process_group(backend="hccl")
+mindspore.set_auto_parallel_context(parallel_mode="data_parallel")
 
 model_id = "CohereLabs/c4ai-command-r-v01"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = CohereForCausalLM.from_pretrained(model_id, mindspore_dtype=ms.float16)
+shard_fn = partial(prepare_network, zero_stage=3, optimizer_parallel_group=GlobalComm.WORLD_COMM_GROUP)
+model = shard_fn(model)
 
 message = [{"role": "user", "content": "How do plants make energy?"}]
 prompt = tokenizer.apply_chat_template(message, add_generation_prompt=True, tokenize=False)
@@ -59,5 +77,11 @@ output = model.generate(
 )
 print(f"Inference time: {time() - infer_start:.3f}s")
 print(tokenizer.decode(output[0], skip_special_tokens=True)[0])
+```
 
+To run the script, you can use the following command:
+
+```bash
+export ASCEND_RT_VISIBLE_DEVICES=0,1
+msrun --worker_num=2 --local_worker_num=2 --master_port=9000 --log_dir=msrun_log --join=True --cluster_time_out=300 generate.py
 ```
