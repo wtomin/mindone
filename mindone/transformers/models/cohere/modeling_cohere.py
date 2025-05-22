@@ -201,7 +201,7 @@ class CohereAttention(nn.Cell):
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor], Optional[Tuple[Tensor]]]:
         input_shape = hidden_states.shape[:-1]
-        hidden_shape = (*input_shape, -1, self.head_dim)
+        hidden_shape = input_shape + (-1, self.head_dim)
 
         query_states = self.q_proj(hidden_states).view(hidden_shape)
         key_states = self.k_proj(hidden_states).view(hidden_shape)
@@ -243,8 +243,8 @@ class CohereAttention(nn.Cell):
             scaling=self.scaling,
             **kwargs,
         )
-
-        attn_output = attn_output.reshape(*input_shape, -1)
+        output_shape = input_shape + (-1,)
+        attn_output = attn_output.reshape(output_shape)
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
 
