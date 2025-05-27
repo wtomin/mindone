@@ -61,6 +61,7 @@ from .models.clip import (
     CLIPVisionModel,
     CLIPVisionModelWithProjection,
 )
+from .models.cohere2 import Cohere2ForCausalLM, Cohere2Model, Cohere2PreTrainedModel
 from .models.dpt import DPTForDepthEstimation
 from .models.gemma import (
     GemmaForCausalLM,
