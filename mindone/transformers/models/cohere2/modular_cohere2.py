@@ -15,11 +15,12 @@
 # limitations under the License.
 from typing import Callable, Optional, Tuple
 
+from transformers.configuration_utils import PretrainedConfig, layer_type_validation
+
 import mindspore.nn as nn
 from mindspore import Tensor, ops
 
 from ...cache_utils import Cache, DynamicCache
-from ...configuration_utils import PretrainedConfig, layer_type_validation
 from ...masking_utils import create_causal_mask, create_sliding_window_causal_mask
 from ...modeling_flash_attention_utils import FlashAttentionKwargs
 from ...modeling_outputs import BaseModelOutputWithPast
@@ -256,11 +257,11 @@ class Cohere2LayerNorm(CohereLayerNorm):
     pass
 
 
-class Cohere2Attention(CohereAttention, nn.Module):
+class Cohere2Attention(CohereAttention, nn.Cell):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: Cohere2Config, layer_idx: Optional[int] = None):
-        nn.Module.__init__()
+        self.__init__()
         self.config = config
         self.layer_idx = layer_idx
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
@@ -283,7 +284,7 @@ class Cohere2Attention(CohereAttention, nn.Module):
             config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
         )
 
-    def forward(
+    def construct(
         self,
         hidden_states: Tensor,
         position_embeddings: Tuple[Tensor, Tensor],
@@ -340,7 +341,7 @@ class Cohere2DecoderLayer(CohereDecoderLayer):
         self.attention_type = config.layer_types[layer_idx]
 
     # @deprecate_kwarg("last_cache_position", version="4.53.0")
-    def forward(
+    def construct(
         self,
         hidden_states: Tensor,
         position_embeddings: Tuple[Tensor, Tensor],
@@ -410,7 +411,7 @@ class Cohere2Model(Gemma2Model):
         self.norm = Cohere2LayerNorm(hidden_size=(config.hidden_size), eps=config.layer_norm_eps)
         self.rotary_emb = Cohere2RotaryEmbedding(config=config)
 
-    def forward(
+    def construct(
         self,
         input_ids: Optional[Tensor] = None,
         attention_mask: Optional[Tensor] = None,
