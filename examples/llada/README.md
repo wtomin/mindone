@@ -7,7 +7,7 @@ LLaDA (Large Language Diffusion with mAsking) is a diffusion model trained from 
 We provide a simple example of how to use LLaDA-8B-Instruct.
 ```
 from transformers import AutoConfig, AutoTokenizer
-from mindway.transformers.models.llada import LLaDAModelLM
+from mindone.transformers.models.llada import LLaDAModelLM
 
 tokenizer = AutoTokenizer.from_pretrained("GSAI-ML/LLaDA-8B-Instruct", trust_remote_code=True)
 config = AutoConfig.from_pretrained("GSAI-ML/LLaDA-8B-Instruct", trust_remote_code=True)

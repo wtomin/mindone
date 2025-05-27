@@ -41,7 +41,7 @@ def instantiate_from_config(config: Union[DictConfig, ListConfig, str]) -> objec
 
 def get_obj_from_str(string: str, reload: bool = False) -> object:
     """TODO: debug
-    if string.startswith('mindway'):
+    if string.startswith('mindone'):
         string = '../../' + string
     """
     module, cls = string.rsplit(".", 1)
