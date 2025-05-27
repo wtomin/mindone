@@ -23,7 +23,6 @@ from mindspore import Tensor, mint
 
 from .cache_utils import Cache
 from .mindspore_adapter.utils import _DTYPE_2_MIN
-from .utils.generic import GeneralInterface
 
 # from .utils.import_utils import is_torch_flex_attn_available, is_torch_greater_or_equal, is_torchdynamo_compiling
 BlockMask = ms.Tensor
@@ -443,7 +442,7 @@ def flex_attention_mask(
     raise NotImplementedError
 
 
-class AttentionMaskInterface(GeneralInterface):
+class AttentionMaskInterface:
     # Class instance object, so that a call to `register` can be reflected into all other files correctly, even if
     # a new instance is created (in order to locally override a given function)
     _global_mapping = {
