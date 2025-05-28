@@ -289,9 +289,9 @@ class Cohere2PreTrainedModel(MSPreTrainedModel):
     _no_split_modules = ["Cohere2DecoderLayer"]
     _skip_keys_device_placement = ["past_key_values"]
     _supports_flash_attn_2 = False
-    _supports_sdpa = False
+    _supports_sdpa = True
     _supports_flex_attn = False
-    _supports_cache_class = False
+    _supports_cache_class = True
     _supports_quantized_cache = False
     _supports_static_cache = True
     _supports_attention_backend = False
