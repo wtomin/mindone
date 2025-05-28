@@ -157,7 +157,8 @@ class Cohere2Config(PretrainedConfig):
         attention_bias=False,
         attention_dropout=0.0,
         sliding_window=4096,
-        layer_types=None,
+        sliding_window_pattern=4,
+        cache_implementation="hybrid",
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -182,9 +183,10 @@ class Cohere2Config(PretrainedConfig):
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
         self.sliding_window = sliding_window
-        self.layer_types = layer_types
+        self.sliding_window_pattern = sliding_window_pattern
         # Need to specify head_dim in the config so it can be used in the attention forward functions
         self.head_dim = hidden_size // num_attention_heads
+        self.cache_implementation = cache_implementation
 
         # Validate the correctness of rotary position embeddings parameters
         rope_config_validation(self)
@@ -196,15 +198,6 @@ class Cohere2Config(PretrainedConfig):
             tie_word_embeddings=tie_word_embeddings,
             **kwargs,
         )
-
-        if self.layer_types is None:
-            # BC -> the pattern used to be a simple int, and it's still present in configs on the Hub
-            sliding_window_pattern = getattr(self, "sliding_window_pattern", 4)
-            self.layer_types = [
-                "sliding_attention" if bool((i + 1) % sliding_window_pattern) else "full_attention"
-                for i in range(self.num_hidden_layers)
-            ]
-        # layer_type_validation(self.layer_types)
 
 
 __all__ = ["Cohere2Config"]
