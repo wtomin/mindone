@@ -468,9 +468,8 @@ class GenerationMixin:
                 attention_mask = causal_mask_creation_function(
                     attention_mask,
                     sequence_length=sequence_length,
-                    target_length=past_key_values.get_max_length(),
+                    target_length=past_key_values.get_max_cache_shape(),
                     cache_position=cache_position,
-                    dtype=self.dtype,
                     batch_size=batch_size,
                 )
         if attention_mask is not None:
