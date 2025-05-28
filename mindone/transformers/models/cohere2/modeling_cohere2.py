@@ -383,21 +383,24 @@ class Cohere2Model(Cohere2PreTrainedModel):
             position_ids = cache_position.unsqueeze(0)
 
         # It may already have been prepared by e.g. `generate`
-        causal_mask_mapping = attention_mask
-        if not isinstance(causal_mask_mapping, dict):
-            # Prepare mask arguments
-            mask_kwargs = {
-                "config": self.config,
-                "input_embeds": inputs_embeds,
-                "attention_mask": attention_mask,
-                "cache_position": cache_position,
-                "past_key_values": past_key_values,
-            }
-            # Create the masks
-            causal_mask_mapping = {
-                "full_attention": create_causal_mask(**mask_kwargs),
-                "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
-            }
+        # causal_mask_mapping = attention_mask
+        # if not isinstance(causal_mask_mapping, dict):
+        #     # Prepare mask arguments
+        #     mask_kwargs = {
+        #         "config": self.config,
+        #         "input_embeds": inputs_embeds,
+        #         "attention_mask": attention_mask,
+        #         "cache_position": cache_position,
+        #         "past_key_values": past_key_values,
+        #     }
+        #     # Create the masks
+        #     causal_mask_mapping = {
+        #         "full_attention": create_causal_mask(**mask_kwargs),
+        #         "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
+        #     }
+        causal_mask = self._update_causal_mask(
+            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+        )
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
@@ -411,7 +414,8 @@ class Cohere2Model(Cohere2PreTrainedModel):
             layer_outputs = decoder_layer(
                 hidden_states,
                 position_embeddings=position_embeddings,
-                attention_mask=causal_mask_mapping[decoder_layer.attention_type],
+                # attention_mask=causal_mask_mapping[decoder_layer.attention_type],
+                attention_mask=causal_mask,
                 past_key_value=past_key_values,
                 output_attentions=output_attentions,
                 use_cache=use_cache,
