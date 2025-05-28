@@ -1,4 +1,4 @@
-from transformers.configuration_utils import PretrainedConfig, layer_type_validation
+from transformers.configuration_utils import PretrainedConfig
 
 from ...modeling_rope_utils import rope_config_validation
 
@@ -204,7 +204,7 @@ class Cohere2Config(PretrainedConfig):
                 "sliding_attention" if bool((i + 1) % sliding_window_pattern) else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
-        layer_type_validation(self.layer_types)
+        # layer_type_validation(self.layer_types)
 
 
 __all__ = ["Cohere2Config"]
