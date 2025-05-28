@@ -19,7 +19,7 @@ from transformers.configuration_utils import PretrainedConfig
 
 import mindspore as ms
 import mindspore.mint.nn.functional as F
-from mindspore import Tensor, mint
+from mindspore import Tensor, mint, ops
 
 from .cache_utils import Cache
 from .mindspore_adapter.utils import _DTYPE_2_MIN
@@ -37,7 +37,7 @@ def and_masks(*mask_functions: list[Callable]) -> Callable:
     def and_mask(batch_idx, head_idx, q_idx, kv_idx):
         result = mint.ones((), dtype=ms.bool_)
         for mask in mask_functions:
-            result = result * mask(batch_idx, head_idx, q_idx, kv_idx)
+            result = result & mask(batch_idx, head_idx, q_idx, kv_idx)
         return result
 
     return and_mask
@@ -161,13 +161,14 @@ def prepare_padding_mask(
     local_padding_mask = attention_mask
     if attention_mask is not None:
         # Pad it if necesary
-        if (padding_length := kv_length + kv_offset - attention_mask.shape[-1]) > 0:
+        padding_length = kv_length
+        if (padding_length + kv_offset - attention_mask.shape[-1]) > 0:
             local_padding_mask = F.pad(attention_mask, (0, padding_length))
         # For flex, we should not slice them, only use an offset
         if _slice:
             # Equivalent to: `local_padding_mask = attention_mask[:, kv_offset : kv_offset + kv_length]`,
             # but without data-dependent slicing (i.e. torch.compile friendly)
-            mask_indices = mint.arange(kv_length, dtype=ms.int32)
+            mask_indices = ops.arange(kv_length, dtype=ms.int32)
             mask_indices += kv_offset
             local_padding_mask = local_padding_mask[:, mask_indices]
     return local_padding_mask
@@ -190,7 +191,7 @@ def _ignore_causal_mask_sdpa(
     """
     is_tracing = False  # MindSpore doesn't have torch.jit.is_tracing()
     if padding_mask is not None and padding_mask.shape[-1] > kv_length:
-        mask_indices = mint.arange(kv_length, dtype=ms.int32)
+        mask_indices = ops.arange(kv_length, dtype=ms.int32)
         mask_indices += kv_offset
         padding_mask = padding_mask[:, mask_indices]
 
@@ -322,15 +323,15 @@ def sdpa_mask_recent_mindspore(
 
     # Similar to `kv_arange = torch.arange(start=kv_offset, end=kv_offset + kv_length, device=cache_position.device)`
     # but without data-dependent slicing (i.e. torch.compile friendly)
-    kv_arange = mint.arange(kv_length, dtype=ms.int32)
+    kv_arange = ops.arange(kv_length, dtype=ms.int32)
     kv_arange += kv_offset
 
     # Potentially add the padding 2D mask
     if padding_mask is not None:
         mask_function = and_masks(mask_function, padding_mask_function(padding_mask))
 
-    batch_arange = mint.arange(batch_size, dtype=ms.int32)
-    head_arange = mint.arange(1, dtype=ms.int32)
+    batch_arange = ops.arange(batch_size, dtype=ms.int32)
+    head_arange = ops.arange(1, dtype=ms.int32)
     # This creates the 4D mask easily. Note that we need this context manager as vmap cannot handle slicing a tensor from
     # scalar tensor (it internally calls `.item()` which vmap does not allow, but this context works around it
     # We don't need to add an offset to the mask_function either, as we vmap directly the correct indices for k and kv indices
