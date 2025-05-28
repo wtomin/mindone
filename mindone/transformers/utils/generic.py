@@ -16,8 +16,6 @@ Generic utilities
 """
 
 import inspect
-import json
-import os
 import tempfile
 import warnings
 from collections import UserDict
@@ -25,11 +23,9 @@ from collections.abc import MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, ContextManager, List, Optional, TypedDict
+from typing import ContextManager, List, Optional
 
 import numpy as np
-
-import mindspore
 
 from .import_utils import is_mindspore_available
 
@@ -522,149 +518,3 @@ def filter_out_non_signature_kwargs(extra: Optional[list] = None):
         return wrapper
 
     return decorator
-
-
-class LossKwargs(TypedDict, total=False):
-    """
-    Keyword arguments to be passed to the loss function
-
-    Attributes:
-        num_items_in_batch (`int`, *optional*):
-            Number of items in the batch. It is recommended to pass it when
-            you are doing gradient accumulation.
-    """
-
-    num_items_in_batch: Optional[int]
-
-
-def is_timm_config_dict(config_dict: dict[str, Any]) -> bool:
-    """Checks whether a config dict is a timm config dict."""
-    return "pretrained_cfg" in config_dict
-
-
-def is_timm_local_checkpoint(pretrained_model_path: str) -> bool:
-    """
-    Checks whether a checkpoint is a timm model checkpoint.
-    """
-    if pretrained_model_path is None:
-        return False
-
-    # in case it's Path, not str
-    pretrained_model_path = str(pretrained_model_path)
-
-    is_file = os.path.isfile(pretrained_model_path)
-    is_dir = os.path.isdir(pretrained_model_path)
-
-    # pretrained_model_path is a file
-    if is_file and pretrained_model_path.endswith(".json"):
-        with open(pretrained_model_path) as f:
-            config_dict = json.load(f)
-        return is_timm_config_dict(config_dict)
-
-    # pretrained_model_path is a directory with a config.json
-    if is_dir and os.path.exists(os.path.join(pretrained_model_path, "config.json")):
-        with open(os.path.join(pretrained_model_path, "config.json")) as f:
-            config_dict = json.load(f)
-        return is_timm_config_dict(config_dict)
-
-    return False
-
-
-def set_attribute_for_modules(module: "mindspore.nn.Cell", key: str, value: Any):
-    """
-    Set a value to a module and all submodules.
-    """
-    setattr(module, key, value)
-    for submodule in module.children():
-        set_attribute_for_modules(submodule, key, value)
-
-
-def del_attribute_from_modules(module: "mindspore.nn.Cell", key: str):
-    """
-    Delete a value from a module and all submodules.
-    """
-    # because we might remove it previously in case it's a shared module, e.g. activation function
-    if hasattr(module, key):
-        delattr(module, key)
-
-    for submodule in module.children():
-        del_attribute_from_modules(submodule, key)
-
-
-def can_return_tuple(func):
-    """
-    Decorator to wrap model method, to call output.to_tuple() if return_dict=False passed as a kwarg or
-    use_return_dict=False is set in the config.
-
-    Note:
-        output.to_tuple() convert output to tuple skipping all `None` values.
-    """
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        is_requested_to_return_tuple = kwargs.pop("return_dict", True) is False
-        is_configured_to_return_tuple = self.config.use_return_dict is False if hasattr(self, "config") else False
-
-        # The following allows to convert output to tuple ONLY on top level forward call,
-        # while internal modules of the model will return Output objects
-        # to be able to use name-based attribute access in modeling code.
-
-        # We will check if we are on top level module, if so, turn off to tuple conversion for all
-        # underling calls.
-        is_top_level_module = getattr(self, "_is_top_level_module", True)
-        if is_configured_to_return_tuple and is_top_level_module:
-            set_attribute_for_modules(self, "_is_top_level_module", False)
-
-        try:
-            output = func(self, *args, **kwargs)
-            if is_requested_to_return_tuple or (is_configured_to_return_tuple and is_top_level_module):
-                output = output.to_tuple()
-        finally:
-            # Remove the flag after the model forward call is finished.
-            if is_configured_to_return_tuple and is_top_level_module:
-                del_attribute_from_modules(self, "_is_top_level_module")
-
-        return output
-
-    return wrapper
-
-
-class GeneralInterface(MutableMapping):
-    """
-    Dict-like object keeping track of a class-wide mapping, as well as a local one. Allows to have library-wide
-    modifications though the class mapping, as well as local modifications in a single file with the local mapping.
-    """
-
-    # Class instance object, so that a call to `register` can be reflected into all other files correctly, even if
-    # a new instance is created (in order to locally override a given function)
-    _global_mapping = {}
-
-    def __init__(self):
-        self._local_mapping = {}
-
-    def __getitem__(self, key):
-        # First check if instance has a local override
-        if key in self._local_mapping:
-            return self._local_mapping[key]
-        return self._global_mapping[key]
-
-    def __setitem__(self, key, value):
-        # Allow local update of the default functions without impacting other instances
-        self._local_mapping.update({key: value})
-
-    def __delitem__(self, key):
-        del self._local_mapping[key]
-
-    def __iter__(self):
-        # Ensure we use all keys, with the overwritten ones on top
-        return iter({**self._global_mapping, **self._local_mapping})
-
-    def __len__(self):
-        return len(self._global_mapping.keys() | self._local_mapping.keys())
-
-    @classmethod
-    def register(cls, key: str, value: Callable):
-        cls._global_mapping.update({key: value})
-
-    def valid_keys(self) -> List[str]:
-        return list(self.keys())
