@@ -31,7 +31,7 @@ def main():
         cache_implementation="static",
     )
     print(f"Inference time: {time() - infer_start:.3f}s")
-    print(tokenizer.decode(output[0], skip_special_tokens=True)[0])
+    print(tokenizer.decode(output[0], skip_special_tokens=True))
 
 
 if __name__ == "__main__":
