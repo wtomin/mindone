@@ -113,6 +113,13 @@ from .models.gpt2 import (
     GPT2Model,
     GPT2PreTrainedModel,
 )
+from .models.helium import (
+    HeliumForCausalLM,
+    HeliumForSequenceClassification,
+    HeliumForTokenClassification,
+    HeliumModel,
+    HeliumPreTrainedModel,
+)
 from .models.hiera import (
     HieraBackbone,
     HieraForImageClassification,
