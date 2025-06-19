@@ -120,7 +120,6 @@ def main(
         output_name: where to save the output image, `{idx}` will be replaced
             by the index of the sample
         prompt: Prompt used for sampling
-        device: Pytorch device
         num_steps: number of sampling steps (default 4 for schnell, 50 for guidance distilled)
         loop: start an interactive session and sample multiple times
         guidance: guidance value used for guidance distillation
