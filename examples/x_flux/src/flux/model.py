@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-import torch
-from einops import rearrange
-from torch import Tensor, nn
+import mindspore.mint as mint
+from mindspore import Tensor, nn
 
 from .modules.layers import DoubleStreamBlock, EmbedND, LastLayer, MLPEmbedder, SingleStreamBlock, timestep_embedding
 
@@ -23,7 +22,7 @@ class FluxParams:
     guidance_embed: bool
 
 
-class Flux(nn.Module):
+class Flux(nn.Cell):
     """
     Transformer model for flow matching on sequences.
     """
@@ -44,15 +43,15 @@ class Flux(nn.Module):
         self.hidden_size = params.hidden_size
         self.num_heads = params.num_heads
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
-        self.img_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
+        self.img_in = mint.nn.Linear(self.in_channels, self.hidden_size, bias=True)
         self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
         self.vector_in = MLPEmbedder(params.vec_in_dim, self.hidden_size)
         self.guidance_in = (
-            MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if params.guidance_embed else nn.Identity()
+            MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if params.guidance_embed else mint.nn.Identity()
         )
-        self.txt_in = nn.Linear(params.context_in_dim, self.hidden_size)
+        self.txt_in = mint.nn.Linear(params.context_in_dim, self.hidden_size)
 
-        self.double_blocks = nn.ModuleList(
+        self.double_blocks = nn.CellList(
             [
                 DoubleStreamBlock(
                     self.hidden_size,
@@ -64,7 +63,7 @@ class Flux(nn.Module):
             ]
         )
 
-        self.single_blocks = nn.ModuleList(
+        self.single_blocks = nn.CellList(
             [
                 SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio)
                 for _ in range(params.depth_single_blocks)
@@ -83,16 +82,16 @@ class Flux(nn.Module):
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors):
+        def fn_recursive_add_processors(name: str, module: nn.Cell, processors):
             if hasattr(module, "set_processor"):
                 processors[f"{name}.processor"] = module.processor
 
-            for sub_name, child in module.named_children():
+            for sub_name, child in module.name_cells().items():
                 fn_recursive_add_processors(f"{name}.{sub_name}", child, processors)
 
             return processors
 
-        for name, module in self.named_children():
+        for name, module in self.name_cells().items():
             fn_recursive_add_processors(name, module, processors)
 
         return processors
@@ -118,20 +117,20 @@ class Flux(nn.Module):
                 f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
             )
 
-        def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
+        def fn_recursive_attn_processor(name: str, module: nn.Cell, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
                     module.set_processor(processor)
                 else:
                     module.set_processor(processor.pop(f"{name}.processor"))
 
-            for sub_name, child in module.named_children():
+            for sub_name, child in module.name_cells().items():
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
 
-        for name, module in self.named_children():
+        for name, module in self.name_cells().items():
             fn_recursive_attn_processor(name, module, processor)
 
-    def forward(
+    def construct(
         self,
         img: Tensor,
         img_ids: Tensor,
@@ -157,67 +156,26 @@ class Flux(nn.Module):
         vec = vec + self.vector_in(y)
         txt = self.txt_in(txt)
 
-        ids = torch.cat((txt_ids, img_ids), dim=1)
+        ids = mint.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
         if block_controlnet_hidden_states is not None:
             controlnet_depth = len(block_controlnet_hidden_states)
         for index_block, block in enumerate(self.double_blocks):
-            if self.training and self.gradient_checkpointing:
-
-                def create_custom_forward(module, return_dict=None):
-                    def custom_forward(*inputs):
-                        if return_dict is not None:
-                            return module(*inputs, return_dict=return_dict)
-                        else:
-                            return module(*inputs)
-
-                    return custom_forward
-
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    img,
-                    txt,
-                    vec,
-                    pe,
-                    image_proj,
-                    ip_scale,
-                )
-            else:
-                img, txt = block(
-                    img=img,
-                    txt=txt,
-                    vec=vec,
-                    pe=pe,
-                    image_proj=image_proj,
-                    ip_scale=ip_scale,
-                )
+            img, txt = block(
+                img=img,
+                txt=txt,
+                vec=vec,
+                pe=pe,
+                image_proj=image_proj,
+                ip_scale=ip_scale,
+            )
             # controlnet residual
             if block_controlnet_hidden_states is not None:
                 img = img + block_controlnet_hidden_states[index_block % 2]
 
-        img = torch.cat((txt, img), 1)
+        img = mint.cat((txt, img), 1)
         for block in self.single_blocks:
-            if self.training and self.gradient_checkpointing:
-
-                def create_custom_forward(module, return_dict=None):
-                    def custom_forward(*inputs):
-                        if return_dict is not None:
-                            return module(*inputs, return_dict=return_dict)
-                        else:
-                            return module(*inputs)
-
-                    return custom_forward
-
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    img,
-                    vec,
-                    pe,
-                )
-            else:
-                img = block(img, vec=vec, pe=pe)
+            img = block(img, vec=vec, pe=pe)
         img = img[:, txt.shape[1] :, ...]
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)

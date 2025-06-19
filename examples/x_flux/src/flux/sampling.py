@@ -1,9 +1,11 @@
 import math
 from typing import Callable
 
-import torch
-from einops import rearrange, repeat
-from torch import Tensor
+import numpy as np
+
+import mindspore as ms
+import mindspore.mint as mint
+from mindspore import Tensor
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
@@ -13,19 +15,17 @@ def get_noise(
     num_samples: int,
     height: int,
     width: int,
-    device: torch.device,
-    dtype: torch.dtype,
+    dtype: ms.common.dtype,
     seed: int,
 ):
-    return torch.randn(
+    return mint.randn(
         num_samples,
         16,
         # allow for packing
         2 * math.ceil(height / 16),
         2 * math.ceil(width / 16),
-        device=device,
         dtype=dtype,
-        generator=torch.Generator(device=device).manual_seed(seed),
+        generator=np.random.Generator().manual_seed(seed),
     )
 
 
@@ -34,32 +34,41 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)
 
-    img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-    if img.shape[0] == 1 and bs > 1:
-        img = repeat(img, "1 ... -> bs ...", bs=bs)
+    b, c, h_combined, w_combined = img.shape
+    ph = 2
+    pw = 2
+    h = h_combined // ph
+    w = w_combined // pw
+    img = img.reshape(b, c, h, ph, w, pw).permute(0, 2, 4, 1, 3, 5).reshape(b, h * w, c * ph * pw)
 
-    img_ids = torch.zeros(h // 2, w // 2, 3)
-    img_ids[..., 1] = img_ids[..., 1] + torch.arange(h // 2)[:, None]
-    img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
-    img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+    if img.shape[0] == 1 and bs > 1:
+        img = img.broadcast_to((bs, *img.shape[1:]))
+
+    img_ids = mint.zeros((h // 2, w // 2, 3))
+    img_ids[..., 1] = img_ids[..., 1] + mint.arange(h // 2)[:, None]
+    img_ids[..., 2] = img_ids[..., 2] + mint.arange(w // 2)[None, :]
+
+    img_ids = img_ids.unsqueeze(0).broadcast_to((bs, *img_ids.shape)).reshape(bs, -1, img_ids.shape[-1])
 
     if isinstance(prompt, str):
         prompt = [prompt]
     txt = t5(prompt)
+
     if txt.shape[0] == 1 and bs > 1:
-        txt = repeat(txt, "1 ... -> bs ...", bs=bs)
-    txt_ids = torch.zeros(bs, txt.shape[1], 3)
+        txt = txt.broadcast_to((bs, *txt.shape[1:]))
+    txt_ids = mint.zeros((bs, txt.shape[1], 3))
 
     vec = clip(prompt)
+
     if vec.shape[0] == 1 and bs > 1:
-        vec = repeat(vec, "1 ... -> bs ...", bs=bs)
+        vec = vec.broadcast_to((bs, *vec.shape[1:]))
 
     return {
         "img": img,
-        "img_ids": img_ids.to(img.device),
-        "txt": txt.to(img.device),
-        "txt_ids": txt_ids.to(img.device),
-        "vec": vec.to(img.device),
+        "img_ids": img_ids,
+        "txt": txt,
+        "txt_ids": txt_ids,
+        "vec": vec,
     }
 
 
@@ -81,7 +90,7 @@ def get_schedule(
     shift: bool = True,
 ) -> list[float]:
     # extra step for zero
-    timesteps = torch.linspace(1, 0, num_steps + 1)
+    timesteps = mint.linspace(1, 0, num_steps + 1)
 
     # shifting the schedule to favor high timesteps for higher signal images
     if shift:
@@ -116,9 +125,13 @@ def denoise(
 ):
     i = 0
     # this is ignored for schnell
-    guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    guidance_vec = mint.full((img.shape[0],), guidance, dtype=img.dtype)
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
-        t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+        t_vec = mint.full(
+            (img.shape[0],),
+            t_curr,
+            dtype=img.dtype,
+        )
         pred = model(
             img=img,
             img_ids=img_ids,
@@ -175,9 +188,13 @@ def denoise_controlnet(
 ):
     # this is ignored for schnell
     i = 0
-    guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    guidance_vec = mint.full((img.shape[0],), guidance, dtype=img.dtype)
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
-        t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+        t_vec = mint.full(
+            (img.shape[0],),
+            t_curr,
+            dtype=img.dtype,
+        )
         block_res_samples = controlnet(
             img=img,
             img_ids=img_ids,
@@ -232,11 +249,10 @@ def denoise_controlnet(
 
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
-    return rearrange(
-        x,
-        "b (h w) (c ph pw) -> b c (h ph) (w pw)",
-        h=math.ceil(height / 16),
-        w=math.ceil(width / 16),
-        ph=2,
-        pw=2,
-    )
+    h = math.ceil(height / 16)
+    w = math.ceil(width / 16)
+    ph = 2
+    pw = 2
+    b, hw, cphpw = x.shape
+    x = x.reshape(b, h, w, -1, ph, pw).permute(0, 3, 1, 4, 2, 5).reshape(b, -1, h * ph, w * pw)
+    return x

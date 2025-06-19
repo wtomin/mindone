@@ -3,10 +3,34 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
-from einops import rearrange
 from torch import Tensor, nn
 
 from ..math import attention, rope
+
+
+def merge_heads(x):
+    """Converts (B, H, L, D) -> (B, L, H*D)"""
+    B, H, L, D = x.shape
+    return x.permute(0, 2, 1, 3).reshape(B, L, H * D)
+
+
+def split_heads(x, H, D):
+    """Converts (B, L, H*D) -> (B, H, L, D)"""
+    B, L, _ = x.shape
+    return x.view(B, L, H, D).permute(0, 2, 1, 3)
+
+
+def split_qkv(qkv, K, H, D=None):
+    """
+    Rearranges qkv tensor of shape (B, L, K*H*D) to (K, B, H, L, D).
+    If D is None, it is inferred as qkv.shape[-1] // (K*H).
+    """
+    B, L, last = qkv.shape
+    if D is None:
+        D = last // (K * H)
+    qkv = qkv.view(B, L, K, H, D)
+    qkv = qkv.permute(2, 0, 3, 1, 4)  # (K, B, H, L, D)
+    return qkv[0], qkv[1], qkv[2]
 
 
 class EmbedND(nn.Module):
@@ -115,7 +139,7 @@ class FLuxSelfAttnProcessor:
         print("2" * 30)
 
         qkv = attn.qkv(x)
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        q, k, v = split_qkv(qkv, K=3, H=self.num_heads)
         q, k = attn.norm(q, k, v)
         x = attention(q, k, v, pe=pe)
         x = attn.proj(x)
@@ -131,7 +155,7 @@ class LoraFluxAttnProcessor(nn.Module):
 
     def __call__(self, attn, x, pe, **attention_kwargs):
         qkv = attn.qkv(x) + self.qkv_lora(x) * self.lora_weight
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        q, k, v = split_qkv(qkv, K=3, H=self.num_heads)
         q, k = attn.norm(q, k, v)
         x = attention(q, k, v, pe=pe)
         x = attn.proj(x) + self.proj_lora(x) * self.lora_weight
@@ -194,14 +218,14 @@ class DoubleStreamBlockLoraProcessor(nn.Module):
         img_modulated = attn.img_norm1(img)
         img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
         img_qkv = attn.img_attn.qkv(img_modulated) + self.qkv_lora1(img_modulated) * self.lora_weight
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads)
+        img_q, img_k, img_v = split_qkv(img_qkv, K=3, H=attn.num_heads)
         img_q, img_k = attn.img_attn.norm(img_q, img_k, img_v)
 
         # prepare txt for attention
         txt_modulated = attn.txt_norm1(txt)
         txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
         txt_qkv = attn.txt_attn.qkv(txt_modulated) + self.qkv_lora2(txt_modulated) * self.lora_weight
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads)
+        txt_q, txt_k, txt_v = split_qkv(txt_qkv, K=3, H=attn.num_heads)
         txt_q, txt_k = attn.txt_attn.norm(txt_q, txt_k, txt_v)
 
         # run actual attention
@@ -260,13 +284,13 @@ class IPDoubleStreamBlockProcessor(nn.Module):
         img_modulated = attn.img_norm1(img)
         img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
         img_qkv = attn.img_attn.qkv(img_modulated)
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads, D=attn.head_dim)
+        img_q, img_k, img_v = split_qkv(img_qkv, K=3, H=attn.num_heads)
         img_q, img_k = attn.img_attn.norm(img_q, img_k, img_v)
 
         txt_modulated = attn.txt_norm1(txt)
         txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
         txt_qkv = attn.txt_attn.qkv(txt_modulated)
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads, D=attn.head_dim)
+        txt_q, txt_k, txt_v = split_qkv(txt_qkv, K=3, H=attn.num_heads)
         txt_q, txt_k = attn.txt_attn.norm(txt_q, txt_k, txt_v)
 
         q = torch.cat((txt_q, img_q), dim=2)
@@ -291,12 +315,12 @@ class IPDoubleStreamBlockProcessor(nn.Module):
         ip_value = self.ip_adapter_double_stream_v_proj(image_proj)
 
         # Reshape projections for multi-head attention
-        ip_key = rearrange(ip_key, "B L (H D) -> B H L D", H=attn.num_heads, D=attn.head_dim)
-        ip_value = rearrange(ip_value, "B L (H D) -> B H L D", H=attn.num_heads, D=attn.head_dim)
+        ip_key = split_heads(ip_key, H=attn.num_heads, D=attn.head_dim)
+        ip_value = split_heads(ip_value, H=attn.num_heads, D=attn.head_dim)
 
         # Compute attention between IP projections and the latent query
         ip_attention = F.scaled_dot_product_attention(ip_query, ip_key, ip_value, dropout_p=0.0, is_causal=False)
-        ip_attention = rearrange(ip_attention, "B H L D -> B L (H D)", H=attn.num_heads, D=attn.head_dim)
+        ip_attention = merge_heads(ip_attention)
 
         img = img + ip_scale * ip_attention
 
@@ -312,14 +336,14 @@ class DoubleStreamBlockProcessor:
         img_modulated = attn.img_norm1(img)
         img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
         img_qkv = attn.img_attn.qkv(img_modulated)
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads, D=attn.head_dim)
+        img_q, img_k, img_v = split_qkv(img_qkv, K=3, H=attn.num_heads)
         img_q, img_k = attn.img_attn.norm(img_q, img_k, img_v)
 
         # prepare txt for attention
         txt_modulated = attn.txt_norm1(txt)
         txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
         txt_qkv = attn.txt_attn.qkv(txt_modulated)
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads, D=attn.head_dim)
+        txt_q, txt_k, txt_v = split_qkv(txt_qkv, K=3, H=attn.num_heads)
         txt_q, txt_k = attn.txt_attn.norm(txt_q, txt_k, txt_v)
 
         # run actual attention
@@ -425,7 +449,7 @@ class IPSingleStreamBlockProcessor(nn.Module):
         x_mod = (1 + mod.scale) * attn.pre_norm(x) + mod.shift
         qkv, mlp = torch.split(attn.linear1(x_mod), [3 * attn.hidden_size, attn.mlp_hidden_dim], dim=-1)
 
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads, D=attn.head_dim)
+        q, k, v = split_qkv(qkv, K=3, H=attn.num_heads)
         q, k = attn.norm(q, k, v)
 
         # compute attention
@@ -437,12 +461,12 @@ class IPSingleStreamBlockProcessor(nn.Module):
         ip_value = self.ip_adapter_single_stream_v_proj(image_proj)
 
         # Reshape projections for multi-head attention
-        ip_key = rearrange(ip_key, "B L (H D) -> B H L D", H=attn.num_heads, D=attn.head_dim)
-        ip_value = rearrange(ip_value, "B L (H D) -> B H L D", H=attn.num_heads, D=attn.head_dim)
+        ip_key = split_heads(ip_key, H=attn.num_heads, D=attn.head_dim)
+        ip_value = split_heads(ip_value, H=attn.num_heads, D=attn.head_dim)
 
         # Compute attention between IP projections and the latent query
         ip_attention = F.scaled_dot_product_attention(ip_query, ip_key, ip_value)
-        ip_attention = rearrange(ip_attention, "B H L D -> B L (H D)")
+        ip_attention = merge_heads(ip_attention)
 
         attn_out = attn_1 + ip_scale * ip_attention
 
@@ -466,7 +490,7 @@ class SingleStreamBlockLoraProcessor(nn.Module):
         qkv, mlp = torch.split(attn.linear1(x_mod), [3 * attn.hidden_size, attn.mlp_hidden_dim], dim=-1)
         qkv = qkv + self.qkv_lora(x_mod) * self.lora_weight
 
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads)
+        q, k, v = split_qkv(qkv, K=3, H=attn.num_heads)
         q, k = attn.norm(q, k, v)
 
         # compute attention
@@ -485,7 +509,7 @@ class SingleStreamBlockProcessor:
         x_mod = (1 + mod.scale) * attn.pre_norm(x) + mod.shift
         qkv, mlp = torch.split(attn.linear1(x_mod), [3 * attn.hidden_size, attn.mlp_hidden_dim], dim=-1)
 
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=attn.num_heads)
+        q, k, v = split_qkv(qkv, K=3, H=attn.num_heads)
         q, k = attn.norm(q, k, v)
 
         # compute attention

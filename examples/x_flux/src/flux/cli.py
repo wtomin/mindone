@@ -4,13 +4,14 @@ import time
 from dataclasses import dataclass
 from glob import iglob
 
-import torch
-from einops import rearrange
+import numpy as np
 from fire import Fire
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack
 from flux.util import configs, embed_watermark, load_ae, load_clip, load_flow_model, load_t5
 from PIL import ExifTags, Image
 from transformers import pipeline
+
+import mindspore as ms
 
 NSFW_THRESHOLD = 0.85
 
@@ -92,7 +93,6 @@ def parse_prompt(options: SamplingOptions) -> SamplingOptions | None:
     return options
 
 
-@torch.inference_mode()
 def main(
     name: str = "flux-schnell",
     width: int = 1360,
@@ -102,11 +102,9 @@ def main(
         "a photo of a forest with mist swirling around the tree trunks. The word "
         '"FLUX" is painted over it in big, red brush strokes with visible texture'
     ),
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int | None = None,
     loop: bool = False,
     guidance: float = 3.5,
-    offload: bool = False,
     output_dir: str = "output",
     add_sampling_metadata: bool = True,
 ):
@@ -134,7 +132,6 @@ def main(
         available = ", ".join(configs.keys())
         raise ValueError(f"Got unknown model name: {name}, chose from {available}")
 
-    torch_device = torch.device(device)
     if num_steps is None:
         num_steps = 4 if name == "flux-schnell" else 50
 
@@ -154,12 +151,16 @@ def main(
             idx = 0
 
     # init all components
-    t5 = load_t5(torch_device, max_length=256 if name == "flux-schnell" else 512)
-    clip = load_clip(torch_device)
-    model = load_flow_model(name, device="cpu" if offload else torch_device)
-    ae = load_ae(name, device="cpu" if offload else torch_device)
+    t5 = load_t5(max_length=256 if name == "flux-schnell" else 512)
+    clip = load_clip()
+    model = load_flow_model(
+        name,
+    )
+    ae = load_ae(
+        name,
+    )
 
-    rng = torch.Generator(device="cpu")
+    rng = np.random.Generator()
     opts = SamplingOptions(
         prompt=prompt,
         width=width,
@@ -183,37 +184,21 @@ def main(
             1,
             opts.height,
             opts.width,
-            device=torch_device,
-            dtype=torch.bfloat16,
+            dtype=ms.bfloat16,
             seed=opts.seed,
         )
         opts.seed = None
-        if offload:
-            ae = ae.cpu()
-            torch.cuda.empty_cache()
-            t5, clip = t5.to(torch_device), clip.to(torch_device)
+
         inp = prepare(t5, clip, x, prompt=opts.prompt)
         timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
-
-        # offload TEs to CPU, load model to gpu
-        if offload:
-            t5, clip = t5.cpu(), clip.cpu()
-            torch.cuda.empty_cache()
-            model = model.to(torch_device)
 
         # denoise initial noise
         x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
 
-        # offload model, load autoencoder to gpu
-        if offload:
-            model.cpu()
-            torch.cuda.empty_cache()
-            ae.decoder.to(x.device)
-
         # decode latents to pixel space
         x = unpack(x.float(), opts.height, opts.width)
-        with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
-            x = ae.decode(x)
+
+        x = ae.decode(x)
         t1 = time.perf_counter()
 
         fn = output_name.format(idx=idx)
@@ -221,9 +206,9 @@ def main(
         # bring into PIL format and save
         x = x.clamp(-1, 1)
         x = embed_watermark(x.float())
-        x = rearrange(x[0], "c h w -> h w c")
+        x = x[0].permute(1, 2, 0)
 
-        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+        img = Image.fromarray((127.5 * (x + 1.0)).asnumpy())
         nsfw_score = [x["score"] for x in nsfw_classifier(img) if x["label"] == "nsfw"][0]
 
         if nsfw_score < NSFW_THRESHOLD:

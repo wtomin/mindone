@@ -2,8 +2,6 @@ import os
 import uuid
 
 import numpy as np
-import torch
-from einops import rearrange
 from PIL import ExifTags, Image
 from src.flux.modules.layers import (
     DoubleStreamBlockLoraProcessor,
@@ -25,23 +23,32 @@ from src.flux.util import (
     load_flow_model_quintized,
     load_t5,
 )
-from torch import Tensor
-from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
+from transformers import CLIPImageProcessor
+
+import mindspore as ms
+from mindspore import Tensor
+
+from mindone.transformers import CLIPVisionModelWithProjection
 
 
 class XFluxPipeline:
     def __init__(self, model_type, device, offload: bool = False):
-        self.device = torch.device(device)
         self.offload = offload
         self.model_type = model_type
 
         self.clip = load_clip(self.device)
         self.t5 = load_t5(self.device, max_length=512)
-        self.ae = load_ae(model_type, device="cpu" if offload else self.device)
+        self.ae = load_ae(
+            model_type,
+        )
         if "fp8" in model_type:
-            self.model = load_flow_model_quintized(model_type, device="cpu" if offload else self.device)
+            self.model = load_flow_model_quintized(
+                model_type,
+            )
         else:
-            self.model = load_flow_model(model_type, device="cpu" if offload else self.device)
+            self.model = load_flow_model(
+                model_type,
+            )
 
         self.image_encoder_path = "openai/clip-vit-large-patch14"
         self.hf_lora_collection = "XLabs-AI/flux-lora-collection"
@@ -52,8 +59,6 @@ class XFluxPipeline:
         self.ip_loaded = False
 
     def set_ip(self, local_path: str = None, repo_id=None, name: str = None):
-        self.model.to(self.device)
-
         # unpack checkpoint
         checkpoint = load_checkpoint(local_path, repo_id, name)
         prefix = "double_blocks."
@@ -67,15 +72,13 @@ class XFluxPipeline:
                 proj[key[len("ip_adapter_proj_model.") :]] = value
 
         # load image encoder
-        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(self.image_encoder_path).to(
-            self.device, dtype=torch.float16
-        )
+        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(self.image_encoder_path).to(dtype=ms.float16)
         self.clip_image_processor = CLIPImageProcessor()
 
         # setup image embedding projection model
         self.improj = ImageProjModel(4096, 768, 4)
         self.improj.load_state_dict(proj)
-        self.improj = self.improj.to(self.device, dtype=torch.bfloat16)
+        self.improj = self.improj.to(dtype=ms.bfloat16)
 
         ip_attn_procs = {}
 
@@ -87,7 +90,7 @@ class XFluxPipeline:
             if ip_state_dict:
                 ip_attn_procs[name] = IPDoubleStreamBlockProcessor(4096, 3072)
                 ip_attn_procs[name].load_state_dict(ip_state_dict)
-                ip_attn_procs[name].to(self.device, dtype=torch.bfloat16)
+                ip_attn_procs[name].to(dtype=ms.bfloat16)
             else:
                 ip_attn_procs[name] = self.model.attn_processors[name]
 
@@ -118,7 +121,7 @@ class XFluxPipeline:
                 else:
                     lora_attn_procs[name] = DoubleStreamBlockLoraProcessor(dim=3072, rank=rank)
                 lora_attn_procs[name].load_state_dict(lora_state_dict)
-                lora_attn_procs[name].to(self.device)
+
             else:
                 if name.startswith("single_blocks"):
                     lora_attn_procs[name] = SingleStreamBlockProcessor()
@@ -128,12 +131,11 @@ class XFluxPipeline:
         self.model.set_attn_processor(lora_attn_procs)
 
     def set_controlnet(self, control_type: str, local_path: str = None, repo_id: str = None, name: str = None):
-        self.model.to(self.device)
-        self.controlnet = load_controlnet(self.model_type, self.device).to(torch.bfloat16)
+        self.controlnet = load_controlnet(self.model_type).to(ms.bfloat16)
 
         checkpoint = load_checkpoint(local_path, repo_id, name)
         self.controlnet.load_state_dict(checkpoint, strict=False)
-        self.annotator = Annotator(control_type, self.device)
+        self.annotator = Annotator(control_type)
         self.controlnet_loaded = True
         self.control_type = control_type
 
@@ -143,10 +145,9 @@ class XFluxPipeline:
     ):
         # encode image-prompt embeds
         image_prompt = self.clip_image_processor(images=image_prompt, return_tensors="pt").pixel_values
-        image_prompt = image_prompt.to(self.image_encoder.device)
+
         image_prompt_embeds = self.image_encoder(image_prompt).image_embeds.to(
-            device=self.device,
-            dtype=torch.bfloat16,
+            dtype=ms.bfloat16,
         )
         # encode image
         image_proj = self.improj(image_prompt_embeds)
@@ -187,10 +188,10 @@ class XFluxPipeline:
 
         if self.controlnet_loaded:
             controlnet_image = self.annotator(controlnet_image, width, height)
-            controlnet_image = torch.from_numpy((np.array(controlnet_image) / 127.5) - 1)
-            controlnet_image = controlnet_image.permute(2, 0, 1).unsqueeze(0).to(torch.bfloat16).to(self.device)
+            controlnet_image = ms.Tensor((np.array(controlnet_image) / 127.5) - 1)
+            controlnet_image = controlnet_image.permute(2, 0, 1).unsqueeze(0).to(ms.bfloat16)
 
-        return self.forward(
+        return self.construct(
             prompt,
             width,
             height,
@@ -208,7 +209,6 @@ class XFluxPipeline:
             neg_ip_scale=neg_ip_scale,
         )
 
-    @torch.inference_mode()
     def gradio_generate(
         self,
         prompt,
@@ -257,7 +257,7 @@ class XFluxPipeline:
                     self.set_ip(repo_id="xlabs-ai/flux-ip-adapter", name="flux-ip-adapter.safetensors")
         seed = int(seed)
         if seed == -1:
-            seed = torch.Generator(device="cpu").seed()
+            seed = np.random.Generator().seed()
 
         img = self(
             prompt,
@@ -285,7 +285,7 @@ class XFluxPipeline:
         img.save(filename, format="jpeg", exif=exif_data, quality=95, subsampling=0)
         return img, filename
 
-    def forward(
+    def construct(
         self,
         prompt,
         width,
@@ -303,76 +303,60 @@ class XFluxPipeline:
         ip_scale=1.0,
         neg_ip_scale=1.0,
     ):
-        x = get_noise(1, height, width, device=self.device, dtype=torch.bfloat16, seed=seed)
+        x = get_noise(1, height, width, dtype=ms.bfloat16, seed=seed)
         timesteps = get_schedule(
             num_steps,
             (width // 8) * (height // 8) // (16 * 16),
             shift=True,
         )
-        torch.manual_seed(seed)
-        with torch.no_grad():
-            if self.offload:
-                self.t5, self.clip = self.t5.to(self.device), self.clip.to(self.device)
-            inp_cond = prepare(t5=self.t5, clip=self.clip, img=x, prompt=prompt)
-            neg_inp_cond = prepare(t5=self.t5, clip=self.clip, img=x, prompt=neg_prompt)
 
-            if self.offload:
-                self.offload_model_to_cpu(self.t5, self.clip)
-                self.model = self.model.to(self.device)
-            if self.controlnet_loaded:
-                x = denoise_controlnet(
-                    self.model,
-                    **inp_cond,
-                    controlnet=self.controlnet,
-                    timesteps=timesteps,
-                    guidance=guidance,
-                    controlnet_cond=controlnet_image,
-                    timestep_to_start_cfg=timestep_to_start_cfg,
-                    neg_txt=neg_inp_cond["txt"],
-                    neg_txt_ids=neg_inp_cond["txt_ids"],
-                    neg_vec=neg_inp_cond["vec"],
-                    true_gs=true_gs,
-                    controlnet_gs=control_weight,
-                    image_proj=image_proj,
-                    neg_image_proj=neg_image_proj,
-                    ip_scale=ip_scale,
-                    neg_ip_scale=neg_ip_scale,
-                )
-            else:
-                x = denoise(
-                    self.model,
-                    **inp_cond,
-                    timesteps=timesteps,
-                    guidance=guidance,
-                    timestep_to_start_cfg=timestep_to_start_cfg,
-                    neg_txt=neg_inp_cond["txt"],
-                    neg_txt_ids=neg_inp_cond["txt_ids"],
-                    neg_vec=neg_inp_cond["vec"],
-                    true_gs=true_gs,
-                    image_proj=image_proj,
-                    neg_image_proj=neg_image_proj,
-                    ip_scale=ip_scale,
-                    neg_ip_scale=neg_ip_scale,
-                )
+        inp_cond = prepare(t5=self.t5, clip=self.clip, img=x, prompt=prompt)
+        neg_inp_cond = prepare(t5=self.t5, clip=self.clip, img=x, prompt=neg_prompt)
 
-            if self.offload:
-                self.offload_model_to_cpu(self.model)
-                self.ae.decoder.to(x.device)
-            x = unpack(x.float(), height, width)
-            x = self.ae.decode(x)
-            self.offload_model_to_cpu(self.ae.decoder)
+        if self.controlnet_loaded:
+            x = denoise_controlnet(
+                self.model,
+                **inp_cond,
+                controlnet=self.controlnet,
+                timesteps=timesteps,
+                guidance=guidance,
+                controlnet_cond=controlnet_image,
+                timestep_to_start_cfg=timestep_to_start_cfg,
+                neg_txt=neg_inp_cond["txt"],
+                neg_txt_ids=neg_inp_cond["txt_ids"],
+                neg_vec=neg_inp_cond["vec"],
+                true_gs=true_gs,
+                controlnet_gs=control_weight,
+                image_proj=image_proj,
+                neg_image_proj=neg_image_proj,
+                ip_scale=ip_scale,
+                neg_ip_scale=neg_ip_scale,
+            )
+        else:
+            x = denoise(
+                self.model,
+                **inp_cond,
+                timesteps=timesteps,
+                guidance=guidance,
+                timestep_to_start_cfg=timestep_to_start_cfg,
+                neg_txt=neg_inp_cond["txt"],
+                neg_txt_ids=neg_inp_cond["txt_ids"],
+                neg_vec=neg_inp_cond["vec"],
+                true_gs=true_gs,
+                image_proj=image_proj,
+                neg_image_proj=neg_image_proj,
+                ip_scale=ip_scale,
+                neg_ip_scale=neg_ip_scale,
+            )
+
+        x = unpack(x.float(), height, width)
+        x = self.ae.decode(x)
 
         x1 = x.clamp(-1, 1)
-        x1 = rearrange(x1[-1], "c h w -> h w c")
-        output_img = Image.fromarray((127.5 * (x1 + 1.0)).cpu().byte().numpy())
+        # x1 = rearrange(x1[-1], "c h w -> h w c")
+        x1 = x1[-1].permute(1, 2, 0)
+        output_img = Image.fromarray((127.5 * (x1 + 1.0)).asnumpy().to(np.uint8))
         return output_img
-
-    def offload_model_to_cpu(self, *models):
-        if not self.offload:
-            return
-        for model in models:
-            model.cpu()
-            torch.cuda.empty_cache()
 
 
 class XFluxSampler(XFluxPipeline):
@@ -381,8 +365,7 @@ class XFluxSampler(XFluxPipeline):
         self.t5 = t5
         self.ae = ae
         self.model = model
-        self.model.eval()
-        self.device = device
+        self.model.set_train(False)
         self.controlnet_loaded = False
         self.ip_loaded = False
         self.offload = False

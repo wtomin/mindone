@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-import torch
-from einops import rearrange
-from torch import Tensor, nn
+import mindspore.mint as mint
+from mindspore import Tensor, nn
 
 
 @dataclass
@@ -19,20 +18,20 @@ class AutoEncoderParams:
 
 
 def swish(x: Tensor) -> Tensor:
-    return x * torch.sigmoid(x)
+    return x * mint.sigmoid(x)
 
 
-class AttnBlock(nn.Module):
+class AttnBlock(nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
         self.in_channels = in_channels
 
-        self.norm = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.norm = mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
 
-        self.q = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.k = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.v = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.proj_out = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.q = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.k = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.v = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.proj_out = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
 
     def attention(self, h_: Tensor) -> Tensor:
         h_ = self.norm(h_)
@@ -41,32 +40,35 @@ class AttnBlock(nn.Module):
         v = self.v(h_)
 
         b, c, h, w = q.shape
-        q = rearrange(q, "b c h w -> b 1 (h w) c").contiguous()
-        k = rearrange(k, "b c h w -> b 1 (h w) c").contiguous()
-        v = rearrange(v, "b c h w -> b 1 (h w) c").contiguous()
+        # q, k, v: (b, c, h, w) -> (b, 1, h*w, c)
+        q = q.permute(0, 2, 3, 1).reshape(b, 1, h * w, c).contiguous()
+        k = k.permute(0, 2, 3, 1).reshape(b, 1, h * w, c).contiguous()
+        v = v.permute(0, 2, 3, 1).reshape(b, 1, h * w, c).contiguous()
         h_ = nn.functional.scaled_dot_product_attention(q, k, v)
 
-        return rearrange(h_, "b 1 (h w) c -> b c h w", h=h, w=w, c=c, b=b)
+        # (b, 1, h*w, c) -> (b, c, h, w)
+        h_ = h_.reshape(b, 1, h, w, c).squeeze(1).permute(0, 3, 1, 2)
+        return h_
 
-    def forward(self, x: Tensor) -> Tensor:
+    def construct(self, x: Tensor) -> Tensor:
         return x + self.proj_out(self.attention(x))
 
 
-class ResnetBlock(nn.Module):
+class ResnetBlock(nn.Cell):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
 
-        self.norm1 = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm1 = mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.conv1 = mint.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm2 = mint.nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
+        self.conv2 = mint.nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         if self.in_channels != self.out_channels:
-            self.nin_shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+            self.nin_shortcut = mint.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
 
-    def forward(self, x):
+    def construct(self, x):
         h = x
         h = self.norm1(h)
         h = swish(h)
@@ -82,31 +84,31 @@ class ResnetBlock(nn.Module):
         return x + h
 
 
-class Downsample(nn.Module):
+class Downsample(nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
         # no asymmetric padding in torch conv, must do it ourselves
-        self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=2, padding=0)
+        self.conv = mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=2, padding=0)
 
-    def forward(self, x: Tensor):
+    def construct(self, x: Tensor):
         pad = (0, 1, 0, 1)
-        x = nn.functional.pad(x, pad, mode="constant", value=0)
+        x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
         x = self.conv(x)
         return x
 
 
-class Upsample(nn.Module):
+class Upsample(nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+        self.conv = mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
 
-    def forward(self, x: Tensor):
-        x = nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
+    def construct(self, x: Tensor):
+        x = mint.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
         x = self.conv(x)
         return x
 
 
-class Encoder(nn.Module):
+class Encoder(nn.Cell):
     def __init__(
         self,
         resolution: int,
@@ -123,22 +125,22 @@ class Encoder(nn.Module):
         self.resolution = resolution
         self.in_channels = in_channels
         # downsampling
-        self.conv_in = nn.Conv2d(in_channels, self.ch, kernel_size=3, stride=1, padding=1)
+        self.conv_in = mint.nn.Conv2d(in_channels, self.ch, kernel_size=3, stride=1, padding=1)
 
         curr_res = resolution
         in_ch_mult = (1,) + tuple(ch_mult)
         self.in_ch_mult = in_ch_mult
-        self.down = nn.ModuleList()
+        self.down = nn.CellList()
         block_in = self.ch
         for i_level in range(self.num_resolutions):
-            block = nn.ModuleList()
-            attn = nn.ModuleList()
+            block = nn.CellList()
+            attn = nn.CellList()
             block_in = ch * in_ch_mult[i_level]
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            down = nn.Module()
+            down = nn.Cell()
             down.block = block
             down.attn = attn
             if i_level != self.num_resolutions - 1:
@@ -147,16 +149,16 @@ class Encoder(nn.Module):
             self.down.append(down)
 
         # middle
-        self.mid = nn.Module()
+        self.mid = nn.Cell()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
         # end
-        self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-        self.conv_out = nn.Conv2d(block_in, 2 * z_channels, kernel_size=3, stride=1, padding=1)
+        self.norm_out = mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
+        self.conv_out = mint.nn.Conv2d(block_in, 2 * z_channels, kernel_size=3, stride=1, padding=1)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def construct(self, x: Tensor) -> Tensor:
         # downsampling
         hs = [self.conv_in(x)]
         for i_level in range(self.num_resolutions):
@@ -180,7 +182,7 @@ class Encoder(nn.Module):
         return h
 
 
-class Decoder(nn.Module):
+class Decoder(nn.Cell):
     def __init__(
         self,
         ch: int,
@@ -205,24 +207,24 @@ class Decoder(nn.Module):
         self.z_shape = (1, z_channels, curr_res, curr_res)
 
         # z to block_in
-        self.conv_in = nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
+        self.conv_in = mint.nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
 
         # middle
-        self.mid = nn.Module()
+        self.mid = nn.Cell()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
         # upsampling
-        self.up = nn.ModuleList()
+        self.up = nn.CellList()
         for i_level in reversed(range(self.num_resolutions)):
-            block = nn.ModuleList()
-            attn = nn.ModuleList()
+            block = nn.CellList()
+            attn = nn.CellList()
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks + 1):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            up = nn.Module()
+            up = nn.Cell()
             up.block = block
             up.attn = attn
             if i_level != 0:
@@ -231,10 +233,10 @@ class Decoder(nn.Module):
             self.up.insert(0, up)  # prepend to get consistent order
 
         # end
-        self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-        self.conv_out = nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
+        self.norm_out = mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
+        self.conv_out = mint.nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
 
-    def forward(self, z: Tensor) -> Tensor:
+    def construct(self, z: Tensor) -> Tensor:
         # z to block_in
         h = self.conv_in(z)
 
@@ -259,22 +261,22 @@ class Decoder(nn.Module):
         return h
 
 
-class DiagonalGaussian(nn.Module):
+class DiagonalGaussian(nn.Cell):
     def __init__(self, sample: bool = True, chunk_dim: int = 1):
         super().__init__()
         self.sample = sample
         self.chunk_dim = chunk_dim
 
-    def forward(self, z: Tensor) -> Tensor:
-        mean, logvar = torch.chunk(z, 2, dim=self.chunk_dim)
+    def construct(self, z: Tensor) -> Tensor:
+        mean, logvar = mint.chunk(z, 2, dim=self.chunk_dim)
         if self.sample:
-            std = torch.exp(0.5 * logvar)
-            return mean + std * torch.randn_like(mean)
+            std = mint.exp(0.5 * logvar)
+            return mean + std * mint.randn_like(mean)
         else:
             return mean
 
 
-class AutoEncoder(nn.Module):
+class AutoEncoder(nn.Cell):
     def __init__(self, params: AutoEncoderParams):
         super().__init__()
         self.encoder = Encoder(
@@ -308,5 +310,5 @@ class AutoEncoder(nn.Module):
         z = z / self.scale_factor + self.shift_factor
         return self.decoder(z)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def construct(self, x: Tensor) -> Tensor:
         return self.decode(self.encode(x))

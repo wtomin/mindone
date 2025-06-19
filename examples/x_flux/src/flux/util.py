@@ -4,12 +4,15 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-import torch
 from huggingface_hub import hf_hub_download
+from imwatermark import WatermarkEncoder
 from optimum.quanto import requantize
 from PIL import Image
 from safetensors import safe_open
 from safetensors.torch import load_file as load_sft
+
+import mindspore as ms
+import mindspore.mint as mint
 
 from .annotator.canny import CannyDetector
 from .annotator.dwpose import DWposeDetector
@@ -44,6 +47,8 @@ def load_checkpoint(local_path, repo_id, name):
             print(f"Loading .safetensors checkpoint from {local_path}")
             checkpoint = load_safetensors(local_path)
         else:
+            import torch
+
             print(f"Loading checkpoint from {local_path}")
             checkpoint = torch.load(local_path, map_location="cpu")
     elif repo_id is not None and name is not None:
@@ -287,45 +292,47 @@ def load_from_repo_id(repo_id, checkpoint_name):
     return sd
 
 
-def load_flow_model(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
     if ckpt_path is None and configs[name].repo_id is not None and configs[name].repo_flow is not None and hf_download:
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow)
 
-    with torch.device("meta" if ckpt_path is not None else device):
-        model = Flux(configs[name].params).to(torch.bfloat16)
+    model = Flux(configs[name].params).to(ms.bfloat16)
 
     if ckpt_path is not None:
         print("Loading checkpoint")
         # load_sft doesn't support torch.device
-        sd = load_sft(ckpt_path, device=str(device))
+        sd = load_sft(
+            ckpt_path,
+        )
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return model
 
 
-def load_flow_model2(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model2(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
     if ckpt_path is None and configs[name].repo_id is not None and configs[name].repo_flow is not None and hf_download:
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow.replace("sft", "safetensors"))
 
-    with torch.device("meta" if ckpt_path is not None else device):
-        model = Flux(configs[name].params)
+    model = Flux(configs[name].params)
 
     if ckpt_path is not None:
         print("Loading checkpoint")
         # load_sft doesn't support torch.device
-        sd = load_sft(ckpt_path, device=str(device))
+        sd = load_sft(
+            ckpt_path,
+        )
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return model
 
 
-def load_flow_model_quintized(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model_quintized(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
@@ -333,48 +340,54 @@ def load_flow_model_quintized(name: str, device: str | torch.device = "cuda", hf
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow)
     json_path = hf_hub_download(configs[name].repo_id, "flux_dev_quantization_map.json")
 
-    model = Flux(configs[name].params).to(torch.bfloat16)
+    model = Flux(configs[name].params).to(ms.bfloat16)
 
     print("Loading checkpoint")
     # load_sft doesn't support torch.device
-    sd = load_sft(ckpt_path, device="cpu")
+    sd = load_sft(
+        ckpt_path,
+    )
     with open(json_path, "r") as f:
         quantization_map = json.load(f)
     print("Start a quantization process...")
-    requantize(model, sd, quantization_map, device=device)
+    requantize(
+        model,
+        sd,
+        quantization_map,
+    )
     print("Model is quantized!")
     return model
 
 
-def load_controlnet(name, device, transformer=None):
-    with torch.device(device):
-        controlnet = ControlNetFlux(configs[name].params)
+def load_controlnet(name, transformer=None):
+    controlnet = ControlNetFlux(configs[name].params)
     if transformer is not None:
         controlnet.load_state_dict(transformer.state_dict(), strict=False)
     return controlnet
 
 
-def load_t5(device: str | torch.device = "cuda", max_length: int = 512) -> HFEmbedder:
+def load_t5(max_length: int = 512) -> HFEmbedder:
     # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
-    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, torch_dtype=torch.bfloat16).to(device)
+    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, torch_dtype=ms.bfloat16)
 
 
-def load_clip(device: str | torch.device = "cuda") -> HFEmbedder:
-    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
+def load_clip() -> HFEmbedder:
+    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=ms.bfloat16)
 
 
-def load_ae(name: str, device: str | torch.device = "cuda", hf_download: bool = True) -> AutoEncoder:
+def load_ae(name: str, hf_download: bool = True) -> AutoEncoder:
     ckpt_path = configs[name].ae_path
     if ckpt_path is None and configs[name].repo_id is not None and configs[name].repo_ae is not None and hf_download:
         ckpt_path = hf_hub_download(configs[name].repo_id_ae, configs[name].repo_ae)
 
     # Loading the autoencoder
     print("Init AE")
-    with torch.device("meta" if ckpt_path is not None else device):
-        ae = AutoEncoder(configs[name].ae_params)
+    ae = AutoEncoder(configs[name].ae_params)
 
     if ckpt_path is not None:
-        sd = load_sft(ckpt_path, device=str(device))
+        sd = load_sft(
+            ckpt_path,
+        )
         missing, unexpected = ae.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return ae
@@ -387,7 +400,7 @@ class WatermarkEmbedder:
         self.encoder = WatermarkEncoder()
         self.encoder.set_watermark("bits", self.watermark)
 
-    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+    def __call__(self, image: ms.Tensor) -> ms.Tensor:
         """
         Adds a predefined watermark to the input image
 
@@ -402,13 +415,21 @@ class WatermarkEmbedder:
         if squeeze:
             image = image[None, ...]
         n = image.shape[0]
-        image_np = rearrange((255 * image).detach().cpu(), "n b c h w -> (n b) h w c").numpy()[:, :, :, ::-1]
+        # rearrange((255 * image), "n b c h w -> (n b) h w c")
+        image_ = 255 * image
+        nb, c, h, w = image_.shape[0] * image_.shape[1], image_.shape[2], image_.shape[3], image_.shape[4]
+        image_reshaped = image_.reshape(nb, c, h, w)
+        image_np = image_reshaped.permute(0, 2, 3, 1).asnumpy()[:, :, :, ::-1]
         # torch (b, c, h, w) in [0, 1] -> numpy (b, h, w, c) [0, 255]
         # watermarking libary expects input as cv2 BGR format
         for k in range(image_np.shape[0]):
             image_np[k] = self.encoder.encode(image_np[k], "dwtDct")
-        image = torch.from_numpy(rearrange(image_np[:, :, :, ::-1], "(n b) h w c -> n b c h w", n=n)).to(image.device)
-        image = torch.clamp(image / 255, min=0.0, max=1.0)
+        # rearrange(image_np[:, :, :, ::-1], "(n b) h w c -> n b c h w", n=n)
+        image_np_bgr = image_np[:, :, :, ::-1]
+        _, h, w, c = image_np_bgr.shape[1:]
+        image_reshaped_back = image_np_bgr.reshape(n, -1, h, w, c).transpose(0, 1, 4, 2, 3)
+        image = ms.from_numpy(image_reshaped_back)
+        image = mint.clamp(image / 255, min=0.0, max=1.0)
         if squeeze:
             image = image[0]
         image = 2 * image - 1
