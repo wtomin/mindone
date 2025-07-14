@@ -185,6 +185,7 @@ from .models.imagegpt import (
     ImageGPTModel,
     ImageGPTPreTrainedModel,
 )
+from .models.jetmoe import JetMoeForCausalLM, JetMoeForSequenceClassification, JetMoeModel, JetMoePreTrainedModel
 from .models.levit import (
     LevitFeatureExtractor,
     LevitForImageClassification,
