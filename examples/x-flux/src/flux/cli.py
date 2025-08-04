@@ -191,7 +191,7 @@ def main(
         opts.seed = None
         if offload:
             ae = ae.cpu()
-            torch.cuda.empty_cache()
+            
             t5, clip = t5.to(torch_device), clip.to(torch_device)
         inp = prepare(t5, clip, x, prompt=opts.prompt)
         timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
@@ -199,7 +199,7 @@ def main(
         # offload TEs to CPU, load model to gpu
         if offload:
             t5, clip = t5.cpu(), clip.cpu()
-            torch.cuda.empty_cache()
+            
             model = model.to(torch_device)
 
         # denoise initial noise
@@ -208,7 +208,7 @@ def main(
         # offload model, load autoencoder to gpu
         if offload:
             model.cpu()
-            torch.cuda.empty_cache()
+            
             ae.decoder
 
         # decode latents to pixel space

@@ -347,8 +347,6 @@ class XFluxPipeline:
         if not self.offload: return
         for model in models:
             model.cpu()
-            torch.cuda.empty_cache()
-
 
 class XFluxSampler(XFluxPipeline):
     def __init__(self, clip, t5, ae, model, device):
