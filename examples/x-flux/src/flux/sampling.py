@@ -16,10 +16,10 @@ def get_noise(
     num_samples: int,
     height: int,
     width: int,
-    device: torch.device,
     dtype: mindspore.dtype,
     seed: int,
 ):
+    mindspore.set_seed(seed)
     return mindspore.mint.randn(
         num_samples,
         16,
@@ -27,7 +27,6 @@ def get_noise(
         2 * math.ceil(height / 16),
         2 * math.ceil(width / 16),
         dtype=dtype,
-        generator=mindspore.manual_seed(seed),
     )
 
 

@@ -1,10 +1,9 @@
-from mindspore import mint, nn
-from mindspore import Tensor, nn
-from transformers import (CLIPTextModel, CLIPTokenizer, T5EncoderModel,
+from mindspore import Tensor
+from mindone.transformers import (CLIPTextModel, CLIPTokenizer, T5EncoderModel,
                           T5Tokenizer)
 
 
-class HFEmbedder(mindspore.nn.Cell):
+class HFEmbedder(ms.nn.Cell):
     def __init__(self, version: str, max_length: int, **hf_kwargs):
         super().__init__()
         self.is_clip = version.startswith("openai")
@@ -18,7 +17,7 @@ class HFEmbedder(mindspore.nn.Cell):
             self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(version, max_length=max_length)
             self.hf_module: T5EncoderModel = T5EncoderModel.from_pretrained(version, **hf_kwargs)
 
-        self.hf_module = self.hf_module.eval().requires_grad_(False)
+        self.hf_module = self.hf_module.set_train(False).requires_grad_(False)
 
     def construct(self, text: list[str]) -> Tensor:
         batch_encoding = self.tokenizer(
@@ -32,7 +31,7 @@ class HFEmbedder(mindspore.nn.Cell):
         )
 
         outputs = self.hf_module(
-            input_ids=mindspore.Tensor(batch_encoding["input_ids"]),
+            input_ids=Tensor(batch_encoding["input_ids"]),
             attention_mask=None,
             output_hidden_states=False,
         )

@@ -1,10 +1,33 @@
 import mindspore as ms
-from mindspore import mint, nn
+from mindspore import mint, nn, Tensor, ops
+from mindspore.common.initializer import Constant, Normal, initializer
+from mindspore import Parameter
 from dataclasses import dataclass
+import numpy as np
 
-import mindspore
-from einops import rearrange
-from mindspore import Tensor, nn
+# Dtype constants for attention calculations
+_MIN_FP16 = ms.tensor(np.finfo(np.float16).min, dtype=ms.float16)
+_MIN_FP32 = ms.tensor(np.finfo(np.float32).min, dtype=ms.float32)
+_MIN_FP64 = ms.tensor(np.finfo(np.float64).min, dtype=ms.float64)
+_MIN_BF16 = ms.tensor(float.fromhex("-0x1.fe00000000000p+127"), dtype=ms.bfloat16)
+_MAX_FP16 = ms.tensor(np.finfo(np.float16).max, dtype=ms.float16)
+_MAX_FP32 = ms.tensor(np.finfo(np.float32).max, dtype=ms.float32)
+_MAX_FP64 = ms.tensor(np.finfo(np.float64).max, dtype=ms.float64)
+_MAX_BF16 = ms.tensor(float.fromhex("0x1.fe00000000000p+127"), dtype=ms.bfloat16)
+
+_DTYPE_2_MIN = {
+    ms.float16: _MIN_FP16,
+    ms.float32: _MIN_FP32,
+    ms.float64: _MIN_FP64,
+    ms.bfloat16: _MIN_BF16,
+}
+
+_DTYPE_2_MAX = {
+    ms.float16: _MAX_FP16,
+    ms.float32: _MAX_FP32,
+    ms.float64: _MAX_FP64,
+    ms.bfloat16: _MAX_BF16,
+}
 
 
 @dataclass
@@ -21,20 +44,60 @@ class AutoEncoderParams:
 
 
 def swish(x: Tensor) -> Tensor:
-    return x * mindspore.mint.sigmoid(x)
+    return x * mint.sigmoid(x)
 
 
-class AttnBlock(mindspore.nn.Cell):
+class AttnBlock(ms.nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
         self.in_channels = in_channels
 
-        self.norm = mindspore.mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.norm = mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
 
-        self.q = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.k = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.v = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.proj_out = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.q = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.k = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.v = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.proj_out = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
+    
+    def scaled_dot_product_attention(
+        self, query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, dtype=None, training=True
+    ):
+        # force dtype(fp16 or bf16) precision calculation
+        ori_dtype = query.dtype
+        if dtype is not None:
+            query, key, value = query.astype(dtype), key.astype(dtype), value.astype(dtype)
+
+        if attn_mask is not None:
+            if attn_mask.dtype == ms.bool_:
+                attn_mask = attn_mask.to(ms.float32)
+                attn_mask = attn_mask.masked_fill((1 - attn_mask).to(ms.bool_), _DTYPE_2_MIN[ms.float16])
+            attn_mask = attn_mask.to(query.dtype)
+
+            attn_weight = mint.nn.functional.softmax(
+                mint.matmul(query, mint.transpose(key, -2, -1)) / (query.shape[-1] ** 0.5) + attn_mask,
+                dim=-1,
+                dtype=ms.float32,
+            ).astype(query.dtype)
+        else:
+            L, S = query.shape[-2], key.shape[-2]
+            attn_bias = mint.zeros((L, S), dtype=query.dtype)
+            if is_causal:
+                temp_mask = mint.ones((L, S), dtype=ms.bool_).tril(diagonal=0)
+                attn_bias = ops.masked_fill(attn_bias, mint.logical_not(temp_mask), _DTYPE_2_MIN[ms.float16])
+                attn_bias = attn_bias.to(query.dtype)
+
+            attn_weight = mint.nn.functional.softmax(
+                mint.matmul(query, mint.transpose(key, -2, -1)) / (query.shape[-1] ** 0.5) + attn_bias,
+                dim=-1,
+                dtype=ms.float32,
+            ).astype(query.dtype)
+
+        attn_weight = mint.nn.functional.dropout(attn_weight, p=dropout_p, training=training)
+
+        out = mint.matmul(attn_weight, value)
+        out = out.astype(ori_dtype)
+
+        return out
 
     def attention(self, h_: Tensor) -> Tensor:
         h_ = self.norm(h_)
@@ -43,30 +106,34 @@ class AttnBlock(mindspore.nn.Cell):
         v = self.v(h_)
 
         b, c, h, w = q.shape
-        q = rearrange(q, "b c h w -> b 1 (h w) c").contiguous()
-        k = rearrange(k, "b c h w -> b 1 (h w) c").contiguous()
-        v = rearrange(v, "b c h w -> b 1 (h w) c").contiguous()
-        h_ = nn.functional.scaled_dot_product_attention(q, k, v)
+        # Original torch code: q = rearrange(q, "b c h w -> b 1 (h w) c").contiguous()
+        q = q.permute(0, 2, 3, 1).reshape(b, 1, h*w, c).contiguous()
+        # Original torch code: k = rearrange(k, "b c h w -> b 1 (h w) c").contiguous()
+        k = k.permute(0, 2, 3, 1).reshape(b, 1, h*w, c).contiguous()
+        # Original torch code: v = rearrange(v, "b c h w -> b 1 (h w) c").contiguous()
+        v = v.permute(0, 2, 3, 1).reshape(b, 1, h*w, c).contiguous()
+        h_ = self.scaled_dot_product_attention(q, k, v)
 
-        return rearrange(h_, "b 1 (h w) c -> b c h w", h=h, w=w, c=c, b=b)
+        # Original torch code: return rearrange(h_, "b 1 (h w) c -> b c h w", h=h, w=w, c=c, b=b)
+        return h_.reshape(b, h, w, c).permute(0, 3, 1, 2)
 
     def construct(self, x: Tensor) -> Tensor:
         return x + self.proj_out(self.attention(x))
 
 
-class ResnetBlock(mindspore.nn.Cell):
+class ResnetBlock(ms.nn.Cell):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
 
-        self.norm1 = mindspore.mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-        self.conv1 = mindspore.mint.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = mindspore.mint.nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
-        self.conv2 = mindspore.mint.nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm1 = mint.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.conv1 = mint.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm2 = mint.nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
+        self.conv2 = mint.nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         if self.in_channels != self.out_channels:
-            self.nin_shortcut = mindspore.mint.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+            self.nin_shortcut = mint.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
 
     def construct(self, x):
         h = x
@@ -84,31 +151,31 @@ class ResnetBlock(mindspore.nn.Cell):
         return x + h
 
 
-class Downsample(mindspore.nn.Cell):
+class Downsample(ms.nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
         # no asymmetric padding in torch conv, must do it ourselves
-        self.conv = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=2, padding=0)
+        self.conv = mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=2, padding=0)
 
     def construct(self, x: Tensor):
         pad = (0, 1, 0, 1)
-        x = mindspore.mint.nn.functional.pad(x, pad, mode="constant", value=0)
+        x = mint.nn.functional.pad(x, pad, mode="constant", value=0)
         x = self.conv(x)
         return x
 
 
-class Upsample(mindspore.nn.Cell):
+class Upsample(ms.nn.Cell):
     def __init__(self, in_channels: int):
         super().__init__()
-        self.conv = mindspore.mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+        self.conv = mint.nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
 
     def construct(self, x: Tensor):
-        x = mindspore.mint.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
+        x = mint.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
         x = self.conv(x)
         return x
 
 
-class Encoder(mindspore.nn.Cell):
+class Encoder(ms.nn.Cell):
     def __init__(
         self,
         resolution: int,
@@ -125,22 +192,22 @@ class Encoder(mindspore.nn.Cell):
         self.resolution = resolution
         self.in_channels = in_channels
         # downsampling
-        self.conv_in = mindspore.mint.nn.Conv2d(in_channels, self.ch, kernel_size=3, stride=1, padding=1)
+        self.conv_in = mint.nn.Conv2d(in_channels, self.ch, kernel_size=3, stride=1, padding=1)
 
         curr_res = resolution
         in_ch_mult = (1,) + tuple(ch_mult)
         self.in_ch_mult = in_ch_mult
-        self.down = mindspore.nn.CellList()
+        self.down = ms.nn.CellList()
         block_in = self.ch
         for i_level in range(self.num_resolutions):
-            block = mindspore.nn.CellList()
-            attn = mindspore.nn.CellList()
+            block = ms.nn.CellList()
+            attn = ms.nn.CellList()
             block_in = ch * in_ch_mult[i_level]
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            down = mindspore.nn.Cell()
+            down = ms.nn.Cell()
             down.block = block
             down.attn = attn
             if i_level != self.num_resolutions - 1:
@@ -149,14 +216,14 @@ class Encoder(mindspore.nn.Cell):
             self.down.append(down)
 
         # middle
-        self.mid = mindspore.nn.Cell()
+        self.mid = ms.nn.Cell()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
         # end
-        self.norm_out = mindspore.mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-        self.conv_out = mindspore.mint.nn.Conv2d(block_in, 2 * z_channels, kernel_size=3, stride=1, padding=1)
+        self.norm_out = mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
+        self.conv_out = mint.nn.Conv2d(block_in, 2 * z_channels, kernel_size=3, stride=1, padding=1)
 
     def construct(self, x: Tensor) -> Tensor:
         # downsampling
@@ -182,7 +249,7 @@ class Encoder(mindspore.nn.Cell):
         return h
 
 
-class Decoder(mindspore.nn.Cell):
+class Decoder(ms.nn.Cell):
     def __init__(
         self,
         ch: int,
@@ -207,24 +274,24 @@ class Decoder(mindspore.nn.Cell):
         self.z_shape = (1, z_channels, curr_res, curr_res)
 
         # z to block_in
-        self.conv_in = mindspore.mint.nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
+        self.conv_in = mint.nn.Conv2d(z_channels, block_in, kernel_size=3, stride=1, padding=1)
 
         # middle
-        self.mid = mindspore.nn.Cell()
+        self.mid = ms.nn.Cell()
         self.mid.block_1 = ResnetBlock(in_channels=block_in, out_channels=block_in)
         self.mid.attn_1 = AttnBlock(block_in)
         self.mid.block_2 = ResnetBlock(in_channels=block_in, out_channels=block_in)
 
         # upsampling
-        self.up = mindspore.nn.CellList()
+        self.up = ms.nn.CellList()
         for i_level in reversed(range(self.num_resolutions)):
-            block = mindspore.nn.CellList()
-            attn = mindspore.nn.CellList()
+            block = ms.nn.CellList()
+            attn = ms.nn.CellList()
             block_out = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks + 1):
                 block.append(ResnetBlock(in_channels=block_in, out_channels=block_out))
                 block_in = block_out
-            up = mindspore.nn.Cell()
+            up = ms.nn.Cell()
             up.block = block
             up.attn = attn
             if i_level != 0:
@@ -233,8 +300,8 @@ class Decoder(mindspore.nn.Cell):
             self.up.insert(0, up)  # prepend to get consistent order
 
         # end
-        self.norm_out = mindspore.mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
-        self.conv_out = mindspore.mint.nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
+        self.norm_out = mint.nn.GroupNorm(num_groups=32, num_channels=block_in, eps=1e-6, affine=True)
+        self.conv_out = mint.nn.Conv2d(block_in, out_ch, kernel_size=3, stride=1, padding=1)
 
     def construct(self, z: Tensor) -> Tensor:
         # z to block_in
@@ -261,22 +328,22 @@ class Decoder(mindspore.nn.Cell):
         return h
 
 
-class DiagonalGaussian(mindspore.nn.Cell):
+class DiagonalGaussian(ms.nn.Cell):
     def __init__(self, sample: bool = True, chunk_dim: int = 1):
         super().__init__()
         self.sample = sample
         self.chunk_dim = chunk_dim
 
     def construct(self, z: Tensor) -> Tensor:
-        mean, logvar = mindspore.mint.chunk(z, 2, dim=self.chunk_dim)
+        mean, logvar = mint.chunk(z, 2, dim=self.chunk_dim)
         if self.sample:
-            std = mindspore.mint.exp(0.5 * logvar)
-            return mean + std * mindspore.mint.randn_like(mean)
+            std = mint.exp(0.5 * logvar)
+            return mean + std * mint.randn_like(mean)
         else:
             return mean
 
 
-class AutoEncoder(mindspore.nn.Cell):
+class AutoEncoder(ms.nn.Cell):
     def __init__(self, params: AutoEncoderParams):
         super().__init__()
         self.encoder = Encoder(

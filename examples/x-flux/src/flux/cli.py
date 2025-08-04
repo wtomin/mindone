@@ -94,7 +94,7 @@ def parse_prompt(options: SamplingOptions) -> SamplingOptions | None:
     return options
 
 
-@torch.inference_mode()
+@ms._no_grad()
 def main(
     name: str = "flux-schnell",
     width: int = 1360,
@@ -104,7 +104,7 @@ def main(
         "a photo of a forest with mist swirling around the tree trunks. The word "
         '"FLUX" is painted over it in big, red brush strokes with visible texture'
     ),
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    device: str = "cpu",
     num_steps: int | None = None,
     loop: bool = False,
     guidance: float = 3.5,
@@ -124,7 +124,7 @@ def main(
         output_name: where to save the output image, `{idx}` will be replaced
             by the index of the sample
         prompt: Prompt used for sampling
-        device: Pytorch device
+        device: Device specification (unused in MindSpore)
         num_steps: number of sampling steps (default 4 for schnell, 50 for guidance distilled)
         loop: start an interactive session and sample multiple times
         guidance: guidance value used for guidance distillation
@@ -136,7 +136,7 @@ def main(
         available = ", ".join(configs.keys())
         raise ValueError(f"Got unknown model name: {name}, chose from {available}")
 
-    torch_device = torch.device(device)
+    # Device handling removed for MindSpore
     if num_steps is None:
         num_steps = 4 if name == "flux-schnell" else 50
 
@@ -156,8 +156,8 @@ def main(
             idx = 0
 
     # init all components
-    t5 = load_t5(torch_device, max_length=256 if name == "flux-schnell" else 512)
-    clip = load_clip(torch_device)
+    t5 = load_t5(max_length=256 if name == "flux-schnell" else 512)
+    clip = load_clip()
     model = load_flow_model(name, )
     ae = load_ae(name, )
 
@@ -190,31 +190,28 @@ def main(
         )
         opts.seed = None
         if offload:
-            ae = ae.cpu()
-            
-            t5, clip = t5.to(torch_device), clip.to(torch_device)
+            # Offloading logic removed for MindSpore
+            pass
         inp = prepare(t5, clip, x, prompt=opts.prompt)
         timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
 
         # offload TEs to CPU, load model to gpu
         if offload:
-            t5, clip = t5.cpu(), clip.cpu()
-            
-            model = model.to(torch_device)
+            # Offloading logic removed for MindSpore
+            pass
 
         # denoise initial noise
         x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
 
         # offload model, load autoencoder to gpu
         if offload:
-            model.cpu()
-            
-            ae.decoder
+            # Offloading logic removed for MindSpore
+            pass
 
         # decode latents to pixel space
         x = unpack(x.float(), opts.height, opts.width)
-        with torch.autocast(device_type=torch_device.type, dtype=mindspore.bfloat16):
-            x = ae.decode(x)
+        # Autocast removed for MindSpore
+        x = ae.decode(x)
         t1 = time.perf_counter()
 
         fn = output_name.format(idx=idx)
@@ -224,7 +221,7 @@ def main(
         x = embed_watermark(x.float())
         x = rearrange(x[0], "c h w -> h w c")
 
-        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+        img = Image.fromarray((127.5 * (x + 1.0)).byte().asnumpy())
         nsfw_score = [x["score"] for x in nsfw_classifier(img) if x["label"] == "nsfw"][0]
         
         if nsfw_score < NSFW_THRESHOLD:

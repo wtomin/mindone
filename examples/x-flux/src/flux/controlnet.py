@@ -1,11 +1,12 @@
 import mindspore as ms
 from mindspore import mint, nn
 from dataclasses import dataclass
-from typing import Any, Dict
 
 import mindspore
 from mindspore import Tensor, nn
 from einops import rearrange
+from mindspore.common.initializer import Constant, initializer
+from mindspore import Parameter
 
 from .modules.layers import (DoubleStreamBlock, EmbedND, LastLayer,
                                  MLPEmbedder, SingleStreamBlock,
@@ -29,14 +30,19 @@ class FluxParams:
 
 def zero_module(module):
     for p in module.parameters():
-        nn.init.zeros_(p)
+        constant_(p, 0.0)
     return module
+
+def constant_(tensor: Parameter, val: float) -> None:
+    tensor.set_data(initializer(Constant(val), tensor.shape, tensor.dtype))
 
 
 class ControlNetFlux(mindspore.nn.Cell):
     """
     Transformer model for flow matching on sequences.
     """
+    _supports_gradient_checkpointing = True
+
     def __init__(self, params: FluxParams, controlnet_depth=2):
         super().__init__()
 
@@ -80,6 +86,7 @@ class ControlNetFlux(mindspore.nn.Cell):
             controlnet_block = zero_module(controlnet_block)
             self.controlnet_blocks.append(controlnet_block)
         self.pos_embed_input = mindspore.mint.nn.Linear(self.in_channels, self.hidden_size, bias=True)
+        self.gradient_checkpointing = False
         self.input_hint_block = mindspore.nn.SequentialCell(
             mindspore.mint.nn.Conv2d(3, 16, 3, padding=1),
             mindspore.mint.nn.SiLU(),
@@ -98,6 +105,9 @@ class ControlNetFlux(mindspore.nn.Cell):
             zero_module(mindspore.mint.nn.Conv2d(16, 16, 3, padding=1))
         )
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if hasattr(module, "gradient_checkpointing"):
+            module.gradient_checkpointing = value
 
 
     @property
@@ -187,7 +197,11 @@ class ControlNetFlux(mindspore.nn.Cell):
         block_res_samples = ()
 
         for block in self.double_blocks:
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+            if self.training and self.gradient_checkpointing:
+                raise NotImplementedError("Gradient checkpoint is not yet supported.")
+            else:
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+
             block_res_samples = block_res_samples + (img,)
 
         controlnet_block_res_samples = ()

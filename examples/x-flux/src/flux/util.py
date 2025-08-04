@@ -10,7 +10,6 @@ import numpy as np
 from PIL import Image
 from huggingface_hub import hf_hub_download
 from safetensors import safe_open
-from safetensors.torch import load_file as load_sft
 
 from optimum.quanto import requantize
 
@@ -46,7 +45,7 @@ def load_checkpoint(local_path, repo_id, name):
             checkpoint = load_safetensors(local_path)
         else:
             print(f"Loading checkpoint from {local_path}")
-            checkpoint = torch.load(local_path, map_location='cpu')
+            checkpoint = ms.load_checkpoint(local_path)
     elif repo_id is not None and name is not None:
         print(f"Loading checkpoint {name} from repo id {repo_id}")
         checkpoint = load_from_repo_id(repo_id, name)
@@ -114,11 +113,11 @@ def resize_image_with_pad(input_image, resolution, skip_hwc3=False, mode='edge')
     return safer_memory(img_padded), remove_pad
 
 class Annotator:
-    def __init__(self, name: str, device: str):
+    def __init__(self, name: str):
         if name == "canny":
             processor = CannyDetector()
         elif name == "openpose":
-            processor = DWposeDetector(device)
+            processor = DWposeDetector()
         elif name == "depth":
             processor = MidasDetector()
         elif name == "hed":
@@ -280,10 +279,10 @@ def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
 
 def load_from_repo_id(repo_id, checkpoint_name):
     ckpt_path = hf_hub_download(repo_id, checkpoint_name)
-    sd = load_sft(ckpt_path, )
+    sd = load_safetensors(ckpt_path)
     return sd
 
-def load_flow_model(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
@@ -295,18 +294,16 @@ def load_flow_model(name: str, device: str | torch.device = "cuda", hf_download:
     ):
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow)
 
-    with torch.device("meta" if ckpt_path is not None else device):
-        model = Flux(configs[name].params).to(mindspore.bfloat16)
+    model = Flux(configs[name].params).to(mindspore.bfloat16)
 
     if ckpt_path is not None:
         print("Loading checkpoint")
-        # load_sft doesn't support torch.device
-        sd = load_sft(ckpt_path, )
+        sd = load_safetensors(ckpt_path)
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return model
 
-def load_flow_model2(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model2(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
@@ -318,18 +315,16 @@ def load_flow_model2(name: str, device: str | torch.device = "cuda", hf_download
     ):
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow.replace("sft", "safetensors"))
 
-    with torch.device("meta" if ckpt_path is not None else device):
-        model = Flux(configs[name].params)
+    model = Flux(configs[name].params)
 
     if ckpt_path is not None:
         print("Loading checkpoint")
-        # load_sft doesn't support torch.device
-        sd = load_sft(ckpt_path, )
+        sd = load_safetensors(ckpt_path)
         missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return model
 
-def load_flow_model_quintized(name: str, device: str | torch.device = "cuda", hf_download: bool = True):
+def load_flow_model_quintized(name: str, hf_download: bool = True):
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
@@ -346,8 +341,7 @@ def load_flow_model_quintized(name: str, device: str | torch.device = "cuda", hf
     model = Flux(configs[name].params).to(mindspore.bfloat16)
 
     print("Loading checkpoint")
-    # load_sft doesn't support torch.device
-    sd = load_sft(ckpt_path, )
+    sd = load_safetensors(ckpt_path)
     with open(json_path, "r") as f:
         quantization_map = json.load(f)
     print("Start a quantization process...")
@@ -355,22 +349,21 @@ def load_flow_model_quintized(name: str, device: str | torch.device = "cuda", hf
     print("Model is quantized!")
     return model
 
-def load_controlnet(name, device, transformer=None):
-    with torch.device(device):
-        controlnet = ControlNetFlux(configs[name].params)
+def load_controlnet(name, transformer=None):
+    controlnet = ControlNetFlux(configs[name].params)
     if transformer is not None:
         controlnet.load_state_dict(transformer.state_dict(), strict=False)
     return controlnet
 
-def load_t5(device: str | torch.device = "cuda", max_length: int = 512) -> HFEmbedder:
+def load_t5(max_length: int = 512) -> HFEmbedder:
     # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
-    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, torch_dtype=mindspore.bfloat16).to(device)
+    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, torch_dtype=mindspore.bfloat16)
 
-def load_clip(device: str | torch.device = "cuda") -> HFEmbedder:
-    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=mindspore.bfloat16).to(device)
+def load_clip() -> HFEmbedder:
+    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=mindspore.bfloat16)
 
 
-def load_ae(name: str, device: str | torch.device = "cuda", hf_download: bool = True) -> AutoEncoder:
+def load_ae(name: str, hf_download: bool = True) -> AutoEncoder:
     ckpt_path = configs[name].ae_path
     if (
         ckpt_path is None
@@ -382,11 +375,10 @@ def load_ae(name: str, device: str | torch.device = "cuda", hf_download: bool = 
 
     # Loading the autoencoder
     print("Init AE")
-    with torch.device("meta" if ckpt_path is not None else device):
-        ae = AutoEncoder(configs[name].ae_params)
+    ae = AutoEncoder(configs[name].ae_params)
 
     if ckpt_path is not None:
-        sd = load_sft(ckpt_path, )
+        sd = load_safetensors(ckpt_path)
         missing, unexpected = ae.load_state_dict(sd, strict=False, assign=True)
         print_load_warning(missing, unexpected)
     return ae

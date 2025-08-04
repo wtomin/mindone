@@ -28,12 +28,10 @@ from src.flux.util import (
     get_lora_rank,
     load_checkpoint
 )
-
 from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor
 
 class XFluxPipeline:
-    def __init__(self, model_type, device, offload: bool = False):
-        self.device = torch.device(device)
+    def __init__(self, model_type, offload: bool = False):
         self.offload = offload
         self.model_type = model_type
 
@@ -69,9 +67,8 @@ class XFluxPipeline:
                 proj[key[len("ip_adapter_proj_model."):]] = value
 
         # load image encoder
-        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(self.image_encoder_path).to(
-            dtype=mindspore.float16
-        )
+        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(self.image_encoder_path,
+        mindspore_dtype=mindspore.float16)
         self.clip_image_processor = CLIPImageProcessor()
 
         # setup image embedding projection model
@@ -149,8 +146,9 @@ class XFluxPipeline:
         # encode image-prompt embeds
         image_prompt = self.clip_image_processor(
             images=image_prompt,
-            return_tensors="pt"
+            return_tensors="np"
         ).pixel_values
+        image_prompt = mindspore.Tensor(image_prompt)
         image_prompt_embeds = self.image_encoder(
             image_prompt
         ).image_embeds.to(
@@ -198,7 +196,7 @@ class XFluxPipeline:
             controlnet_image = controlnet_image.permute(
                 2, 0, 1).unsqueeze(0).to(mindspore.bfloat16)
 
-        return self.forward(
+        return self.construct(
             prompt,
             width,
             height,
@@ -216,7 +214,7 @@ class XFluxPipeline:
             neg_ip_scale=neg_ip_scale,
         )
 
-    @torch.inference_mode()
+    @mindspore._no_grad()
     def gradio_generate(self, prompt, image_prompt, controlnet_image, width, height, guidance,
                         num_steps, seed, true_gs, ip_scale, neg_ip_scale, neg_prompt,
                         neg_image_prompt, timestep_to_start_cfg, control_type, control_weight,
@@ -285,7 +283,7 @@ class XFluxPipeline:
             (width // 8) * (height // 8) // (16 * 16),
             shift=True,
         )
-        torch.manual_seed(seed)
+        ms.manual_seed(seed)
         with mindspore._no_grad():
             if self.offload:
                 self.t5, self.clip = self.t5, self.clip
@@ -336,26 +334,26 @@ class XFluxPipeline:
                 self.ae.decoder
             x = unpack(x.float(), height, width)
             x = self.ae.decode(x)
-            self.offload_model_to_cpu(self.ae.decoder)
+            if self.offload:
+                self.offload_model_to_cpu(self.ae.decoder)
 
         x1 = x.clamp(-1, 1)
         x1 = rearrange(x1[-1], "c h w -> h w c")
-        output_img = Image.fromarray((127.5 * (x1 + 1.0)).cpu().byte().numpy())
+        output_img = Image.fromarray((127.5 * (x1 + 1.0)).asnumpy().astype(np.uint8))
         return output_img
 
     def offload_model_to_cpu(self, *models):
         if not self.offload: return
-        for model in models:
-            model.cpu()
+        raise NotImplementedError("Offload is not implemented")
+
 
 class XFluxSampler(XFluxPipeline):
-    def __init__(self, clip, t5, ae, model, device):
+    def __init__(self, clip, t5, ae, model):
         self.clip = clip
         self.t5 = t5
         self.ae = ae
         self.model = model
-        self.model.eval()
-        self.device = device
+        self.model.set_train(False)
         self.controlnet_loaded = False
         self.ip_loaded = False
         self.offload = False

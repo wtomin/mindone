@@ -1,10 +1,7 @@
 import mindspore as ms
-from mindspore import mint, nn
+from mindspore import mint, nn, Tensor
 from dataclasses import dataclass
-from typing import Any, Dict
-
-import mindspore
-from mindspore import Tensor, nn
+from typing import Dict, Any
 from einops import rearrange
 
 from .modules.layers import (DoubleStreamBlock, EmbedND, LastLayer,
@@ -28,10 +25,12 @@ class FluxParams:
     guidance_embed: bool
 
 
-class Flux(mindspore.nn.Cell):
+class Flux(ms.nn.Cell):
     """
     Transformer model for flow matching on sequences.
     """
+    _supports_gradient_checkpointing = True
+
     def __init__(self, params: FluxParams):
         super().__init__()
 
@@ -48,15 +47,15 @@ class Flux(mindspore.nn.Cell):
         self.hidden_size = params.hidden_size
         self.num_heads = params.num_heads
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
-        self.img_in = mindspore.mint.nn.Linear(self.in_channels, self.hidden_size, bias=True)
+        self.img_in = mint.nn.Linear(self.in_channels, self.hidden_size, bias=True)
         self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
         self.vector_in = MLPEmbedder(params.vec_in_dim, self.hidden_size)
         self.guidance_in = (
-            MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if params.guidance_embed else mindspore.mint.nn.Identity()
+            MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if params.guidance_embed else mint.nn.Identity()
         )
-        self.txt_in = mindspore.mint.nn.Linear(params.context_in_dim, self.hidden_size)
+        self.txt_in = mint.nn.Linear(params.context_in_dim, self.hidden_size)
 
-        self.double_blocks = mindspore.nn.CellList(
+        self.double_blocks = ms.nn.CellList(
             [
                 DoubleStreamBlock(
                     self.hidden_size,
@@ -68,7 +67,7 @@ class Flux(mindspore.nn.Cell):
             ]
         )
 
-        self.single_blocks = mindspore.nn.CellList(
+        self.single_blocks = ms.nn.CellList(
             [
                 SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio)
                 for _ in range(params.depth_single_blocks)
@@ -76,13 +75,18 @@ class Flux(mindspore.nn.Cell):
         )
 
         self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
+        self.gradient_checkpointing = False
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if hasattr(module, "gradient_checkpointing"):
+            module.gradient_checkpointing = value
 
     @property
     def attn_processors(self):
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: mindspore.nn.Cell, processors):
+        def fn_recursive_add_processors(name: str, module: ms.nn.Cell, processors):
             if hasattr(module, "set_processor"):
                 processors[f"{name}.processor"] = module.processor
 
@@ -117,7 +121,7 @@ class Flux(mindspore.nn.Cell):
                 f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
             )
 
-        def fn_recursive_attn_processor(name: str, module: mindspore.nn.Cell, processor):
+        def fn_recursive_attn_processor(name: str, module: ms.nn.Cell, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
                     module.set_processor(processor)
@@ -156,27 +160,33 @@ class Flux(mindspore.nn.Cell):
         vec = vec + self.vector_in(y)
         txt = self.txt_in(txt)
 
-        ids = mindspore.mint.cat((txt_ids, img_ids), dim=1)
+        ids = mint.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
         if block_controlnet_hidden_states is not None:
             controlnet_depth = len(block_controlnet_hidden_states)
         for index_block, block in enumerate(self.double_blocks):
-            img, txt = block(
-                img=img, 
-                txt=txt, 
-                vec=vec, 
-                pe=pe, 
-                image_proj=image_proj,
-                ip_scale=ip_scale, 
-            )
+            if self.training and self.gradient_checkpointing:
+                raise NotImplementedError("Gradient checkpoint is not yet supported.")
+            else:
+                img, txt = block(
+                    img=img, 
+                    txt=txt, 
+                    vec=vec, 
+                    pe=pe, 
+                    image_proj=image_proj,
+                    ip_scale=ip_scale, 
+                )
             # controlnet residual
             if block_controlnet_hidden_states is not None:
                 img = img + block_controlnet_hidden_states[index_block % 2]
 
 
-        img = mindspore.mint.cat((txt, img), 1)
+        img = mint.cat((txt, img), 1)
         for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe)
+            if self.training and self.gradient_checkpointing:
+                raise NotImplementedError("Gradient checkpoint is not yet supported.")
+            else:
+                img = block(img, vec=vec, pe=pe)
         img = img[:, txt.shape[1] :, ...]
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
