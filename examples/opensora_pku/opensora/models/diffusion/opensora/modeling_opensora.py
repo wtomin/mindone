@@ -387,7 +387,6 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
 
         # Set model in evaluation mode to deactivate DropOut modules by default
         model.set_train(False)
-
         if output_loading_info:
             return model, loading_info
 
