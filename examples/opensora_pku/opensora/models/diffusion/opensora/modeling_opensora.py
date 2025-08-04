@@ -21,7 +21,7 @@ from mindone.diffusers import __version__
 from mindone.diffusers.configuration_utils import ConfigMixin, register_to_config
 from mindone.diffusers.models.embeddings import PixArtAlphaTextProjection
 from mindone.diffusers.models.model_loading_utils import _fetch_index_file, _fetch_index_file_legacy, load_state_dict
-from mindone.diffusers.models.modeling_utils import ModelMixin, _convert_state_dict, load_state_dict
+from mindone.diffusers.models.modeling_utils import ModelMixin, _convert_state_dict
 from mindone.diffusers.models.normalization import AdaLayerNormSingle
 from mindone.diffusers.utils import (
     SAFETENSORS_WEIGHTS_NAME,
