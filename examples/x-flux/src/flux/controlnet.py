@@ -1,9 +1,7 @@
-import mindspore as ms
-from mindspore import mint, nn
 from dataclasses import dataclass
 
 import mindspore
-from mindspore import Tensor, nn
+from mindspore import Tensor
 from einops import rearrange
 from mindspore.common.initializer import Constant, initializer
 from mindspore import Parameter

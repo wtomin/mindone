@@ -1,5 +1,4 @@
 import mindspore as ms
-from mindspore import mint, nn
 import os
 from dataclasses import dataclass
 
@@ -11,19 +10,13 @@ from PIL import Image
 from huggingface_hub import hf_hub_download
 from safetensors import safe_open
 
-from optimum.quanto import requantize
+# from optimum.quanto import requantize
 
 from .model import Flux, FluxParams
 from .controlnet import ControlNetFlux
 from .modules.autoencoder import AutoEncoder, AutoEncoderParams
 from .modules.conditioner import HFEmbedder
-from .annotator.dwpose import DWposeDetector
-from .annotator.mlsd import MLSDdetector
 from .annotator.canny import CannyDetector
-from .annotator.midas import MidasDetector
-from .annotator.hed import HEDdetector
-from .annotator.tile import TileDetector
-from .annotator.zoe import ZoeDetector
 
 
 def load_safetensors(path):
@@ -116,18 +109,8 @@ class Annotator:
     def __init__(self, name: str):
         if name == "canny":
             processor = CannyDetector()
-        elif name == "openpose":
-            processor = DWposeDetector()
-        elif name == "depth":
-            processor = MidasDetector()
-        elif name == "hed":
-            processor = HEDdetector()
-        elif name == "hough":
-            processor = MLSDdetector()
-        elif name == "tile":
-            processor = TileDetector()
-        elif name == "zoe":
-            processor = ZoeDetector()
+        else:
+            raise ValueError(f"Invalid annotator name: {name}")
         self.name = name
         self.processor = processor
 
@@ -325,6 +308,8 @@ def load_flow_model2(name: str, hf_download: bool = True):
     return model
 
 def load_flow_model_quintized(name: str, hf_download: bool = True):
+
+    raise NotImplementedError("Quantization is not supported in mindspore.")
     # Loading Flux
     print("Init model")
     ckpt_path = configs[name].ckpt_path
@@ -405,13 +390,17 @@ class WatermarkEmbedder:
         squeeze = len(image.shape) == 4
         if squeeze:
             image = image[None, ...]
-        n = image.shape[0]
-        image_np = rearrange((255 * image).detach().cpu(), "n b c h w -> (n b) h w c").numpy()[:, :, :, ::-1]
+        n, b, c, h, w = image.shape
+        # "n b c h w -> (n b) h w c"
+        image_np = (255 * image).permute(0, 1, 3, 4, 2).reshape(n*b, h, w, c).asnumpy()[:, :, :, ::-1]
         # torch (b, c, h, w) in [0, 1] -> numpy (b, h, w, c) [0, 255]
         # watermarking libary expects input as cv2 BGR format
         for k in range(image_np.shape[0]):
             image_np[k] = self.encoder.encode(image_np[k], "dwtDct")
-        image = mindspore.Tensor.from_numpy(rearrange(image_np[:, :, :, ::-1], "(n b) h w c -> n b c h w", n=n))
+        
+        _, h, w, c = image_np[:, :, :, ::-1].shape
+        # "(n b) h w c -> n b c h w"
+        image = mindspore.Tensor(image_np[:, :, :, ::-1].permute(0, 3, 1, 2).reshape(n, -1, c, h, w))
         image = mindspore.mint.clamp(image / 255, min=0.0, max=1.0)
         if squeeze:
             image = image[0]

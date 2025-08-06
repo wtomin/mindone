@@ -1,33 +1,7 @@
 import mindspore as ms
-from mindspore import mint, nn, Tensor, ops
-from mindspore.common.initializer import Constant, Normal, initializer
-from mindspore import Parameter
+from mindspore import mint, Tensor, ops
+from src.flux.math import scaled_dot_product_attention
 from dataclasses import dataclass
-import numpy as np
-
-# Dtype constants for attention calculations
-_MIN_FP16 = ms.tensor(np.finfo(np.float16).min, dtype=ms.float16)
-_MIN_FP32 = ms.tensor(np.finfo(np.float32).min, dtype=ms.float32)
-_MIN_FP64 = ms.tensor(np.finfo(np.float64).min, dtype=ms.float64)
-_MIN_BF16 = ms.tensor(float.fromhex("-0x1.fe00000000000p+127"), dtype=ms.bfloat16)
-_MAX_FP16 = ms.tensor(np.finfo(np.float16).max, dtype=ms.float16)
-_MAX_FP32 = ms.tensor(np.finfo(np.float32).max, dtype=ms.float32)
-_MAX_FP64 = ms.tensor(np.finfo(np.float64).max, dtype=ms.float64)
-_MAX_BF16 = ms.tensor(float.fromhex("0x1.fe00000000000p+127"), dtype=ms.bfloat16)
-
-_DTYPE_2_MIN = {
-    ms.float16: _MIN_FP16,
-    ms.float32: _MIN_FP32,
-    ms.float64: _MIN_FP64,
-    ms.bfloat16: _MIN_BF16,
-}
-
-_DTYPE_2_MAX = {
-    ms.float16: _MAX_FP16,
-    ms.float32: _MAX_FP32,
-    ms.float64: _MAX_FP64,
-    ms.bfloat16: _MAX_BF16,
-}
 
 
 @dataclass
@@ -59,45 +33,6 @@ class AttnBlock(ms.nn.Cell):
         self.v = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.proj_out = mint.nn.Conv2d(in_channels, in_channels, kernel_size=1)
     
-    def scaled_dot_product_attention(
-        self, query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, dtype=None, training=True
-    ):
-        # force dtype(fp16 or bf16) precision calculation
-        ori_dtype = query.dtype
-        if dtype is not None:
-            query, key, value = query.astype(dtype), key.astype(dtype), value.astype(dtype)
-
-        if attn_mask is not None:
-            if attn_mask.dtype == ms.bool_:
-                attn_mask = attn_mask.to(ms.float32)
-                attn_mask = attn_mask.masked_fill((1 - attn_mask).to(ms.bool_), _DTYPE_2_MIN[ms.float16])
-            attn_mask = attn_mask.to(query.dtype)
-
-            attn_weight = mint.nn.functional.softmax(
-                mint.matmul(query, mint.transpose(key, -2, -1)) / (query.shape[-1] ** 0.5) + attn_mask,
-                dim=-1,
-                dtype=ms.float32,
-            ).astype(query.dtype)
-        else:
-            L, S = query.shape[-2], key.shape[-2]
-            attn_bias = mint.zeros((L, S), dtype=query.dtype)
-            if is_causal:
-                temp_mask = mint.ones((L, S), dtype=ms.bool_).tril(diagonal=0)
-                attn_bias = ops.masked_fill(attn_bias, mint.logical_not(temp_mask), _DTYPE_2_MIN[ms.float16])
-                attn_bias = attn_bias.to(query.dtype)
-
-            attn_weight = mint.nn.functional.softmax(
-                mint.matmul(query, mint.transpose(key, -2, -1)) / (query.shape[-1] ** 0.5) + attn_bias,
-                dim=-1,
-                dtype=ms.float32,
-            ).astype(query.dtype)
-
-        attn_weight = mint.nn.functional.dropout(attn_weight, p=dropout_p, training=training)
-
-        out = mint.matmul(attn_weight, value)
-        out = out.astype(ori_dtype)
-
-        return out
 
     def attention(self, h_: Tensor) -> Tensor:
         h_ = self.norm(h_)
@@ -112,7 +47,7 @@ class AttnBlock(ms.nn.Cell):
         k = k.permute(0, 2, 3, 1).reshape(b, 1, h*w, c).contiguous()
         # Original torch code: v = rearrange(v, "b c h w -> b 1 (h w) c").contiguous()
         v = v.permute(0, 2, 3, 1).reshape(b, 1, h*w, c).contiguous()
-        h_ = self.scaled_dot_product_attention(q, k, v)
+        h_ = scaled_dot_product_attention(q, k, v)
 
         # Original torch code: return rearrange(h_, "b 1 (h w) c -> b c h w", h=h, w=w, c=c, b=b)
         return h_.reshape(b, h, w, c).permute(0, 3, 1, 2)

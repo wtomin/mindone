@@ -1,8 +1,6 @@
 import mindspore as ms
-from mindspore import mint, nn, Tensor
+from mindspore import mint, Tensor
 from dataclasses import dataclass
-from typing import Dict, Any
-from einops import rearrange
 
 from .modules.layers import (DoubleStreamBlock, EmbedND, LastLayer,
                                  MLPEmbedder, SingleStreamBlock,

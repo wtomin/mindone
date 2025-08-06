@@ -1,23 +1,8 @@
-import numpy as np
-
+from mindone.transformers.mindspore_adapter.utils import _DTYPE_2_MIN
 import mindspore as ms
 # from einops import rearrange  # einops not supported in MindSpore
 from mindspore import Tensor, mint, ops
 
-from ..math import attention, rope
-
-# MindSpore scaled dot product attention implementation
-_MIN_FP16 = ms.tensor(np.finfo(np.float16).min, dtype=ms.float16)
-_MIN_FP32 = ms.tensor(np.finfo(np.float32).min, dtype=ms.float32)
-_MIN_FP64 = ms.tensor(np.finfo(np.float64).min, dtype=ms.float64)
-_MIN_BF16 = ms.tensor(float.fromhex("-0x1.fe00000000000p+127"), dtype=ms.bfloat16)
-
-_DTYPE_2_MIN = {
-    ms.float16: _MIN_FP16,
-    ms.float32: _MIN_FP32,
-    ms.float64: _MIN_FP64,
-    ms.bfloat16: _MIN_BF16,
-}
 
 def scaled_dot_product_attention(
     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, dtype=None, training=True

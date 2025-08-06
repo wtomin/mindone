@@ -4,7 +4,6 @@ import numpy as np
 import mindspore
 from mindspore import Tensor
 
-from einops import rearrange
 import uuid
 import os
 
@@ -28,7 +27,8 @@ from src.flux.util import (
     get_lora_rank,
     load_checkpoint
 )
-from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor
+from transformers import CLIPImageProcessor
+from mindone.transformers import CLIPVisionModelWithProjection
 
 class XFluxPipeline:
     def __init__(self, model_type, offload: bool = False):
@@ -338,7 +338,8 @@ class XFluxPipeline:
                 self.offload_model_to_cpu(self.ae.decoder)
 
         x1 = x.clamp(-1, 1)
-        x1 = rearrange(x1[-1], "c h w -> h w c")
+        # c h w -> h w c
+        x1 = x1[-1].permute(1, 2, 0)
         output_img = Image.fromarray((127.5 * (x1 + 1.0)).asnumpy().astype(np.uint8))
         return output_img
 
