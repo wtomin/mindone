@@ -2,7 +2,7 @@ import math
 from typing import Callable
 
 import mindspore
-from einops import rearrange, repeat
+
 from mindspore import Tensor
 
 from .model import Flux
@@ -32,25 +32,35 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     if bs == 1 and not isinstance(prompt, str):
         bs = len(prompt)
 
-    img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
-    if img.shape[0] == 1 and bs > 1:
-        img = repeat(img, "1 ... -> bs ...", bs=bs)
+    b, c, h, w = img.shape
+    h = h // 2  # ph=2
+    w = w // 2  # pw=2
+    # img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)  # keep for debugging
+    img = img.reshape(b, c, h, 2, w, 2)
+    img = img.permute(0, 2, 4, 1, 3, 5)
+    img = img.reshape(b, h*w, c*4)
 
     img_ids = mindspore.mint.zeros(h // 2, w // 2, 3)
     img_ids[..., 1] = img_ids[..., 1] + mindspore.mint.arange(h // 2)[:, None]
     img_ids[..., 2] = img_ids[..., 2] + mindspore.mint.arange(w // 2)[None, :]
-    img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+    # img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)  # keep for debugging
+    img_ids = img_ids.reshape(1, h, w, 3).broadcast_to((bs, h, w, 3))
+    img_ids = img_ids.reshape(bs, h*w, 3)
 
     if isinstance(prompt, str):
         prompt = [prompt]
     txt = t5(prompt)
+    # if txt.shape[0] == 1 and bs > 1:
+    #     txt = repeat(txt, "1 ... -> bs ...", bs=bs)  # keep for debugging
     if txt.shape[0] == 1 and bs > 1:
-        txt = repeat(txt, "1 ... -> bs ...", bs=bs)
+        txt = txt.broadcast_to((bs, *txt.shape[1:]))
     txt_ids = mindspore.mint.zeros(bs, txt.shape[1], 3)
 
     vec = clip(prompt)
+    # if vec.shape[0] == 1 and bs > 1:
+    #     vec = repeat(vec, "1 ... -> bs ...", bs=bs)  # keep for debugging
     if vec.shape[0] == 1 and bs > 1:
-        vec = repeat(vec, "1 ... -> bs ...", bs=bs)
+        vec = vec.broadcast_to((bs, *vec.shape[1:]))
 
     return {
         "img": img,
@@ -230,11 +240,14 @@ def denoise_controlnet(
     return img
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:
-    return rearrange(
-        x,
-        "b (h w) (c ph pw) -> b c (h ph) (w pw)",
-        h=math.ceil(height / 16),
-        w=math.ceil(width / 16),
-        ph=2,
-        pw=2,
-    )
+    b = x.shape[0]
+    h = math.ceil(height / 16)
+    w = math.ceil(width / 16)
+    # return rearrange(x, "b (h w) (c ph pw) -> b c (h ph) (w pw)", 
+    #                  h=h, w=w, ph=2, pw=2)  # keep for debugging
+    x = x.reshape(b, h*w, -1)  # -1 will infer the correct size for c*ph*pw
+    c = x.shape[2] // 4  # since ph=pw=2, total is 4
+    x = x.reshape(b, h, w, c, 2, 2)
+    x = x.transpose(0, 3, 1, 4, 2, 5)
+    x = x.reshape(b, c, h*2, w*2)
+    return x

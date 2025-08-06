@@ -1,6 +1,37 @@
-# Example Usage
+# Overview
 
-## Canny ControlNet V3
+This is a MindSpore implementation of [X-Flux](https://github.com/XLabs-AI/x-flux). 
+
+
+## 📦 Requirements
+
+
+<div align="center">
+
+| MindSpore | Ascend Driver |  Firmware   | CANN toolkit/kernel |
+|:---------:|:-------------:|:-----------:|:-------------------:|
+|   2.6.0   |  24.1.RC3     | 7.6.0.1.220 |  8.0.RC3.beta1     |
+
+</div>
+
+1. Install
+   [CANN 8.0.RC3.beta1](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.0.RC3.beta1)
+   and MindSpore according to the [official instructions](https://www.mindspore.cn/install).
+2. Install requirements
+    ```shell
+    pip install -r requirements.txt
+    ```
+3. Install mindone
+    ```
+    cd mindone
+    pip install -e .
+    ```
+    Try `python -c "import mindone"`. If no error occurs, the installation is successful.
+
+
+## 🚀 Quick Start
+
+### Canny ControlNet V3
 
 ```bash
 python3 main.py \
