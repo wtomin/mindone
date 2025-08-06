@@ -18,13 +18,22 @@ from .modules.autoencoder import AutoEncoder, AutoEncoderParams
 from .modules.conditioner import HFEmbedder
 from .annotator.canny import CannyDetector
 
+from transformers.utils import is_safetensors_available
+
+from mindone.safetensors.mindspore import load_file as safe_load_file
 
 def load_safetensors(path):
-    tensors = {}
-    with safe_open(path, framework="pt", ) as f:
-        for key in f.keys():
-            tensors[key] = f.get_tensor(key)
-    return tensors
+
+    if path.endswith(".safetensors") and is_safetensors_available():
+        # Check format of the archive
+        with safe_open(path, framework="np") as f:
+            metadata = f.metadata()
+        if metadata.get("format") not in ["pt", "tf", "flax", "np"]:
+            raise OSError(
+                f"The safetensors archive passed at {path} does not contain the valid metadata. Make sure "
+                "you save your model with the `save_pretrained` method."
+            )
+        return safe_load_file(path)
 
 def get_lora_rank(checkpoint):
     for k in checkpoint.keys():
