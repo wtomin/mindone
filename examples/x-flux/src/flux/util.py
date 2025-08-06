@@ -28,7 +28,7 @@ def load_safetensors(path):
         # Check format of the archive
         with safe_open(path, framework="np") as f:
             metadata = f.metadata()
-        if metadata.get("format") not in ["pt", "tf", "flax", "np"]:
+        if metadata.get("format") is not None and metadata.get("format") not in ["pt", "tf", "flax", "np"]:
             raise OSError(
                 f"The safetensors archive passed at {path} does not contain the valid metadata. Make sure "
                 "you save your model with the `save_pretrained` method."
@@ -291,7 +291,7 @@ def load_flow_model(name: str, hf_download: bool = True):
     if ckpt_path is not None:
         print("Loading checkpoint")
         sd = load_safetensors(ckpt_path)
-        missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
+        missing, unexpected = model.load_state_dict(sd, strict=False)
         print_load_warning(missing, unexpected)
     return model
 
@@ -312,7 +312,7 @@ def load_flow_model2(name: str, hf_download: bool = True):
     if ckpt_path is not None:
         print("Loading checkpoint")
         sd = load_safetensors(ckpt_path)
-        missing, unexpected = model.load_state_dict(sd, strict=False, assign=True)
+        missing, unexpected = model.load_state_dict(sd, strict=False)
         print_load_warning(missing, unexpected)
     return model
 
@@ -373,7 +373,7 @@ def load_ae(name: str, hf_download: bool = True) -> AutoEncoder:
 
     if ckpt_path is not None:
         sd = load_safetensors(ckpt_path)
-        missing, unexpected = ae.load_state_dict(sd, strict=False, assign=True)
+        missing, unexpected = ae.load_state_dict(sd, strict=False)
         print_load_warning(missing, unexpected)
     return ae
 
