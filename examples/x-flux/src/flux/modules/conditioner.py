@@ -18,7 +18,11 @@ class HFEmbedder(ms.nn.Cell):
             self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(version, max_length=max_length)
             self.hf_module: T5EncoderModel = T5EncoderModel.from_pretrained(version, **hf_kwargs)
 
-        self.hf_module = self.hf_module.set_train(False).requires_grad_(False)
+        self.hf_module.set_train(False)
+        
+        for param in self.hf_module.get_parameters():
+            param.requires_grad = False
+
 
     def construct(self, text: list[str]) -> Tensor:
         batch_encoding = self.tokenizer(

@@ -342,10 +342,10 @@ def load_controlnet(name, transformer=None):
 
 def load_t5(max_length: int = 512) -> HFEmbedder:
     # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
-    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, torch_dtype=mindspore.bfloat16)
+    return HFEmbedder("xlabs-ai/xflux_text_encoders", max_length=max_length, mindspore_dtype=mindspore.bfloat16)
 
 def load_clip() -> HFEmbedder:
-    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=mindspore.bfloat16)
+    return HFEmbedder("openai/clip-vit-large-patch14", max_length=77, mindspore_dtype=mindspore.bfloat16)
 
 
 def load_ae(name: str, hf_download: bool = True) -> AutoEncoder:
