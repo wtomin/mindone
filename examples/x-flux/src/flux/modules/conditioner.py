@@ -1,8 +1,7 @@
 from mindspore import Tensor
 import mindspore as ms
 from transformers import CLIPTokenizer, T5Tokenizer
-from mindone.transformers import (CLIPTextModel, CLIPTokenizer, T5EncoderModel,
-                          T5Tokenizer)
+from mindone.transformers import CLIPTextModel, T5EncoderModel
 
 
 class HFEmbedder(ms.nn.Cell):

@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import mindspore
 from mindspore import Tensor
-from einops import rearrange
 from mindspore.common.initializer import Constant, initializer
 from mindspore import Parameter
 
@@ -178,7 +177,13 @@ class ControlNetFlux(mindspore.nn.Cell):
         # running on sequences img
         img = self.img_in(img)
         controlnet_cond = self.input_hint_block(controlnet_cond)
-        controlnet_cond = rearrange(controlnet_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
+        # controlnet_cond = rearrange(controlnet_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)  # keep for debugging
+        b, c, h, w = controlnet_cond.shape
+        h = h // 2  # ph=2
+        w = w // 2  # pw=2
+        controlnet_cond = controlnet_cond.reshape(b, c, h, 2, w, 2)
+        controlnet_cond = controlnet_cond.permute(0, 2, 4, 1, 3, 5)
+        controlnet_cond = controlnet_cond.reshape(b, h*w, c*4)
         controlnet_cond = self.pos_embed_input(controlnet_cond)
         img = img + controlnet_cond
         vec = self.time_in(timestep_embedding(timesteps, 256))
