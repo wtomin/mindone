@@ -7,14 +7,14 @@ pytest tests/test_clip_text_similarity.py
 import unittest
 import os
 import mindspore as ms
-from mindspore import Tensor
+from mindspore import Tensor, mint
 
 from src.flux.util import load_clip
 
 def normalize(t: Tensor, eps: float = 1e-8) -> Tensor:
     # L2 normalize along last dimension
-    norm = ms.ops.sqrt(
-        ms.ops.clip_by_value(ms.ops.reduce_sum(t * t, -1, keep_dims=True), eps, 1e9)
+    norm = mint.sqrt(
+        mint.clamp(mint.reduce_sum(t * t, -1, keep_dims=True), eps, 1e9)
     )
     return t / norm
 
