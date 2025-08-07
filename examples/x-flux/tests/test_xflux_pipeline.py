@@ -28,8 +28,7 @@ class TestXFluxPipeline(unittest.TestCase):
         cls.dummy_text_embeddings = Tensor(np.random.randn(cls.batch_size, cls.seq_len, cls.hidden_size), dtype=ms.float32)
         cls.dummy_timesteps = Tensor([999], dtype=ms.int64)
         
-    def setUp(self):
-        self.pipeline = XFluxPipeline(self.model_type)
+
 
     def test_load_ae_with_input(self):
         """Test autoencoder loading and forward pass"""
@@ -100,6 +99,8 @@ class TestXFluxPipeline(unittest.TestCase):
         control_type = "canny"
         repo_id = "XLabs-AI/flux-controlnet-canny-v3"
         name = "flux-canny-controlnet-v3.safetensors"
+
+        self.pipeline = XFluxPipeline(self.model_type)
         
         # Setup controlnet
         self.pipeline.set_controlnet(
@@ -108,17 +109,26 @@ class TestXFluxPipeline(unittest.TestCase):
             name=name
         )
         
-        # Create dummy controlnet condition
+        # Create dummy inputs for flow model
+        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 64*64), dtype=ms.float32)
+        dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64)), dtype=ms.int64)
+        dummy_txt = self.dummy_text_embeddings
+        dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)
+        dummy_timesteps = self.dummy_timesteps
+        dummy_y = Tensor(np.random.randn(self.batch_size, 256), dtype=ms.float32)
+
         dummy_condition = Tensor(np.random.randn(self.batch_size, 3, self.img_size, self.img_size), 
-                               dtype=ms.float32)
-        
+                                    dtype=ms.float32)
         # Test controlnet forward pass
         down_block_res_samples, mid_block_res_sample = self.pipeline.controlnet(
-            hidden_states=self.dummy_latents,
-            timesteps=self.dummy_timesteps,
-            encoder_hidden_states=self.dummy_text_embeddings,
+            img=dummy_img,
+            img_ids=dummy_img_ids,
+            txt=dummy_txt,
+            txt_ids=dummy_txt_ids,
+            timesteps=dummy_timesteps,
+            y=dummy_y,
+            guidance=None,
             controlnet_cond=dummy_condition,
-            return_dict=False
         )
         
         # Verify outputs
@@ -128,6 +138,7 @@ class TestXFluxPipeline(unittest.TestCase):
     def test_pipeline_inference_with_controlnet(self):
         """Test full pipeline inference with controlnet"""
         test_image = Image.fromarray(self.test_image)
+        self.pipeline = XFluxPipeline(self.model_type)
         
         # Setup controlnet
         self.pipeline.set_controlnet(
