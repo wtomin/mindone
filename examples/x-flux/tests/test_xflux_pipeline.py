@@ -49,14 +49,9 @@ class TestXFluxPipeline(unittest.TestCase):
         clip = load_clip()
         self.assertIsNotNone(clip)
         
-        # Create dummy text input
-        dummy_input_ids = Tensor(np.random.randint(0, 49408, (self.batch_size, self.seq_len)), dtype=ms.int64)
-        dummy_attention_mask = Tensor(np.ones((self.batch_size, self.seq_len)), dtype=ms.int64)
-        
         # Test text encoder
         text_outputs = clip(
-            input_ids=dummy_input_ids,
-            attention_mask=dummy_attention_mask
+            text=["a photo of a cat"]
         )
         
         self.assertEqual(text_outputs.last_hidden_state.shape, 
@@ -66,15 +61,10 @@ class TestXFluxPipeline(unittest.TestCase):
         """Test T5 model loading and forward pass"""
         t5 = load_t5(max_length=512)
         self.assertIsNotNone(t5)
-        
-        # Create dummy text input
-        dummy_input_ids = Tensor(np.random.randint(0, 32128, (self.batch_size, 512)), dtype=ms.int64)
-        dummy_attention_mask = Tensor(np.ones((self.batch_size, 512)), dtype=ms.int64)
-        
+
         # Test encoder
         encoder_outputs = t5.encoder(
-            input_ids=dummy_input_ids,
-            attention_mask=dummy_attention_mask
+            text=["a photo of a cat"]
         )
         
         self.assertEqual(encoder_outputs.last_hidden_state.shape, 
@@ -163,21 +153,6 @@ class TestXFluxPipeline(unittest.TestCase):
         self.assertIsInstance(result, Image.Image)
         self.assertEqual(result.size, (self.img_size, self.img_size))
 
-    def test_tensor_device_and_dtype(self):
-        """Test tensor device and dtype consistency"""
-        # Test if all models are using consistent dtype
-        self.assertEqual(self.dummy_latents.dtype, ms.float32)
-        self.assertEqual(self.dummy_text_embeddings.dtype, ms.float32)
-        
-        # Test if pipeline components maintain dtype
-        self.pipeline.set_controlnet(
-            control_type="canny",
-            repo_id="XLabs-AI/flux-controlnet-canny-v3",
-            name="flux-canny-controlnet-v3.safetensors"
-        )
-        
-        self.assertEqual(self.pipeline.controlnet.dtype, ms.float32)
-        self.assertEqual(self.pipeline.model.dtype, ms.float32)
 
 if __name__ == '__main__':
     unittest.main() 

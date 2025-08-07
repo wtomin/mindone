@@ -39,5 +39,6 @@ class HFEmbedder(ms.nn.Cell):
             input_ids=Tensor(batch_encoding["input_ids"]),
             attention_mask=None,
             output_hidden_states=False,
+            return_dict=True,
         )
         return outputs[self.output_key]
