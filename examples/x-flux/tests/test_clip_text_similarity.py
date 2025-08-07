@@ -14,7 +14,7 @@ from src.flux.util import load_clip
 def normalize(t: Tensor, eps: float = 1e-8) -> Tensor:
     # L2 normalize along last dimension
     norm = mint.sqrt(
-        mint.clamp(mint.reduce_sum(t * t, -1, keep_dims=True), eps, 1e9)
+        mint.clamp(mint.sum(t * t, -1, keepdim=True), eps, 1e9)
     )
     return t / norm
 
