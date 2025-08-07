@@ -62,7 +62,7 @@ class TestXFluxPipeline(unittest.TestCase):
         self.assertIsNotNone(t5)
 
         # Test encoder
-        encoder_outputs = t5.encoder(
+        encoder_outputs = t5(
             text=["a photo of a truck"]
         )
         

@@ -35,9 +35,9 @@ class TestT5TextSimilarity(unittest.TestCase):
 
     def test_t5_text_text_similarity(self):
         # Get encoder outputs; expect shape (batch, seq_len, hidden_size)
-        enc_truck = self.t5.encoder(text=self.text_truck)
-        enc_car = self.t5.encoder(text=self.text_car)
-        enc_cat = self.t5.encoder(text=self.text_cat)
+        enc_truck = self.t5(text=self.text_truck)
+        enc_car = self.t5(text=self.text_car)
+        enc_cat = self.t5(text=self.text_cat)
 
         # Sanity checks
         for e in (enc_truck, enc_car, enc_cat):
