@@ -316,7 +316,7 @@ def load_flow_model2(name: str, hf_download: bool = True):
         print_load_warning(missing, unexpected)
     return model
 
-def load_flow_model_quintized(name: str, hf_download: bool = True):
+def load_flow_model_quantized(name: str, hf_download: bool = True):
 
     raise NotImplementedError("Quantization is not supported in mindspore.")
     # Loading Flux

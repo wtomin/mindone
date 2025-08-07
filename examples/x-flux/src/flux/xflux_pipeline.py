@@ -22,7 +22,7 @@ from src.flux.util import (
     load_flow_model,
     load_t5,
     load_controlnet,
-    load_flow_model_quintized,
+    load_flow_model_quantized,
     Annotator,
     get_lora_rank,
     load_checkpoint
@@ -39,7 +39,7 @@ class XFluxPipeline:
         self.t5 = load_t5(max_length=512)
         self.ae = load_ae(model_type, )
         if "fp8" in model_type:
-            self.model = load_flow_model_quintized(model_type, )
+            self.model = load_flow_model_quantized(model_type, )
         else:
             self.model = load_flow_model(model_type, )
 
