@@ -26,7 +26,7 @@ class FluxParams:
     guidance_embed: bool
 
 def zero_module(module):
-    for p in module.parameters():
+    for p in module.get_parameters():
         constant_(p, 0.0)
     return module
 
