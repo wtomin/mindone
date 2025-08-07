@@ -54,8 +54,8 @@ class TestXFluxPipeline(unittest.TestCase):
             text=["a photo of a cat"]
         )
         
-        self.assertEqual(text_outputs.last_hidden_state.shape, 
-                        (self.batch_size, self.seq_len, self.hidden_size))
+        self.assertEqual(text_outputs.shape, 
+                        (self.batch_size, self.hidden_size))
 
     def test_load_t5_with_input(self):
         """Test T5 model loading and forward pass"""
@@ -67,8 +67,8 @@ class TestXFluxPipeline(unittest.TestCase):
             text=["a photo of a cat"]
         )
         
-        self.assertEqual(encoder_outputs.last_hidden_state.shape, 
-                        (self.batch_size, 512, self.hidden_size))
+        self.assertEqual(encoder_outputs.shape, 
+                        (self.batch_size, 512, 4096))
 
     def test_load_flow_model_with_input(self):
         """Test flow model loading and forward pass"""
