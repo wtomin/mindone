@@ -69,10 +69,6 @@ def create_argparser():
         help="Local path to the model checkpoint (Controlnet)"
     )
     parser.add_argument(
-        "--device", type=str, default="cuda",
-        help="Device to use (e.g. cpu, cuda:0, cuda:1, etc.)"
-    )
-    parser.add_argument(
         "--offload", action='store_true', help="Offload model to CPU when not in use"
     )
     parser.add_argument(
@@ -140,7 +136,7 @@ def main(args):
     else:
         image = None
 
-    xflux_pipeline = XFluxPipeline(args.model_type, args.device, args.offload)
+    xflux_pipeline = XFluxPipeline(args.model_type,  args.offload)
     if args.use_ip:
         print('load ip-adapter:', args.ip_local_path, args.ip_repo_id, args.ip_name)
         xflux_pipeline.set_ip(args.ip_local_path, args.ip_repo_id, args.ip_name)
