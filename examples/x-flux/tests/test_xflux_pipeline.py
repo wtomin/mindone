@@ -19,7 +19,7 @@ class TestXFluxPipeline(unittest.TestCase):
         cls.batch_size = 1
         cls.seq_len = 77  # Standard CLIP text sequence length
         cls.img_size = 512
-        cls.latent_channels = 4
+        cls.latent_channels = 16
         cls.hidden_size = 768
         
         # Dummy tensors for different modules
