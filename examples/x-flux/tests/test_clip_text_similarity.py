@@ -49,8 +49,8 @@ class TestCLIPTextSimilarity(unittest.TestCase):
         cat_n = normalize(txt_cat)
 
         # Cosine similarity = dot product of normalized vectors
-        sim_truck_car = ms.ops.reduce_sum(truck_n * car_n, -1)  # (1,)
-        sim_truck_cat = ms.ops.reduce_sum(truck_n * cat_n, -1)  # (1,)
+        sim_truck_car = mint.sum(truck_n * car_n, -1)  # (1,)
+        sim_truck_cat = mint.sum(truck_n * cat_n, -1)  # (1,)
 
         # Convert to floats
         sim_truck_car_val = float(sim_truck_car.asnumpy()[0])
