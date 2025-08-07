@@ -28,11 +28,13 @@ def load_safetensors(path):
         # Check format of the archive
         with safe_open(path, framework="np") as f:
             metadata = f.metadata()
-        if metadata.get("format") is not None and metadata.get("format") not in ["pt", "tf", "flax", "np"]:
-            raise OSError(
-                f"The safetensors archive passed at {path} does not contain the valid metadata. Make sure "
-                "you save your model with the `save_pretrained` method."
-            )
+        if metadata is not None:
+            format = metadata.get("format", None)
+            if format is not None and format not in ["pt", "tf", "flax", "np"]:
+                raise OSError(
+                    f"The safetensors archive passed at {path} does not contain the valid metadata. Make sure "
+                    "you save your model with the `save_pretrained` method."
+                )
         return safe_load_file(path)
 
 def get_lora_rank(checkpoint):
