@@ -156,8 +156,9 @@ class SelfAttention(ms.nn.Cell):
         self.qkv = mint.nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.norm = QKNorm(head_dim)
         self.proj = mint.nn.Linear(dim, dim)
-    def construct():
-        pass
+    def construct(self, x: Tensor):
+        # a dummy construct function to avoid error
+        return x
 
 
 @dataclass
