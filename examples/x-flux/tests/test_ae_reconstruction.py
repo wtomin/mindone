@@ -3,7 +3,7 @@ Before running this script, please download the images via:
 mkdir tests/assets
 wget -P tests/assets https://raw.githubusercontent.com/facebookresearch/sam2/main/notebooks/images/truck.jpg
 
-Then run `python -m unittest tests.test_ae_reconstruction`
+Then run `pytest tests/test_ae_reconstruction.py`
 
 """
 import unittest

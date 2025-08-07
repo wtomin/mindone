@@ -50,7 +50,7 @@ class TestXFluxPipeline(unittest.TestCase):
         
         # Test text encoder
         text_outputs = clip(
-            text=["a photo of a cat"]
+            text=["a photo of a truck"]
         )
         
         self.assertEqual(text_outputs.shape, 
@@ -63,7 +63,7 @@ class TestXFluxPipeline(unittest.TestCase):
 
         # Test encoder
         encoder_outputs = t5.encoder(
-            text=["a photo of a cat"]
+            text=["a photo of a truck"]
         )
         
         self.assertEqual(encoder_outputs.shape, 
