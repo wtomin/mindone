@@ -76,7 +76,7 @@ class TestXFluxPipeline(unittest.TestCase):
         self.assertIsNotNone(model)
         
         # Create dummy inputs for flow model
-        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 64, 64), dtype=ms.float32)
+        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 64*64), dtype=ms.float32)
         dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64)), dtype=ms.int64)
         dummy_txt = self.dummy_text_embeddings
         dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)

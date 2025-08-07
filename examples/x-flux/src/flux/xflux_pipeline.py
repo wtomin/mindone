@@ -130,8 +130,8 @@ class XFluxPipeline:
         self.model.set_attn_processor(lora_attn_procs)
 
     def set_controlnet(self, control_type: str, local_path: str = None, repo_id: str = None, name: str = None):
-        self.model
-        self.controlnet = load_controlnet(self.model_type, ).to(mindspore.bfloat16)
+ 
+        self.controlnet = load_controlnet(self.model_type, ).to_float(mindspore.bfloat16)
 
         checkpoint = load_checkpoint(local_path, repo_id, name)
         self.controlnet.load_state_dict(checkpoint, strict=False)

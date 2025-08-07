@@ -332,7 +332,7 @@ def load_flow_model_quantized(name: str, hf_download: bool = True):
     json_path = hf_hub_download(configs[name].repo_id, 'flux_dev_quantization_map.json')
 
 
-    model = Flux(configs[name].params).to(mindspore.bfloat16)
+    model = Flux(configs[name].params).to_float(mindspore.bfloat16)
 
     print("Loading checkpoint")
     sd = load_safetensors(ckpt_path)
