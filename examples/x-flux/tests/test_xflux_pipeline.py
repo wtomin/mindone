@@ -12,13 +12,13 @@ class TestXFluxPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.model_type = "flux-dev"
-        cls.test_image = np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
+        cls.test_image = np.random.randint(0, 255, (1024, 1024, 3), dtype=np.uint8)
         cls.test_prompt = "cyberpunk dining room, full hd, cinematic"
         
         # Create dummy tensor inputs
         cls.batch_size = 1
         cls.seq_len = 77  # Standard CLIP text sequence length
-        cls.img_size = 512
+        cls.img_size = 1024
         cls.latent_channels = 16
         cls.hidden_size = 768
         
@@ -75,8 +75,8 @@ class TestXFluxPipeline(unittest.TestCase):
         self.assertIsNotNone(model)
         
         # Create dummy inputs for flow model
-        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 64*64), dtype=ms.float32)
-        dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64)), dtype=ms.int64)
+        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 128*128), dtype=ms.float32)
+        dummy_img_ids = Tensor(np.random.randint(0, 128*128, (self.batch_size, 128*128)), dtype=ms.int64)
         dummy_txt = self.dummy_text_embeddings
         dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)
         dummy_timesteps = self.dummy_timesteps
@@ -110,8 +110,8 @@ class TestXFluxPipeline(unittest.TestCase):
         )
         
         # Create dummy inputs for flow model
-        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 64*64), dtype=ms.float32)
-        dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64)), dtype=ms.int64)
+        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 128*128), dtype=ms.float32)
+        dummy_img_ids = Tensor(np.random.randint(0, 128*128, (self.batch_size, 128*128)), dtype=ms.int64)
         dummy_txt = self.dummy_text_embeddings
         dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)
         dummy_timesteps = self.dummy_timesteps
