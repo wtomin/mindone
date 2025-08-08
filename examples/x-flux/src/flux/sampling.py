@@ -40,7 +40,7 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     img = img.permute(0, 2, 4, 1, 3, 5)
     img = img.reshape(b, h*w, c*4)
 
-    img_ids = mindspore.mint.zeros(h // 2, w // 2, 3)
+    img_ids = mindspore.mint.zeros((h // 2, w // 2, 3))
     img_ids[..., 1] = img_ids[..., 1] + mindspore.mint.arange(h // 2)[:, None]
     img_ids[..., 2] = img_ids[..., 2] + mindspore.mint.arange(w // 2)[None, :]
     # img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)  # keep for debugging
@@ -54,7 +54,7 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     #     txt = repeat(txt, "1 ... -> bs ...", bs=bs)  # keep for debugging
     if txt.shape[0] == 1 and bs > 1:
         txt = txt.broadcast_to((bs, *txt.shape[1:]))
-    txt_ids = mindspore.mint.zeros(bs, txt.shape[1], 3)
+    txt_ids = mindspore.mint.zeros((bs, txt.shape[1], 3))
 
     vec = clip(prompt)
     # if vec.shape[0] == 1 and bs > 1:
