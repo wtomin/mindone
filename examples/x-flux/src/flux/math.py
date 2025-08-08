@@ -57,16 +57,23 @@ def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
     return x
 
 
+# FIXME: this is not working, raise TypeError
+# def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
+#     assert dim % 2 == 0
+#     scale = ops.arange(0, dim, 2, dtype=ms.float64) / dim
+#     omega = 1.0 / (theta**scale)
+#     out = pos.unsqueeze(-1) * omega
+#     out = ops.stack([ops.cos(out), -ops.sin(out), ops.sin(out), ops.cos(out)], axis=-1)
+#     out = out.reshape(*out.shape[:-1], 2, 2)
+#     return out.float()
 def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     assert dim % 2 == 0
-    scale = mint.arange(0, dim, 2, dtype=ms.float64) / dim
+    scale = ops.arange(0, dim, 2, dtype=ms.float64) / dim
     omega = 1.0 / (theta**scale)
-    out = ms.mint.einsum("...n,d->...nd", pos, omega)
-    out = ms.mint.stack([ms.mint.cos(out), -ms.mint.sin(out), ms.mint.sin(out), ms.mint.cos(out)], dim=-1)
-    # out = rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
-    out = out.reshape(*out.shape[:3], 2, 2)
+    out = pos.unsqueeze(-1) * omega
+    out = ops.stack([ops.cos(out), -ops.sin(out), ops.sin(out), ops.cos(out)], axis=-1)
+    out = out.reshape(*out.shape[:-1], 2, 2)
     return out.float()
-
 
 def apply_rope(xq: Tensor, xk: Tensor, freqs_cis: Tensor) -> tuple[Tensor, Tensor]:
     xq_ = xq.float().reshape(*xq.shape[:-1], -1, 1, 2)

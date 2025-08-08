@@ -83,7 +83,7 @@ class QKNorm(ms.nn.Cell):
     def construct(self, q: Tensor, k: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
         q = self.query_norm(q)
         k = self.key_norm(k)
-        return q.to(v), k.to(v)
+        return q.to(v.dtype), k.to(v.dtype)
 
 class LoRALinearLayer(ms.nn.Cell):
     def __init__(self, in_features, out_features, rank=4, network_alpha=None, device=None, dtype=None):
