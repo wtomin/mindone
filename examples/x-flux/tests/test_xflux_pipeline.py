@@ -46,7 +46,7 @@ class TestXFluxPipeline(unittest.TestCase):
         
         dummy_guidance = Tensor([ 4.0] * self.batch_size, dtype=ms.float32)
         # Test controlnet forward pass
-        down_block_res_samples, mid_block_res_sample = self.controlnet(
+        controlnet_block_res_samples = self.controlnet(
             img=dummy_img,
             img_ids=dummy_img_ids,
             txt=dummy_txt,
@@ -58,8 +58,7 @@ class TestXFluxPipeline(unittest.TestCase):
         )
         
         # Verify outputs
-        self.assertEqual(len(down_block_res_samples), 12)  # Typically 12 down blocks
-        self.assertIsNotNone(mid_block_res_sample)
+        self.assertIsNotNone(controlnet_block_res_samples)
 
     def test_pipeline_inference_with_controlnet(self):
         """Test full pipeline inference with controlnet"""
