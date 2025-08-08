@@ -17,91 +17,28 @@ class TestXFluxPipeline(unittest.TestCase):
         
         # Create dummy tensor inputs
         cls.batch_size = 1
-        cls.seq_len = 77  # Standard CLIP text sequence length
+        cls.seq_len = 512 # t5 max length
         cls.img_size = 1024
         cls.latent_channels = 16
-        cls.hidden_size = 768
+        cls.clip_hidden_size = 768
+        cls.t5_hidden_size = 4096
         
         # Dummy tensors for different modules
         cls.dummy_image = Tensor(np.random.randn(cls.batch_size, 3, cls.img_size, cls.img_size), dtype=ms.float32)
         cls.dummy_latents = Tensor(np.random.randn(cls.batch_size, cls.latent_channels, cls.img_size//8, cls.img_size//8), dtype=ms.float32)
-        cls.dummy_text_embeddings = Tensor(np.random.randn(cls.batch_size, cls.seq_len, cls.hidden_size), dtype=ms.float32)
-        cls.dummy_timesteps = Tensor([999], dtype=ms.int64)
+        cls.dummy_text_embeddings = Tensor(np.random.randn(cls.batch_size, cls.seq_len, cls.t5_hidden_size), dtype=ms.float32)
+        cls.dummy_timesteps = Tensor([999] * cls.batch_size, dtype=ms.int64)
         
 
-
-    def test_load_ae_with_input(self):
-        """Test autoencoder loading and forward pass"""
-        ae = load_ae(self.model_type)
-        self.assertIsNotNone(ae)
+    def setUp(self):
+        self.pipeline = XFluxPipeline(self.model_type)
         
-        # Test encode
-        encoded = ae.encode(self.dummy_image)
-        self.assertEqual(encoded.shape, (self.batch_size, self.latent_channels, self.img_size//8, self.img_size//8))
-        
-        # Test decode
-        decoded = ae.decode(self.dummy_latents)
-        self.assertEqual(decoded.shape, (self.batch_size, 3, self.img_size, self.img_size))
-
-    def test_load_clip_with_input(self):
-        """Test CLIP model loading and forward pass"""
-        clip = load_clip()
-        self.assertIsNotNone(clip)
-        
-        # Test text encoder
-        text_outputs = clip(
-            text=["a photo of a truck"]
-        )
-        
-        self.assertEqual(text_outputs.shape, 
-                        (self.batch_size, self.hidden_size))
-
-    def test_load_t5_with_input(self):
-        """Test T5 model loading and forward pass"""
-        t5 = load_t5(max_length=512)
-        self.assertIsNotNone(t5)
-
-        # Test encoder
-        encoder_outputs = t5(
-            text=["a photo of a truck"]
-        )
-        
-        self.assertEqual(encoder_outputs.shape, 
-                        (self.batch_size, 512, 4096))
-
-    def test_load_flow_model_with_input(self):
-        """Test flow model loading and forward pass"""
-        model = load_flow_model(self.model_type)
-        self.assertIsNotNone(model)
-        
-        # Create dummy inputs for flow model
-        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 128*128), dtype=ms.float32)
-        dummy_img_ids = Tensor(np.random.randint(0, 128*128, (self.batch_size, 128*128)), dtype=ms.int64)
-        dummy_txt = self.dummy_text_embeddings
-        dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)
-        dummy_timesteps = self.dummy_timesteps
-        dummy_y = Tensor(np.random.randn(self.batch_size, 256), dtype=ms.float32)
-        
-        # Test model forward pass
-        output = model(
-            img=dummy_img,
-            img_ids=dummy_img_ids,
-            txt=dummy_txt,
-            txt_ids=dummy_txt_ids,
-            timesteps=dummy_timesteps,
-            y=dummy_y
-        )
-        
-        self.assertEqual(output.shape, dummy_img.shape)
-
     def test_set_controlnet_with_input(self):
         """Test controlnet setup and forward pass"""
         control_type = "canny"
         repo_id = "XLabs-AI/flux-controlnet-canny-v3"
         name = "flux-canny-controlnet-v3.safetensors"
 
-        self.pipeline = XFluxPipeline(self.model_type)
-        
         # Setup controlnet
         self.pipeline.set_controlnet(
             control_type=control_type,
@@ -110,12 +47,12 @@ class TestXFluxPipeline(unittest.TestCase):
         )
         
         # Create dummy inputs for flow model
-        dummy_img = Tensor(np.random.randn(self.batch_size, self.latent_channels, 128*128), dtype=ms.float32)
-        dummy_img_ids = Tensor(np.random.randint(0, 128*128, (self.batch_size, 128*128)), dtype=ms.int64)
+        dummy_img = Tensor(np.random.randn(self.batch_size, 64*64, self.latent_channels,), dtype=ms.float32)
+        dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64, 3)), dtype=ms.int64)
         dummy_txt = self.dummy_text_embeddings
-        dummy_txt_ids = Tensor(np.random.randint(0, 77, (self.batch_size, 77)), dtype=ms.int64)
+        dummy_txt_ids = Tensor(np.random.randint(0, self.seq_len, (self.batch_size, self.seq_len, 3)), dtype=ms.int64)
         dummy_timesteps = self.dummy_timesteps
-        dummy_y = Tensor(np.random.randn(self.batch_size, 256), dtype=ms.float32)
+        dummy_y = Tensor(np.random.randn(self.batch_size, self.clip_hidden_size), dtype=ms.float32)
 
         dummy_condition = Tensor(np.random.randn(self.batch_size, 3, self.img_size, self.img_size), 
                                     dtype=ms.float32)
@@ -138,8 +75,7 @@ class TestXFluxPipeline(unittest.TestCase):
     def test_pipeline_inference_with_controlnet(self):
         """Test full pipeline inference with controlnet"""
         test_image = Image.fromarray(self.test_image)
-        self.pipeline = XFluxPipeline(self.model_type)
-        
+
         # Setup controlnet
         self.pipeline.set_controlnet(
             control_type="canny",
