@@ -29,8 +29,6 @@ class TestXFluxPipeline(unittest.TestCase):
         cls.dummy_timesteps = Tensor([999] * cls.batch_size, dtype=ms.int64)
         
 
-    def setUp(self):
-        self.pipeline = XFluxPipeline(self.model_type)
         
     def test_set_controlnet_with_input(self):
         """Test controlnet setup and forward pass"""
@@ -66,6 +64,7 @@ class TestXFluxPipeline(unittest.TestCase):
         """Test full pipeline inference with controlnet"""
         test_image = Image.fromarray(self.test_image)
 
+        self.pipeline = XFluxPipeline(self.model_type)
         # Setup controlnet
         self.pipeline.set_controlnet(
             control_type="canny",
