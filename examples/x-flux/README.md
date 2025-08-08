@@ -38,7 +38,7 @@ mkdir tests/assets
 wget -P tests/assets https://raw.githubusercontent.com/facebookresearch/sam2/main/notebooks/images/truck.jpg
 
 python3 main.py \
- --prompt "cyberpank dining room, full hd, cinematic" \
+ --prompt "cyberpank truck, full hd, cinematic" \
  --image tests/assets/truck.jpg --control_type canny \
  --repo_id XLabs-AI/flux-controlnet-canny-v3 \
  --name flux-canny-controlnet-v3.safetensors \
