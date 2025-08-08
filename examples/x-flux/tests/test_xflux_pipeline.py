@@ -18,7 +18,7 @@ class TestXFluxPipeline(unittest.TestCase):
         cls.batch_size = 1
         cls.seq_len = 512 # t5 max length
         cls.img_size = 1024
-        cls.latent_channels = 16
+        cls.latent_channels = 64
         cls.clip_hidden_size = 768
         cls.t5_hidden_size = 4096
         
@@ -27,7 +27,6 @@ class TestXFluxPipeline(unittest.TestCase):
         cls.dummy_latents = Tensor(np.random.randn(cls.batch_size, cls.latent_channels, cls.img_size//8, cls.img_size//8), dtype=ms.float32)
         cls.dummy_text_embeddings = Tensor(np.random.randn(cls.batch_size, cls.seq_len, cls.t5_hidden_size), dtype=ms.float32)
         cls.dummy_timesteps = Tensor([999] * cls.batch_size, dtype=ms.int64)
-        
 
         
     def test_set_controlnet_with_input(self):
@@ -44,6 +43,8 @@ class TestXFluxPipeline(unittest.TestCase):
 
         dummy_condition = Tensor(np.random.randn(self.batch_size, 3, self.img_size, self.img_size), 
                                     dtype=ms.float32)
+        
+        dummy_guidance = Tensor([ 4.0] * self.batch_size, dtype=ms.float32)
         # Test controlnet forward pass
         down_block_res_samples, mid_block_res_sample = self.controlnet(
             img=dummy_img,
@@ -52,7 +53,7 @@ class TestXFluxPipeline(unittest.TestCase):
             txt_ids=dummy_txt_ids,
             timesteps=dummy_timesteps,
             y=dummy_y,
-            guidance=None,
+            guidance=dummy_guidance,
             controlnet_cond=dummy_condition,
         )
         
