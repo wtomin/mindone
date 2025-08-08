@@ -34,9 +34,12 @@ This is a MindSpore implementation of [X-Flux](https://github.com/XLabs-AI/x-flu
 ### Canny ControlNet V3
 
 ```bash
+mkdir tests/assets
+wget -P tests/assets https://raw.githubusercontent.com/facebookresearch/sam2/main/notebooks/images/truck.jpg
+
 python3 main.py \
  --prompt "cyberpank dining room, full hd, cinematic" \
- --image input_canny1.png --control_type canny \
+ --image tests/assets/truck.jpg --control_type canny \
  --repo_id XLabs-AI/flux-controlnet-canny-v3 \
  --name flux-canny-controlnet-v3.safetensors \
  --use_controlnet --model_type flux-dev \
