@@ -63,9 +63,8 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     omega = 1.0 / (theta**scale)
     out = ms.mint.einsum("...n,d->...nd", pos, omega)
     out = ms.mint.stack([ms.mint.cos(out), -ms.mint.sin(out), ms.mint.sin(out), ms.mint.cos(out)], dim=-1)
-    B, N, D, _ = out.shape
     # out = rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
-    out = out.reshape(B, D, N, 2, 2)
+    out = out.reshape(*out.shape[:3], 2, 2)
     return out.float()
 
 
