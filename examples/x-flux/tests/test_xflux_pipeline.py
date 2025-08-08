@@ -6,8 +6,7 @@ from PIL import Image
 import numpy as np
 
 from src.flux.xflux_pipeline import XFluxPipeline
-from src.flux.util import load_ae, load_clip, load_t5, load_flow_model
-
+from src.flux.util import load_controlnet
 class TestXFluxPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -35,17 +34,8 @@ class TestXFluxPipeline(unittest.TestCase):
         
     def test_set_controlnet_with_input(self):
         """Test controlnet setup and forward pass"""
-        control_type = "canny"
-        repo_id = "XLabs-AI/flux-controlnet-canny-v3"
-        name = "flux-canny-controlnet-v3.safetensors"
 
-        # Setup controlnet
-        self.pipeline.set_controlnet(
-            control_type=control_type,
-            repo_id=repo_id,
-            name=name
-        )
-        
+        self.controlnet = load_controlnet(self.model_type, ).to_float(ms.bfloat16)
         # Create dummy inputs for flow model
         dummy_img = Tensor(np.random.randn(self.batch_size, 64*64, self.latent_channels,), dtype=ms.float32)
         dummy_img_ids = Tensor(np.random.randint(0, 64*64, (self.batch_size, 64*64, 3)), dtype=ms.int64)
@@ -57,7 +47,7 @@ class TestXFluxPipeline(unittest.TestCase):
         dummy_condition = Tensor(np.random.randn(self.batch_size, 3, self.img_size, self.img_size), 
                                     dtype=ms.float32)
         # Test controlnet forward pass
-        down_block_res_samples, mid_block_res_sample = self.pipeline.controlnet(
+        down_block_res_samples, mid_block_res_sample = self.controlnet(
             img=dummy_img,
             img_ids=dummy_img_ids,
             txt=dummy_txt,
