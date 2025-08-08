@@ -33,17 +33,21 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
         bs = len(prompt)
 
     b, c, h, w = img.shape
-    h = h // 2  # ph=2
-    w = w // 2  # pw=2
+    sh = h // 2  # ph=2
+    sw = w // 2  # pw=2
     # img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)  # keep for debugging
-    img = img.reshape(b, c, h, 2, w, 2)
+    img = img.reshape(b, c, sh, 2, sw, 2)
     img = img.permute(0, 2, 4, 1, 3, 5)
-    img = img.reshape(b, h*w, c*4)
+    img = img.reshape(b, sh*sw, c*4)
+
+    if img.shape[0] == 1 and bs > 1:
+        img = img.broadcast_to((bs, *img.shape[1:]))
 
     img_ids = mindspore.mint.zeros((h // 2, w // 2, 3))
     img_ids[..., 1] = img_ids[..., 1] + mindspore.mint.arange(h // 2)[:, None]
     img_ids[..., 2] = img_ids[..., 2] + mindspore.mint.arange(w // 2)[None, :]
     # img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)  # keep for debugging
+    h, w, _ = img_ids.shape
     img_ids = img_ids.reshape(1, h, w, 3).broadcast_to((bs, h, w, 3))
     img_ids = img_ids.reshape(bs, h*w, 3)
 
