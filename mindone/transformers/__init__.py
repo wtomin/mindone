@@ -347,6 +347,11 @@ from .models.clvp import (
 from .models.codegen import CodeGenForCausalLM, CodeGenModel, CodeGenPreTrainedModel
 from .models.cohere import CohereForCausalLM, CohereModel, CoherePreTrainedModel
 from .models.cohere2 import Cohere2ForCausalLM, Cohere2Model, Cohere2PreTrainedModel
+from .models.cohere2_vision import (
+    Cohere2VisionForConditionalGeneration,
+    Cohere2VisionModel,
+    Cohere2VisionPreTrainedModel,
+)
 from .models.colpali import ColPaliForRetrieval, ColPaliPreTrainedModel, ColPaliProcessor
 from .models.convbert import (
     ConvBertForMaskedLM,
