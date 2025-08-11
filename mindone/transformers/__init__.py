@@ -418,6 +418,11 @@ from .models.mixtral import (
     MixtralModel,
     MixtralPreTrainedModel,
 )
+from .models.mm_grounding_dino import (
+    MMGroundingDinoForObjectDetection,
+    MMGroundingDinoModel,
+    MMGroundingDinoPreTrainedModel,
+)
 from .models.mobilebert import (
     MobileBertForMaskedLM,
     MobileBertForMultipleChoice,
