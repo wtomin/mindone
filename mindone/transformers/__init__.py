@@ -530,6 +530,14 @@ from .models.siglip import (
     SiglipTextModel,
     SiglipVisionModel,
 )
+from .models.smollm3 import (
+    SmolLM3ForCausalLM,
+    SmolLM3ForQuestionAnswering,
+    SmolLM3ForSequenceClassification,
+    SmolLM3ForTokenClassification,
+    SmolLM3Model,
+    SmolLM3PreTrainedModel,
+)
 from .models.smolvlm import (
     SmolVLMForConditionalGeneration,
     SmolVLMModel,
