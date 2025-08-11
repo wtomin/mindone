@@ -246,6 +246,7 @@ from .models.clip import (
     CLIPVisionModelWithProjection,
 )
 from .models.cohere2 import Cohere2ForCausalLM, Cohere2Model, Cohere2PreTrainedModel
+from .models.colqwen2 import ColQwen2ForRetrieval, ColQwen2PreTrainedModel
 from .models.convbert import (
     ConvBertForMaskedLM,
     ConvBertForMultipleChoice,
