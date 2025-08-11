@@ -520,6 +520,7 @@ from .models.roberta import (
     RobertaModel,
     RobertaPreTrainedModel,
 )
+from .models.shieldgemma2 import ShieldGemma2ForImageClassification
 from .models.siglip import (
     SiglipForImageClassification,
     SiglipImageProcessor,
