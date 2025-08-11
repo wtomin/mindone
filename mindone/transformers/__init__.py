@@ -461,6 +461,11 @@ from .models.opt import (
     OPTPreTrainedModel,
 )
 from .models.paligemma import PaliGemmaForConditionalGeneration, PaliGemmaPreTrainedModel
+from .models.cohere2_vision import (
+    Cohere2VisionForConditionalGeneration,
+    Cohere2VisionModel,
+    Cohere2VisionPreTrainedModel,
+)
 from .models.persimmon import (
     PersimmonForCausalLM,
     PersimmonForSequenceClassification,
