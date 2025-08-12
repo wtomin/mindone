@@ -460,6 +460,7 @@ from .models.opt import (
     OPTModel,
     OPTPreTrainedModel,
 )
+from .models.perception_lm import PerceptionLMForConditionalGeneration, PerceptionLMPreTrainedModel, PerceptionLMModel
 from .models.paligemma import PaliGemmaForConditionalGeneration, PaliGemmaPreTrainedModel
 from .models.persimmon import (
     PersimmonForCausalLM,
