@@ -586,6 +586,14 @@ from .models.gemma2 import (
     Gemma2PreTrainedModel,
 )
 from .models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration, Gemma3PreTrainedModel, Gemma3TextModel
+from .models.gemma3n import (
+    Gemma3nAudioEncoder,
+    Gemma3nForCausalLM,
+    Gemma3nForConditionalGeneration,
+    Gemma3nModel,
+    Gemma3nPreTrainedModel,
+    Gemma3nTextModel,
+)
 from .models.git import GitForCausalLM, GitModel, GitPreTrainedModel, GitVisionModel
 from .models.glm import (
     GlmForCausalLM,
