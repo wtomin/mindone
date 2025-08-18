@@ -243,6 +243,7 @@ _import_structure = {
         "WuerstchenPriorPipeline",
     ],
     "wan": ["WanPipeline", "WanImageToVideoPipeline", "WanVideoToVideoPipeline"],
+    "qwenimage": ["QwenImagePipeline", "QwenImageImg2ImgPipeline", "QwenImageInpaintPipeline"],
     "pipeline_utils": [
         "AudioPipelineOutput",
         "DiffusionPipeline",
@@ -388,6 +389,7 @@ if TYPE_CHECKING:
     from .pia import PIAPipeline
     from .pipeline_utils import AudioPipelineOutput, DiffusionPipeline, ImagePipelineOutput, StableDiffusionMixin
     from .pixart_alpha import PixArtAlphaPipeline, PixArtSigmaPipeline
+    from .qwenimage import QwenImageImg2ImgPipeline, QwenImageInpaintPipeline, QwenImagePipeline
     from .sana import SanaControlNetPipeline, SanaPipeline, SanaSprintImg2ImgPipeline, SanaSprintPipeline
     from .semantic_stable_diffusion import SemanticStableDiffusionPipeline
     from .shap_e import ShapEImg2ImgPipeline, ShapEPipeline
