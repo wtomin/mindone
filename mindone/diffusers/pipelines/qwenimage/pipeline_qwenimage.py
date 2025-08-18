@@ -16,17 +16,18 @@ import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
+from diffusers.utils import logging, replace_example_docstring
+from transformers import Qwen2Tokenizer
 
 import mindspore as ms
 from mindspore import mint
 
-from mindone.transformers import Qwen2_5_VLForConditionalGeneration, Qwen2Tokenizer
+from mindone.transformers import Qwen2_5_VLForConditionalGeneration
 
 from ...image_processor import VaeImageProcessor
 from ...loaders import QwenImageLoraLoaderMixin
 from ...models import AutoencoderKLQwenImage, QwenImageTransformer2DModel
 from ...schedulers import FlowMatchEulerDiscreteScheduler
-from ...utils import logging, replace_example_docstring
 from ...utils.mindspore_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline
 from .pipeline_output import QwenImagePipelineOutput
@@ -176,7 +177,7 @@ class QwenImagePipeline(DiffusionPipeline, QwenImageLoraLoaderMixin):
     def _get_qwen_prompt_embeds(
         self,
         prompt: Union[str, List[str]] = None,
-        dtype: Optional[ms.dtype] = None,
+        dtype: Optional[ms.common.dtype] = None,
     ):
         dtype = dtype or self.text_encoder.dtype
 
