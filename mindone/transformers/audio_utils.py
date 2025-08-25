@@ -28,7 +28,7 @@ import mindspore as ms
 import numpy as np
 import requests
 
-from .utils import is_librosa_available, is_numpy_array, is_soundfile_available, is_torch_tensor, requires_backends
+from .utils import is_librosa_available, is_numpy_array, is_soundfile_available, is_mindspore_tensor, requires_backends
 
 if is_soundfile_available():
     import soundfile as sf
@@ -163,7 +163,7 @@ AudioInput = Union[
 
 
 def is_valid_audio(audio):
-    return is_numpy_array(audio) or is_torch_tensor(audio)
+    return is_numpy_array(audio) or is_mindspore_tensor(audio)
 
 
 def is_valid_list_of_audio(audio):
