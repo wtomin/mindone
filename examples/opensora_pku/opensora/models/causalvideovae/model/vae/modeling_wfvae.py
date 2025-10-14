@@ -3,7 +3,6 @@
 
 import logging
 import math
-import os
 from collections import deque
 from typing import List
 
@@ -640,27 +639,3 @@ class WFVAEModel(VideoBaseAE):
 
     def disable_tiling(self):
         self.enable_tiling(False)
-
-    def init_from_ckpt(self, path, ignore_keys=list()):
-        # TODO: support auto download pretrained checkpoints
-        sd = ms.load_checkpoint(path)
-        keys = list(sd.keys())
-        for k in keys:
-            for ik in ignore_keys:
-                if k.startswith(ik):
-                    logger.info("Deleting key {} from state_dict.".format(k))
-                    del sd[k]
-
-        if "ema_state_dict" in sd and len(sd["ema_state_dict"]) > 0 and os.environ.get("NOT_USE_EMA_MODEL", 0) == 0:
-            logger.info("Load from ema model!")
-            sd = sd["ema_state_dict"]
-            sd = {key.replace("module.", ""): value for key, value in sd.items()}
-        elif "state_dict" in sd:
-            logger.info("Load from normal model!")
-            if "gen_model" in sd["state_dict"]:
-                sd = sd["state_dict"]["gen_model"]
-            else:
-                sd = sd["state_dict"]
-
-        ms.load_param_into_net(self, sd, strict_load=False)
-        logger.info(f"Restored from {path}")

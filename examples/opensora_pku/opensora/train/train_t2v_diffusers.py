@@ -105,7 +105,6 @@ def main(args):
             args.vae_precision = "fp32"
         vae_dtype = get_precision(args.vae_precision)
         kwarg = {
-            "state_dict": None,
             "use_safetensors": True,
             "dtype": vae_dtype,
         }

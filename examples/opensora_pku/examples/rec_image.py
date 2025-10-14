@@ -69,16 +69,7 @@ def main(args):
 
     set_logger(name="", output_dir=args.output_path, rank=0)
     dtype = get_precision(args.precision)
-    if args.ms_checkpoint is not None and os.path.exists(args.ms_checkpoint):
-        logger.info(f"Run inference with MindSpore checkpoint {args.ms_checkpoint}")
-        state_dict = ms.load_checkpoint(args.ms_checkpoint)
-
-        state_dict = dict(
-            [k.replace("autoencoder.", "") if k.startswith("autoencoder.") else k, v] for k, v in state_dict.items()
-        )
-        state_dict = dict([k.replace("_backbone.", "") if "_backbone." in k else k, v] for k, v in state_dict.items())
-    else:
-        state_dict = None
+    model_dir = args.ae_path
     vae = None
     if args.model_config is not None:
         assert os.path.exists(args.model_config), f"`model_config` does not exist! {args.model_config}"
@@ -87,21 +78,24 @@ def main(args):
             model_name = re.match(pattern, args.ae).group(1)
             model_cls = ModelRegistry.get_model(model_name)
             vae = model_cls.from_config(args.model_config, dtype=dtype)
-            if args.ms_checkpoint is None or not os.path.exists(args.ms_checkpoint):
+            # Warn if ae_path does not contain a .ckpt
+            has_ckpt = os.path.isdir(args.ae_path) and any(
+                str(fname).endswith(".ckpt") for fname in os.listdir(args.ae_path)
+            )
+            if not has_ckpt:
                 logger.warning(
-                    "VAE is randomly initialized. The inference results may be incorrect! Check `ms_checkpoint`!"
+                    "VAE is randomly initialized. The inference results may be incorrect! Check `ae_path` for .ckpt!"
                 )
 
         else:
             logger.warning(f"Incorrect ae name, must be one of {ae_wrapper.keys()}")
 
     kwarg = {
-        "state_dict": state_dict,
         "use_safetensors": True,
         "dtype": dtype,
         "vae": vae,
     }
-    vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
+    vae = ae_wrapper[args.ae](model_dir, **kwarg)
 
     if args.enable_tiling:
         vae.vae.enable_tiling()
@@ -140,8 +134,9 @@ if __name__ == "__main__":
     parser.add_argument("--image_path", type=str, default="")
     parser.add_argument("--rec_path", type=str, default="")
     parser.add_argument("--ae", type=str, default="WFVAEModel_D8_4x8x8", choices=ae_wrapper.keys())
-    parser.add_argument("--ae_path", type=str, default="results/pretrained")
-    parser.add_argument("--ms_checkpoint", type=str, default=None)
+    parser.add_argument(
+        "--ae_path", type=str, default="results/pretrained", help="Directory containing config.json and .ckpt"
+    )
     parser.add_argument("--short_size", type=int, default=336)
     parser.add_argument("--tile_overlap_factor", type=float, default=0.25)
     parser.add_argument("--tile_sample_min_size", type=int, default=256)

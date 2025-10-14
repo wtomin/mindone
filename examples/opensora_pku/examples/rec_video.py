@@ -107,16 +107,7 @@ def main(args):
     npu_config.print_ops_dtype_info()
     dtype = get_precision(args.precision)
     set_logger(name="", output_dir=args.output_path, rank=0)
-    if args.ms_checkpoint is not None and os.path.exists(args.ms_checkpoint):
-        logger.info(f"Run inference with MindSpore checkpoint {args.ms_checkpoint}")
-        state_dict = ms.load_checkpoint(args.ms_checkpoint)
-
-        state_dict = dict(
-            [k.replace("autoencoder.", "") if k.startswith("autoencoder.") else k, v] for k, v in state_dict.items()
-        )
-        state_dict = dict([k.replace("_backbone.", "") if "_backbone." in k else k, v] for k, v in state_dict.items())
-    else:
-        state_dict = None
+    model_dir = args.ae_path
 
     vae = None
     if args.model_config is not None:
@@ -135,12 +126,11 @@ def main(args):
             logger.warning(f"Incorrect ae name, must be one of {ae_wrapper.keys()}")
 
     kwarg = {
-        "state_dict": state_dict,
         "use_safetensors": True,
         "dtype": dtype,
         "vae": vae,
     }
-    vae = ae_wrapper[args.ae](args.ae_path, **kwarg)
+    vae = ae_wrapper[args.ae](model_dir, **kwarg)
 
     if args.enable_tiling:
         vae.vae.enable_tiling()
@@ -188,8 +178,9 @@ if __name__ == "__main__":
     parser.add_argument("--video_path", type=str, default="")
     parser.add_argument("--rec_path", type=str, default="")
     parser.add_argument("--ae", type=str, default="")
-    parser.add_argument("--ae_path", type=str, default="results/pretrained")
-    parser.add_argument("--ms_checkpoint", type=str, default=None)
+    parser.add_argument(
+        "--ae_path", type=str, default="results/pretrained", help="Directory containing config.json and .ckpt"
+    )
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--height", type=int, default=336)
     parser.add_argument("--width", type=int, default=336)
