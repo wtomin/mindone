@@ -186,7 +186,13 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
                 assert (
                     len(glob.glob(os.path.join(os.path.dirname(ckpt_path), "*.index.json"))) == 1
                 ), f"Found multiple safetensors files in {ckpt_path}, but no index.json file!"
-                state_dict = safe_load(safetensors_files.split("-")[0] + ".safetensors", device="cpu")
+                # split the filename by '-' and get the first part
+                safetensors_filepath = safetensors_files[0]
+                safetensors_filepath = os.path.join(
+                    os.path.dirname(safetensors_filepath),
+                    os.path.basename(safetensors_filepath).split("-")[0] + ".safetensors",
+                )
+                state_dict = safe_load(safetensors_filepath, device="cpu")
             else:
                 raise ValueError(f"Found no safetensors files in {ckpt_path}!")
         else:
