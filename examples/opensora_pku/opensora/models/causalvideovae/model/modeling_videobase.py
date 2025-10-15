@@ -37,7 +37,8 @@ class VideoBaseAE(ModelMixin, ConfigMixin):
     @validate_hf_hub_args
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], **kwargs):
         ckpt_files = glob.glob(os.path.join(pretrained_model_name_or_path, "*.ckpt"))
-        if ckpt_files:
+        safetensors_files = glob.glob(os.path.join(pretrained_model_name_or_path, "*.safetensors"))
+        if ckpt_files and not safetensors_files:
             # Adapt to checkpoint
             last_ckpt_file = ckpt_files[-1]
             config_file = os.path.join(pretrained_model_name_or_path, cls.config_name)
