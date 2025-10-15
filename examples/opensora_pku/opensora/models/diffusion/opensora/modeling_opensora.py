@@ -167,8 +167,32 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
     def load_from_checkpoint(cls, model, ckpt_path):
         if ckpt_path.endswith(".ckpt"):
             return cls.load_from_ms_checkpoint(ckpt_path)
+        elif ckpt_path.endswith(".safetensors") or os.path.isdir(ckpt_path):
+            return cls.load_from_safetensors(ckpt_path)
         else:
-            raise ValueError(f"Only support MindSpore pretrained ckpt, but got {ckpt_path}!")
+            raise ValueError(f"Only support MindSpore pretrained ckpt or safetensors directory, but got {ckpt_path}!")
+
+    @classmethod
+    def load_from_safetensors(cls, model, ckpt_path):
+        from safetensors.torch import load_file as safe_load
+
+        if os.path.isdir(ckpt_path):
+            safetensors_files = glob.glob(os.path.join(os.path.dirname(ckpt_path), "*.safetensors"))
+
+            if len(safetensors_files) == 1:
+                ckpt_path = safetensors_files[0]
+                state_dict = safe_load(ckpt_path, device="cpu")
+            elif len(safetensors_files) > 1:
+                assert (
+                    len(glob.glob(os.path.join(os.path.dirname(ckpt_path), "*.index.json"))) == 1
+                ), f"Found multiple safetensors files in {ckpt_path}, but no index.json file!"
+                state_dict = safe_load(safetensors_files.split("-")[0] + ".safetensors", device="cpu")
+            else:
+                raise ValueError(f"Found no safetensors files in {ckpt_path}!")
+        else:
+            state_dict = safe_load(ckpt_path, device="cpu")
+        model.load_state_dict(state_dict)
+        return model
 
     @classmethod
     def load_from_ms_checkpoint(self, model, ckpt_path):
