@@ -166,9 +166,9 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
     @classmethod
     def load_from_checkpoint(cls, model, ckpt_path):
         if ckpt_path.endswith(".ckpt"):
-            return cls.load_from_ms_checkpoint(ckpt_path)
+            return cls.load_from_ms_checkpoint(model, ckpt_path)
         elif ckpt_path.endswith(".safetensors") or os.path.isdir(ckpt_path):
-            return cls.load_from_safetensors(ckpt_path)
+            return cls.load_from_safetensors(model, ckpt_path)
         else:
             raise ValueError(f"Only support MindSpore pretrained ckpt or safetensors directory, but got {ckpt_path}!")
 
