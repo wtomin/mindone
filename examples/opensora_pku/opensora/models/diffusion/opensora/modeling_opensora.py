@@ -157,7 +157,7 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
             # Adapt to checkpoint
             last_ckpt_file = ckpt_files[-1]
             config_file = os.path.join(pretrained_model_name_or_path, cls.config_name)
-            model = cls.load_from_checkpoint(config_file)
+            model = cls.from_config(config_file)
             model.load_from_checkpoint(last_ckpt_file)
             return model
         else:
@@ -174,30 +174,16 @@ class OpenSoraT2V_v1_3(ModelMixin, ConfigMixin):
 
     @classmethod
     def load_from_safetensors(cls, model, ckpt_path):
-        from safetensors.torch import load_file as safe_load
-
         if os.path.isdir(ckpt_path):
-            safetensors_files = glob.glob(os.path.join(os.path.dirname(ckpt_path), "*.safetensors"))
-
-            if len(safetensors_files) == 1:
-                ckpt_path = safetensors_files[0]
-                state_dict = safe_load(ckpt_path, device="cpu")
-            elif len(safetensors_files) > 1:
-                assert (
-                    len(glob.glob(os.path.join(os.path.dirname(ckpt_path), "*.index.json"))) == 1
-                ), f"Found multiple safetensors files in {ckpt_path}, but no index.json file!"
-                # split the filename by '-' and get the first part
-                safetensors_filepath = safetensors_files[0]
-                safetensors_filepath = os.path.join(
-                    os.path.dirname(safetensors_filepath),
-                    os.path.basename(safetensors_filepath).split("-")[0] + ".safetensors",
-                )
-                state_dict = safe_load(safetensors_filepath, device="cpu")
-            else:
-                raise ValueError(f"Found no safetensors files in {ckpt_path}!")
+            pretrained_model_name_or_path = ckpt_path
+            # load from pretrained model directory
+            return cls.from_pretrained(pretrained_model_name_or_path)
         else:
+            from safetensors.torch import load_file as safe_load
+
+            # load from safetensors file directly
             state_dict = safe_load(ckpt_path, device="cpu")
-        model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict)
         return model
 
     @classmethod
