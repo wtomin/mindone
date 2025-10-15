@@ -23,4 +23,3 @@ python opensora/sample/sample.py \
     --rescale_betas_zero_snr \
     --prediction_type "v_prediction" \
     --precision bf16 \
-    --ms_checkpoint ckpt/path \

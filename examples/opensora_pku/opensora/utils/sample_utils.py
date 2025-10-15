@@ -156,16 +156,7 @@ def prepare_pipeline(args):
     print_banner("transformer model init")
     FA_dtype = get_precision(args.precision) if get_precision(args.precision) != ms.float32 else ms.bfloat16
     assert args.model_type == "dit", "Currently only suppport model_type as 'dit'@"
-    if args.ms_checkpoint is not None and os.path.exists(args.ms_checkpoint):
-        logger.info(f"Initiate from MindSpore checkpoint file {args.ms_checkpoint}")
-        state_dict = ms.load_checkpoint(args.ms_checkpoint)
-        # rm 'network.' prefix
-        state_dict = dict(
-            [k.replace("network.", "") if k.startswith("network.") else k, v] for k, v in state_dict.items()
-        )
-        state_dict = dict([k.replace("_backbone.", "") if "_backbone." in k else k, v] for k, v in state_dict.items())
-    else:
-        state_dict = None
+
     model_version = args.model_path.split("/")[-1]
     if (args.version != "v1_3") and (model_version.split("x")[0][:3] != "any"):
         if int(model_version.split("x")[0]) != args.num_frames:
@@ -200,7 +191,6 @@ def prepare_pipeline(args):
 
         transformer_model, logging_info = OpenSoraT2V_v1_3.from_pretrained(
             args.model_path,
-            state_dict=state_dict,
             cache_dir=args.cache_dir,
             FA_dtype=FA_dtype,
             output_loading_info=True,
@@ -597,13 +587,7 @@ def get_args():
         help="path to load a config yaml file that describes the setting which will override the default arguments",
     )
     parser.add_argument("--model_path", type=str, default="LanguageBind/Open-Sora-Plan-v1.3.0")
-    parser.add_argument(
-        "--ms_checkpoint",
-        type=str,
-        default=None,
-        help="If not provided, will search for ckpt file under `model_path`"
-        "If provided, will use this pretrained ckpt path.",
-    )
+
     parser.add_argument("--num_frames", type=int, default=1)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
