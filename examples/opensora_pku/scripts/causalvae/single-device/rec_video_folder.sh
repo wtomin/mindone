@@ -12,4 +12,3 @@ python examples/rec_video_folder.py \
     --num_workers 8 \
     --ae "WFVAEModel_D8_4x8x8" \
     --ae_path LanguageBind/Open-Sora-Plan-v1.3.0/vae \
-    # --ms_checkpoint path/to/ms/ckpt

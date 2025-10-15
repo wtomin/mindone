@@ -319,8 +319,7 @@ python examples/rec_video_folder.py \
     --width 256 \
     --num_workers 8 \
     --ae "WFVAEModel_D8_4x8x8" \
-    --ae_path LanguageBind/Open-Sora-Plan-v1.3.0/vae \
-    --ms_checkpoint path/to/ms/ckpt \
+    --ae_path dir/to/vae/checkpoint \  # directory path to the vae checkpoint
 ```
 
 Runing this command will generate reconstructed videos under the given `output_generated_video_dir`. You can then evalute some common metrics (e.g., ssim, psnr) using the script under `opensora/eval/script`.

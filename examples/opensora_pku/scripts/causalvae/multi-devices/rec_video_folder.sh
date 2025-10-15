@@ -14,4 +14,3 @@ msrun --bind_core=True --worker_num=8 --local_worker_num=8 --master_port=9000 --
     --ae "WFVAEModel_D8_4x8x8" \
     --ae_path LanguageBind/Open-Sora-Plan-v1.3.0/vae \
     --use_parallel True \
-    # --ms_checkpoint path/to/ms/ckpt
