@@ -4,15 +4,14 @@ import logging
 import math
 import os
 import sys
+import time
 from copy import deepcopy
 
 import yaml
 
 import mindspore as ms
-from mindspore import Model, nn
+from mindspore import nn
 from mindspore.communication.management import GlobalComm
-from mindspore.train import get_metric_fn
-from mindspore.train.callback import TimeMonitor
 
 mindone_lib_path = os.path.abspath("../../")
 sys.path.insert(0, mindone_lib_path)
@@ -24,24 +23,22 @@ from opensora.models.causalvideovae import ae_channel_config, ae_stride_config, 
 from opensora.models.diffusion import Diffusion_models
 from opensora.models.diffusion.common import PatchEmbed2D
 from opensora.models.diffusion.opensora.modules import Attention, LayerNorm
-from opensora.models.diffusion.opensora.net_with_loss import DiffusionWithLoss, DiffusionWithLossEval
+from opensora.models.diffusion.opensora.net_with_loss import DiffusionWithLoss
 from opensora.npu_config import npu_config
 from opensora.train.commons import create_loss_scaler, parse_args
-from opensora.utils.callbacks import EMAEvalSwapCallback, PerfRecorderCallback
 from opensora.utils.dataset_utils import Collate, LengthGroupedSampler
 from opensora.utils.ema import EMA
 from opensora.utils.message_utils import print_banner
-from opensora.utils.utils import get_precision, save_diffusers_json
+from opensora.utils.train_step import TrainStepOpenSoraPlan, prepare_train_network
+from opensora.utils.utils import AverageMeter, get_precision, save_diffusers_json
 
 from mindone.diffusers.models.activations import SiLU
 from mindone.diffusers.schedulers import FlowMatchEulerDiscreteScheduler  # CogVideoXDDIMScheduler,
 from mindone.diffusers.schedulers import DDPMScheduler
-from mindone.trainers.callback import EvalSaveCallback, OverflowMonitor, ProfilerCallbackEpoch, StopAtStepCallback
+from mindone.diffusers.training_utils import pynative_no_grad
 from mindone.trainers.checkpoint import resume_train_network
 from mindone.trainers.lr_schedule import create_scheduler
 from mindone.trainers.optim import create_optimizer
-from mindone.trainers.train_step import TrainOneStepWrapper
-from mindone.trainers.zero import prepare_train_network
 from mindone.transformers import CLIPTextModelWithProjection, MT5EncoderModel, T5EncoderModel
 from mindone.utils.amp import auto_mixed_precision
 from mindone.utils.config import str2bool
@@ -73,6 +70,36 @@ def set_all_reduce_fusion(
 #################################################################################
 
 
+def validate_model(model, val_dataloader, rank_id, device_num):
+    """Run validation on the model"""
+    model.set_train(False)
+    total_val_loss = 0.0
+    num_val_batches = 0
+
+    with pynative_no_grad():
+        val_iter = val_dataloader.create_dict_iterator(num_epochs=1, output_numpy=True)
+        for batch in val_iter:
+            pixel_values = ms.Tensor(batch["pixel_values"])
+            attention_mask = ms.Tensor(batch["attention_mask"])
+            text_embed = ms.Tensor(batch["text_embed"])
+            encoder_attention_mask = ms.Tensor(batch["encoder_attention_mask"])
+
+            # Forward pass for validation (no gradients)
+            outputs = model(
+                pixel_values,
+                attention_mask,
+                text_embed,
+                encoder_attention_mask,
+            )
+            val_loss = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
+            total_val_loss += float(val_loss.asnumpy())
+            num_val_batches += 1
+
+    avg_val_loss = total_val_loss / num_val_batches if num_val_batches > 0 else 0.0
+    model.set_train(True)
+    return avg_val_loss
+
+
 def main(args):
     # 1. init
     save_src_strategy = args.use_parallel and args.parallel_mode != "data"
@@ -88,7 +115,7 @@ def main(args):
         logger.info(f"Memory profiling: {profiler}")
     npu_config.print_ops_dtype_info()
     set_logger(name="", output_dir=args.output_dir, rank=rank_id, log_level=eval(args.log_level))
-
+    LOG_FILE = os.path.join(args.output_dir, "loss.log")
     # 2. Init and load models
     # Load VAE
     train_with_vae_latent = args.vae_latent_folder is not None and len(args.vae_latent_folder) > 0
@@ -119,7 +146,8 @@ def main(args):
             vae.vae.tile_overlap_factor = args.tile_overlap_factor
 
     ae_stride_t, ae_stride_h, ae_stride_w = ae_stride_config[args.ae]
-    vae.vae_scale_factor = (ae_stride_t, ae_stride_h, ae_stride_w)
+    if vae is not None:
+        vae.vae_scale_factor = (ae_stride_t, ae_stride_h, ae_stride_w)
     assert (
         ae_stride_h == ae_stride_w
     ), f"Support only ae_stride_h == ae_stride_w now, but found ae_stride_h ({ae_stride_h}), ae_stride_w ({ae_stride_w})"
@@ -283,7 +311,6 @@ def main(args):
         rank_id=rank_id,
         device_num=device_num,
     )
-    latent_diffusion_eval, metrics, eval_indexes = None, None, None
 
     # 3. create dataset
     # TODO: replace it with new dataset
@@ -365,22 +392,6 @@ def main(args):
         assert (
             val_dataloader_size > 0
         ), "Incorrect validation dataset size. Please check your dataset size and your global batch size"
-
-        # create eval network
-        latent_diffusion_eval = DiffusionWithLossEval(
-            model,
-            noise_scheduler,
-            vae=vae,
-            text_encoder=text_encoder_1,
-            text_emb_cached=args.text_embed_cache,
-            video_emb_cached=False,
-            use_image_num=args.use_image_num,
-            dtype=model_dtype,
-            noise_offset=args.noise_offset,
-            snr_gamma=args.snr_gamma,
-        )
-        metrics = {"val loss": get_metric_fn("loss")}
-        eval_indexes = [0, 1, 2]  # the indexes of the output of eval network: loss. pred and label
     # 4. build training utils: lr, optim, callbacks, trainer
     if args.scale_lr:
         learning_rate = args.start_learning_rate * args.train_batch_size * args.gradient_accumulation_steps * device_num
@@ -390,12 +401,6 @@ def main(args):
     else:
         learning_rate = args.start_learning_rate
         end_learning_rate = args.end_learning_rate
-
-    if args.dataset_sink_mode and args.sink_size != -1:
-        assert args.sink_size > 0, f"Expect that sink size is a positive integer, but got {args.sink_size}"
-        steps_per_sink = args.sink_size
-    else:
-        steps_per_sink = dataloader_size
 
     if args.max_train_steps is not None:
         assert args.max_train_steps > 0, f"max_train_steps should a positive integer, but got {args.max_train_steps}"
@@ -408,49 +413,8 @@ def main(args):
         ), f"When args.max_train_steps is not provided, args.num_train_epochs must be a positive integer! but got {args.num_train_epochs}"
         total_train_steps = args.num_train_epochs * dataloader_size
 
-    sink_epochs = math.ceil(total_train_steps / steps_per_sink)
-    total_train_steps = sink_epochs * steps_per_sink
-
-    if steps_per_sink == dataloader_size:
-        logger.info(
-            f"Number of training steps: {total_train_steps}, Number of epochs: {args.num_train_epochs}, "
-            f"Number of batches in a epoch (dataloader size): {dataloader_size}"
-        )
-    else:
-        logger.info(
-            f"Number of training steps: {total_train_steps}, Number of sink epochs: {sink_epochs}, Number of batches in a sink (sink_size): {steps_per_sink}"
-        )
-    if args.checkpointing_steps is None:
-        ckpt_save_interval = args.ckpt_save_interval
-        step_mode = False
-    else:
-        step_mode = not args.dataset_sink_mode
-        if not args.dataset_sink_mode:
-            ckpt_save_interval = args.checkpointing_steps
-        else:
-            # still need to count interval in sink epochs
-            ckpt_save_interval = max(1, args.checkpointing_steps // steps_per_sink)
-            if args.checkpointing_steps % steps_per_sink != 0:
-                logger.warning(
-                    "`checkpointing_steps` must be times of sink size or dataset_size under dataset sink mode."
-                    f"Checkpoint will be saved every {ckpt_save_interval * steps_per_sink} steps."
-                )
-    if step_mode != args.step_mode:
-        logger.info("Using args.checkpointing_steps to determine whether to use step mode to save ckpt.")
-        if args.checkpointing_steps is None:
-            logger.warning(f"args.checkpointing_steps is not provided. Force step_mode to {step_mode}!")
-        else:
-            logger.warning(
-                f"args.checkpointing_steps is provided. data sink mode is {args.dataset_sink_mode}. Force step mode to {step_mode}!"
-            )
-    logger.info(
-        "ckpt_save_interval: {} {}".format(
-            ckpt_save_interval,
-            "steps"
-            if (not args.dataset_sink_mode and step_mode)
-            else ("epochs" if steps_per_sink == dataloader_size else "sink epochs"),
-        )
-    )
+    ckpt_save_interval = args.checkpointing_steps if args.checkpointing_steps is not None else args.ckpt_save_interval
+    logger.info(f"ckpt_save_interval: {ckpt_save_interval} steps")
     # build learning rate scheduler
     if not args.lr_decay_steps:
         args.lr_decay_steps = total_train_steps - args.lr_warmup_steps  # fix lr scheduling
@@ -464,7 +428,7 @@ def main(args):
         args.lr_warmup_steps >= 0
     ), f"Expect args.lr_warmup_steps to be no less than zero,  but got {args.lr_warmup_steps}"
 
-    lr = create_scheduler(
+    lr_scheduler = create_scheduler(
         steps_per_epoch=dataloader_size,
         name=args.lr_scheduler,
         lr=learning_rate,
@@ -489,12 +453,13 @@ def main(args):
         eps=args.optim_eps,
         group_strategy=args.group_strategy,
         weight_decay=args.weight_decay,
-        lr=lr,
+        lr=lr_scheduler,
     )
 
     loss_scaler = create_loss_scaler(args)
     # resume ckpt
     ckpt_dir = os.path.join(args.output_dir, "ckpt")
+    os.makedirs(ckpt_dir, exist_ok=True)
     start_epoch = 0
     cur_iter = 0
     if args.resume_from_checkpoint:
@@ -510,7 +475,6 @@ def main(args):
         loss_scaler.last_overflow_iter = last_overflow_iter
         logger.info(f"Resume training from {resume_ckpt}")
 
-    # trainer (standalone and distributed)
     ema = (
         EMA(
             latent_diffusion_with_loss.network,
@@ -534,109 +498,26 @@ def main(args):
                 "reduce_scatter": {"openstate": True, "bucket_size": 5e8},
                 "allgather": {"openstate": False, "bucket_size": 5e8},
             }
-        net_with_grads = prepare_train_network(
+        latent_diffusion_with_loss, zero_helper = prepare_train_network(
             latent_diffusion_with_loss,
             optimizer,
             zero_stage=args.zero_stage,
             optimizer_parallel_group=GlobalComm.WORLD_COMM_GROUP,
             comm_fusion=comm_fusion_dict,
-            scale_sense=loss_scaler,
-            drop_overflow_update=args.drop_overflow_update,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            clip_grad=args.clip_grad,
-            clip_norm=args.max_grad_norm,
-            ema=ema,
         )
     else:
-        net_with_grads = TrainOneStepWrapper(
-            latent_diffusion_with_loss,
-            optimizer=optimizer,
-            scale_sense=loss_scaler,
-            drop_overflow_update=args.drop_overflow_update,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            clip_grad=args.clip_grad,
-            clip_norm=args.max_grad_norm,
-            ema=ema,
-        )
+        zero_helper = None
 
-    # set dynamic inputs
-    _bs = ms.Symbol(unique=True)
-    video = ms.Tensor(shape=[_bs, 3, None, None, None], dtype=ms.float32)  # (b, c, f, h, w)
-    attention_mask = ms.Tensor(shape=[_bs, None, None, None], dtype=ms.float32)  # (b, f, h, w)
-    text_tokens = (
-        ms.Tensor(shape=[_bs, None, args.model_max_length, None], dtype=ms.float32)
-        if args.text_embed_cache
-        else ms.Tensor(shape=[_bs, None, args.model_max_length], dtype=ms.float32)
+    train_step_cell = TrainStepOpenSoraPlan(
+        network=latent_diffusion_with_loss,
+        optimizer=optimizer,
+        loss_scaler=loss_scaler,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        max_grad_norm=args.max_grad_norm if args.clip_grad else None,
+        ema=ema,
+        zero_helper=zero_helper,
+        gradient_checkpointing=args.gradient_checkpointing,
     )
-    encoder_attention_mask = ms.Tensor(shape=[_bs, None, args.model_max_length], dtype=ms.uint8)
-    net_with_grads.set_inputs(video, attention_mask, text_tokens, encoder_attention_mask)
-    logger.info("Dynamic inputs are initialized for training!")
-
-    model = Model(
-        net_with_grads,
-        eval_network=latent_diffusion_eval,
-        metrics=metrics,
-        eval_indexes=eval_indexes,
-    )
-
-    # callbacks
-    callback = [TimeMonitor(args.log_interval), EMAEvalSwapCallback(ema)]
-    ofm_cb = OverflowMonitor()
-    callback.append(ofm_cb)
-    if args.max_train_steps is not None and args.max_train_steps > 0:
-        callback.append(StopAtStepCallback(args.max_train_steps, global_step=cur_iter))
-
-    if args.parallel_mode == "optim":
-        cb_rank_id = None
-        ckpt_save_dir = os.path.join(ckpt_dir, f"rank_{rank_id}")
-        output_dir = os.path.join(args.output_dir, "log", f"rank_{rank_id}")
-        if args.ckpt_max_keep != 1:
-            logger.warning("For semi-auto parallel training, the `ckpt_max_keep` is force to be 1.")
-        ckpt_max_keep = 1
-        integrated_save = False
-        save_training_resume = False  # TODO: support training resume
-    else:
-        cb_rank_id = rank_id
-        ckpt_save_dir = ckpt_dir
-        output_dir = None
-        ckpt_max_keep = args.ckpt_max_keep
-        integrated_save = True
-        save_training_resume = True
-
-    if rank_id == 0 or args.parallel_mode == "optim":
-        save_cb = EvalSaveCallback(
-            network=latent_diffusion_with_loss.network,
-            rank_id=cb_rank_id,
-            ckpt_save_dir=ckpt_save_dir,
-            output_dir=output_dir,
-            ema=ema,
-            save_ema_only=args.save_ema_only,
-            ckpt_save_policy="latest_k",
-            ckpt_max_keep=ckpt_max_keep,
-            step_mode=step_mode,
-            use_step_unit=(args.checkpointing_steps is not None),
-            ckpt_save_interval=ckpt_save_interval,
-            log_interval=args.log_interval,
-            start_epoch=start_epoch,
-            model_name=args.model.replace("/", "-"),
-            record_lr=False,
-            integrated_save=integrated_save,
-            save_training_resume=save_training_resume,
-        )
-        callback.append(save_cb)
-        if args.validate:
-            assert metrics is not None, "Val during training must set the metric functions"
-            rec_cb = PerfRecorderCallback(
-                save_dir=args.output_dir,
-                file_name="result_val.log",
-                resume=args.resume_from_checkpoint,
-                metric_names=list(metrics.keys()),
-            )
-            callback.append(rec_cb)
-        if args.profile:
-            callback.append(ProfilerCallbackEpoch(2, 2, "./profile_data"))
-
-    # Train!
 
     # 5. log and save config
     if rank_id == 0:
@@ -651,7 +532,6 @@ def main(args):
         key_info += "\n".join(
             [
                 f"MindSpore mode[GRAPH(0)/PYNATIVE(1)]: {args.mode}",
-                f"Jit level: {args.jit_level}",
                 f"Distributed mode: {args.use_parallel}"
                 + (
                     f"\nParallel mode: {args.parallel_mode}"
@@ -687,7 +567,6 @@ def main(args):
                 f"EMA cpu offload: {args.ema_offload}",
                 f"FA dtype: {FA_dtype}",
                 f"Use recompute(gradient checkpoint): {args.gradient_checkpointing}",
-                f"Dataset sink: {args.dataset_sink_mode}",
             ]
         )
         key_info += "\n" + "=" * 50
@@ -698,18 +577,100 @@ def main(args):
         with open(os.path.join(args.output_dir, "args.yaml"), "w") as f:
             yaml.safe_dump(vars(args), stream=f, default_flow_style=False, sort_keys=False)
 
-    # 6. train
-    model.fit(
-        sink_epochs,
-        dataloader,
-        valid_dataset=val_dataloader,
-        valid_frequency=args.val_interval,
-        callbacks=callback,
-        dataset_sink_mode=args.dataset_sink_mode,
-        valid_dataset_sink_mode=False,  # TODO: add support?
-        sink_size=args.sink_size,
-        initial_epoch=start_epoch,
-    )
+    global_step = cur_iter
+    batch_time_m = AverageMeter()
+    data_time_m = AverageMeter()
+    end = time.time()
+
+    for epoch in range(start_epoch, args.num_train_epochs):
+        latent_diffusion_with_loss.set_train(True)
+        data_iter = dataloader.create_dict_iterator(num_epochs=1, output_numpy=True)
+        for batch in data_iter:
+            pixel_values = ms.Tensor(batch["pixel_values"])  # (b, c, f, h, w)
+            attention_mask = ms.Tensor(batch["attention_mask"])  # (b, f, h, w)
+            text_embed = ms.Tensor(batch["text_embed"])  # (b, model_max_length, dim) or cached shape
+            encoder_attention_mask = ms.Tensor(batch["encoder_attention_mask"])  # (b, model_max_length)
+            data_time_m.update(time.time() - end)
+            loss = train_step_cell.train_one_step(
+                pixel_values,
+                attention_mask,
+                text_embed,
+                encoder_attention_mask,
+            )
+
+            batch_time_m.update(time.time() - end)
+            end = time.time()
+            # save the log file
+            if rank_id == 0:
+                try:
+                    if not os.path.exists(LOG_FILE):
+                        with open(LOG_FILE, "w", encoding="utf-8") as fp:
+                            fp.write("\t".join(["step", "loss", "per step time (s)"]) + "\n")
+                    with open(LOG_FILE, "a", encoding="utf-8") as fp:
+                        fp.write(
+                            "\t".join(
+                                [
+                                    f"{global_step + 1:<7}",
+                                    f"{loss.asnumpy().item():<10.6f}",
+                                    f"{batch_time_m.val:<13.3f}",
+                                ]
+                            )
+                            + "\n"
+                        )
+                except (IOError, PermissionError) as e:
+                    logger.error(f"Failed to write log: {e}")
+
+            lr_scheduler.step()
+            if (global_step + 1) % args.log_interval == 0 and (rank_id == 0):
+                cur_lr = lr_scheduler.get_last_lr()[0]
+                cur_lr_val = float(cur_lr.asnumpy()) if hasattr(cur_lr, "asnumpy") else float(cur_lr)
+                logger.info(f"Step: {global_step + 1} Loss: {float(loss.asnumpy()):.6f} LR: {cur_lr_val:.6e}")
+
+            # Validation at step intervals (optional)
+            if (
+                args.validate
+                and val_dataloader is not None
+                and (global_step + 1) % (args.val_interval * dataloader_size) == 0
+                and rank_id == 0
+            ):
+                logger.info(f"Running validation at step {global_step + 1}")
+                val_loss = validate_model(latent_diffusion_with_loss, val_dataloader, rank_id, device_num)
+                logger.info(f"Validation loss at step {global_step + 1}: {val_loss:.6f}")
+
+            if (global_step + 1) % ckpt_save_interval == 0 and (rank_id == 0):
+                save_path = os.path.join(ckpt_dir, f"train_resume_step{global_step + 1}.ckpt")
+                ms.save_checkpoint(latent_diffusion_with_loss.network, save_path)
+                logger.info(f"Saved checkpoint to {save_path}")
+
+            global_step += 1
+            if args.max_train_steps is not None and global_step >= args.max_train_steps:
+                break
+
+        # Validation after each epoch
+        if args.validate and val_dataloader is not None and (epoch + 1) % args.val_interval == 0:
+            if rank_id == 0:
+                logger.info(f"Running validation at epoch {epoch + 1}")
+            val_loss = validate_model(latent_diffusion_with_loss, val_dataloader, rank_id, device_num)
+            if rank_id == 0:
+                logger.info(f"Validation loss at epoch {epoch + 1}: {val_loss:.6f}")
+                # Save validation log
+                val_log_file = os.path.join(args.output_dir, "val_loss.log")
+                try:
+                    if not os.path.exists(val_log_file):
+                        with open(val_log_file, "w", encoding="utf-8") as fp:
+                            fp.write("\t".join(["epoch", "val_loss"]) + "\n")
+                    with open(val_log_file, "a", encoding="utf-8") as fp:
+                        fp.write(f"{epoch + 1}\t{val_loss:.6f}\n")
+                except (IOError, PermissionError) as e:
+                    logger.error(f"Failed to write validation log: {e}")
+
+        if args.max_train_steps is not None and global_step >= args.max_train_steps:
+            break
+
+    if rank_id == 0:
+        final_path = os.path.join(ckpt_dir, f"train_final_step{global_step}.ckpt")
+        ms.save_checkpoint(latent_diffusion_with_loss.network, final_path)
+        logger.info(f"Final checkpoint saved to {final_path}")
 
 
 def parse_t2v_train_args(parser):
@@ -874,7 +835,7 @@ def parse_t2v_train_args(parser):
     parser.add_argument(
         "--enable_parallel_fusion", default=True, type=str2bool, help="Whether to parallel fusion for AdamW"
     )
-    parser.add_argument("--jit_level", default="O0", help="Set jit level: # O0: KBK, O1:DVM, O2: GE")
+
     parser.add_argument("--noise_offset", type=float, default=0.02, help="The scale of noise offset.")
     parser.add_argument(
         "--snr_gamma",
