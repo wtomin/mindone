@@ -1077,7 +1077,7 @@ class Gemma3nTextAltUp(ms.nn.Cell):
         self.register_buffer("router_input_scale", ms.Tensor(self.config.hidden_size**-1.0), persistent=False)
 
     def compute_router_modalities(self, x: ms.Tensor) -> ms.Tensor:
-        router_inputs = self.router_norm(x) * self.router_input_scale
+        router_inputs = self.router_norm(x) * self.router_input_scale.to(x.dtype)
         routed = self.modality_router(router_inputs)
         return mint.tanh(routed.float()).type_as(x)
 
@@ -1715,7 +1715,7 @@ class Gemma3nTextModel(Gemma3nPreTrainedModel):
             new_magnitude = mint.mean(current_hidden_state**2, dim=-1, keepdim=True)
             new_magnitude = mint.sqrt(mint.maximum(new_magnitude, epsilon_tensor))
             current_hidden_state = current_hidden_state * target_magnitude / new_magnitude
-            temp_hidden_states.append(current_hidden_state)
+            temp_hidden_states.append(current_hidden_state.to(temp_hidden_states[0].dtype))
 
         hidden_states = mint.stack(temp_hidden_states)
         hidden_states = mint.mean(hidden_states, dim=0)
