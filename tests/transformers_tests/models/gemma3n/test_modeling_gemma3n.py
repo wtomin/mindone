@@ -7,6 +7,9 @@ import numpy as np
 import pytest
 import torch
 
+# Use local config to avoid importing external HF transformers in test body
+from transformers import Gemma3nTextConfig
+
 import mindspore as ms
 
 from tests.modeling_test_utils import (
@@ -17,9 +20,6 @@ from tests.modeling_test_utils import (
     get_modules,
 )
 from tests.transformers_tests.models.modeling_common import ids_numpy
-
-# Use local config to avoid importing external HF transformers in test body
-from transformers import Gemma3nTextConfig
 
 DTYPE_AND_THRESHOLDS = {"fp32": 5e-4, "fp16": 5e-3, "bf16": 5e-2}
 MODES = [0, 1]
@@ -36,6 +36,7 @@ class Gemma3nModelTester:
         vocab_size=99,
         hidden_size=32,
         num_hidden_layers=2,
+        num_kv_shared_layers=1,
         num_attention_heads=4,
         num_key_value_heads=2,
         intermediate_size=37,
@@ -51,6 +52,7 @@ class Gemma3nModelTester:
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
+        self.num_kv_shared_layers = num_kv_shared_layers
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
         self.intermediate_size = intermediate_size
@@ -78,6 +80,7 @@ class Gemma3nModelTester:
             vocab_size=self.vocab_size,
             hidden_size=self.hidden_size,
             num_hidden_layers=self.num_hidden_layers,
+            num_kv_shared_layers=self.num_kv_shared_layers,
             num_attention_heads=self.num_attention_heads,
             num_key_value_heads=self.num_key_value_heads,
             intermediate_size=[self.intermediate_size] * self.num_hidden_layers,
@@ -115,12 +118,7 @@ GEMMA3N_CASES = [
 
 @pytest.mark.parametrize(
     "name,pt_module,ms_module,init_args,init_kwargs,inputs_args,inputs_kwargs,outputs_map,dtype,mode",
-    [
-        case + [dtype] + [mode]
-        for case in GEMMA3N_CASES
-        for dtype in DTYPE_AND_THRESHOLDS.keys()
-        for mode in MODES
-    ],
+    [case + [dtype] + [mode] for case in GEMMA3N_CASES for dtype in DTYPE_AND_THRESHOLDS.keys() for mode in MODES],
 )
 def test_named_modules(
     name,
