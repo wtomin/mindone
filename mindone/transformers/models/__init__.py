@@ -87,6 +87,7 @@ from . import (
     gemma,
     gemma2,
     gemma3,
+    gemma3n,
     git,
     glm,
     glpn,
