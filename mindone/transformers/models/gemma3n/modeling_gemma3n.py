@@ -1148,7 +1148,7 @@ class Gemma3nTextAltUp(ms.nn.Cell):
 
     def scale_corrected_output(self, corrected: ms.Tensor) -> ms.Tensor:
         """Scales the provided 3D tensor of shape [batch_size, num_tokens, hidden_size]."""
-        return self.forward(corrected)
+        return self.construct(corrected)
 
 
 class Gemma3nTextRotaryEmbedding(ms.nn.Cell):
@@ -1661,7 +1661,11 @@ class Gemma3nTextModel(Gemma3nPreTrainedModel):
             new_magnitude = mint.mean(current_hidden_state**2, dim=-1, keepdim=True)
             new_magnitude = mint.sqrt(mint.maximum(new_magnitude, epsilon_tensor))
             current_hidden_state = current_hidden_state * target_magnitude / new_magnitude
-            temp_hidden_states.append(current_hidden_state)
+            temp_hidden_states.append(
+                current_hidden_state.to(
+                    dtype=hidden_states_0.dtype,
+                )
+            )
 
         hidden_states = mint.stack(temp_hidden_states, dim=0)  # [num_altup_inputs, batch, seq_len, hidden_size]
 
@@ -1819,7 +1823,8 @@ class Gemma3nForCausalLM(Gemma3nPreTrainedModel, GenerationMixin):
         if self.training and self.config._attn_implementation != "eager":
             logger.warning_once(
                 "It is strongly recommended to train Gemma3n models with the `eager` attention implementation "
-                f"instead of `{self.config._attn_implementation}`. Use `eager` with `AutoModelForCausalLM.from_pretrained('<path-to-checkpoint>', attn_implementation='eager')`."
+                f"instead of `{self.config._attn_implementation}`. Use `eager` with "
+                "`AutoModelForCausalLM.from_pretrained('<path-to-checkpoint>', attn_implementation='eager')`."
             )
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -2301,7 +2306,8 @@ class Gemma3nForConditionalGeneration(Gemma3nPreTrainedModel, GenerationMixin):
         >>> # Generate
         >>> generate_ids = model.generate(**inputs)
         >>> processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-        "user\nYou are a helpful assistant.\n\n\n\n\n\nWhere is the cat standing?\nmodel\nBased on the image, the cat is standing in a snowy area, likely outdoors. It appears to"
+        "user\nYou are a helpful assistant.\n\n\n\n\n\nWhere is the cat standing?\nmodel\nBased on the image,"
+        " the cat is standing in a snowy area, likely outdoors. It appears to"
         ```
         """
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
